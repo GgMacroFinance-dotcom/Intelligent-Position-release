@@ -21,7 +21,7 @@
 
 拿不准算不算，就按敏感路径处理。
 
-CI 已恢复（2026-11-13）。改到 `rust/**` 或 `.github/workflows/rust.yml` 的 PR 会自动跑 `rust` 工作流，合并前要看到它通过，PR 描述里写明 CI 结果。提交信息不要加 `[skip ci]`，否则这次推送不跑 CI。只改文档的 PR 不触发 CI。提 PR 前最好先在本地跑一遍下面的检查。
+CI 已恢复（2026-11-13）。改到 `rust/**` 或 `.github/workflows/rust.yml` 的 PR 会自动跑 `rust` 工作流，合并前要看到它通过，PR 描述里写明 CI 结果。提交信息不要加 `[skip ci]`，否则这次推送不跑 CI。只改文档的 PR 不触发 `rust` 工作流。每个 PR 另外跑 `dco` 工作流：每个提交都要用 `git commit -s` 带上 `Signed-off-by` 一行（见根目录 [CONTRIBUTING.md](../CONTRIBUTING.md)）。提 PR 前最好先在本地跑一遍下面的检查。
 
 ## 本地检查（和 CI 一致）
 
