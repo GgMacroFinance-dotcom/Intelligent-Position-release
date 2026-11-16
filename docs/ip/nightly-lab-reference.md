@@ -1,7 +1,7 @@
 # nightly-lab 参考清单（只参考设计，不复制代码）
 
 nightly-labs/openbot 是 PolyForm Noncommercial 许可。Rust 重写只参考它公开的功能与架构设计，所有代码自行用 Rust 编写。
-完整的旧对照表和复制过来的代码保留在分支 `claude/project-thread-i52gnf`（PR #1 已关闭），仅供阅读设计，不要合并。
+本仓库不包含 nightly-lab 的任何代码。下表只记它公开的 README 里描述的设计，以及 Rust 版对应做到了哪一步。
 
 ## 值得在 Rust 版里对应实现的设计点
 

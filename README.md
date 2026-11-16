@@ -72,11 +72,11 @@ flowchart TB
 需要 Linux、Rust 1.85 以上和 Node.js 18.17 以上（宏观研究员的取数工具 `macro-mcp/` 用 Node 跑）。第一次编译在 4 核主机上约 5 分钟，之后服务启动只要几毫秒。
 
 ```bash
-git clone https://github.com/GgMacroFinance-dotcom/intelligent-position.git
+git clone https://github.com/GgMacroFinance-dotcom/Intelligent-Position-release.git
 ```
 
 ```bash
-cd intelligent-position/rust && cargo build --release --locked
+cd Intelligent-Position-release/rust && cargo build --release --locked
 ```
 
 ```bash
@@ -137,7 +137,6 @@ export OPENAI_API_KEY=你的密钥
 | [`docs/ip/m2-acceptance.md`](docs/ip/m2-acceptance.md) | 真实验收手册 |
 | [`macro-mcp/README.md`](macro-mcp/README.md) | Finance Macro Data API 开源版：10 个宏观数据工具（9 个美国、1 个中国），MIT |
 | [`docs/ip/macro-mcp-open-source.md`](docs/ip/macro-mcp-open-source.md) | Finance Macro Data API 开源前的核对和维护者的决定 |
-| [`docs/ip/open-core-boundary.md`](docs/ip/open-core-boundary.md) | 开源项目和商业化服务的边界 |
 | [`homepage/`](homepage/) | 项目主页的静态原型 |
 
 ## 参与和许可

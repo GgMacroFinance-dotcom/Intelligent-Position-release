@@ -67,7 +67,7 @@ impl Fetcher {
             .user_agent(concat!(
                 "intelligent-position/",
                 env!("CARGO_PKG_VERSION"),
-                " (+https://github.com/GgMacroFinance-dotcom/intelligent-position)"
+                " (+https://github.com/GgMacroFinance-dotcom/Intelligent-Position-release)"
             ))
             .build()
             .map_err(|e| e.to_string())?;

@@ -25,4 +25,3 @@ python3 -m http.server 8080
 
 - 页面里标了"示意"的数字（Router 价格、API 返回值）和"待定"项都是占位，上线前换成实测数据或定稿方案。
 - 表单不提交到任何地方。
-- 文案与线框图见 [`docs/ip/homepage-copy-wireframe.md`](../docs/ip/homepage-copy-wireframe.md)；开源项目与商业化服务的边界见 [`docs/ip/open-core-boundary.md`](../docs/ip/open-core-boundary.md)。
