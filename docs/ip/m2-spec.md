@@ -35,7 +35,7 @@
 | M2-1 | 通用渠道接口、四张表、投递器、假渠道、渠道测试 T1–T11（第 3 节） | Claude | M2-0 | 已实现（#24） |
 | M2-2 | Slack 渠道，用 Socket Mode（第 4 节） | Claude | M2-1 | 已实现（#25），用假 Slack 服务器验证 |
 | M2-3 | MCP 服务端：把组织工具开放给外部引擎（第 5 节） | Claude | — | 已实现（#21） |
- M2-4 | 引擎接口和 Codex 引擎，只给运维测试岗位用（第 6 节） | Claude | M2-3 | 已实现（#22），先用假 codex 验证；2026-11-14 用真实 Codex 跑通过一次示例项目（M2-6） |
+| M2-4 | 引擎接口和 Codex 引擎，只给运维测试岗位用（第 6 节） | Claude | M2-3 | 已实现（#22），先用假 codex 验证；2026-11-14 用真实 Codex 跑通过一次示例项目（M2-6） |
 | M2-5 | 真实验收：在 Slack 线程里提需求，经协调员派给宏观研究员，交回报告，结论回到 Slack 线程（同时完成 M0、M1 的真实验收） | Claude | M2-2、维护者提供 Slack 工作区（按 `examples/slack/manifest.yaml` 建好应用）、两个 Slack 令牌和模型 API key | 完成（2026-11-16，[记录](acceptance-2026-11-16-slack.md)）：真实工作区里手册第 4 节的 Slack 链路都符合。经本机转发器连接（Socket Mode 不走代理），回复里没有真实数据，私有频道和私信没验 |
 | M2-6 | 真实验收：用真实 Codex 跑 `examples/ops-demo`，经历跑测试失败 → 修复 → 复跑通过 → 写报告 → 交回 | Claude | M2-4、维护者提供 Codex API key | 完成（2026-11-14，`codex-cli 0.169.0`，见 `docs/ip/acceptance-2026-11-14-codex.md`）。消息从控制台发，没经 Slack；还没在真实项目上跑过；续接会话时用量重复记账没修（backlog E-10） |
 
