@@ -177,6 +177,8 @@ nav a .short, .thread-head { display: none; }
   .chat { flex-direction: column; }
   .chat aside { width: auto; flex: 1; border-right: 0; }
   .chat.pane-list .thread, .chat.pane-thread aside { display: none; }
+  /* 竖排时对话区要能缩：不然消息一长，输入框就被挤到底部导航栏下面。 */
+  .chat .thread, .chat aside { min-height: 0; }
   .item { padding: 12px 16px; }
   .thread-head {
     display: flex; align-items: center; gap: 8px; padding: 8px 12px;
@@ -195,13 +197,38 @@ nav a .short, .thread-head { display: none; }
   .options { flex-direction: column; }
   .options button { max-width: none; width: 100%; min-height: 44px; }
   .card-head button { white-space: nowrap; flex-shrink: 0; }
-  table thead { display: none; }
-  table tr { display: block; border-bottom: 1px solid var(--line); padding: 6px 0; }
-  table td { display: block; border: 0; padding: 2px 0; }
+  table:not(.md-table) thead { display: none; }
+  table:not(.md-table) tr { display: block; border-bottom: 1px solid var(--line); padding: 6px 0; }
+  table:not(.md-table) td { display: block; border: 0; padding: 2px 0; }
 }
 }
 
-.task-result { margin-top: 4px; font-size: 13px; white-space: pre-wrap; }
+.task-result { margin-top: 4px; font-size: 13px; }
+
+/* 员工回复的 Markdown（backlog F-3）。表格太宽时在气泡里横向滚动，不撑破页面。 */
+.msg .text.md-text { white-space: normal; }
+.md { min-width: 0; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md blockquote, .md .table-wrap { margin: 0 0 8px; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 12px 0 6px; line-height: 1.4; }
+.md h1 { font-size: 18px; }
+.md h2 { font-size: 16px; }
+.md h3, .md h4, .md h5, .md h6 { font-size: 14px; }
+.md ul, .md ol { padding-left: 22px; }
+.md li.task { list-style: none; margin-left: -20px; }
+.md li.task input { margin: 0 6px 0 0; vertical-align: -1px; }
+.md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.md pre { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; overflow-x: auto; }
+.md pre code { border: 0; padding: 0; background: none; white-space: pre; }
+.md blockquote { border-left: 3px solid var(--line); padding-left: 10px; color: var(--muted); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.md .table-wrap { max-width: 100%; overflow-x: auto; }
+.md table.md-table { width: auto; border-collapse: collapse; font-size: 13px; }
+.md table.md-table th, .md table.md-table td { border: 1px solid var(--line); padding: 4px 8px; white-space: nowrap; }
+.md table.md-table th { background: var(--bg); color: var(--text); font-weight: 600; font-size: 13px; }
+.md .align-right { text-align: right; }
+.md .align-center { text-align: center; }
 
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .drafts .draft { border-top: 1px solid var(--line); padding: 10px 0; display: flex; flex-direction: column; gap: 4px; }

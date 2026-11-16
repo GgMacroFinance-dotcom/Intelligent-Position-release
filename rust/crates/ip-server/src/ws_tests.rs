@@ -481,6 +481,7 @@ async fn serves_embedded_console() {
         ("/", "200"),
         ("/assets/app.js", "200"),
         ("/assets/style.css", "200"),
+        ("/assets/markdown.js", "200"),
         ("/assets/icon-192.png", "200"),
         ("/manifest.webmanifest", "200"),
         ("/sw.js", "200"),

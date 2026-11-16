@@ -51,6 +51,9 @@ jobs:
       - name: Type-check web console
         working-directory: rust/web
         run: npx -y -p typescript@5.9.3 tsc -p tsconfig.json
+      - name: Unit-test web console
+        working-directory: rust/web
+        run: node --test test/*.test.mjs
 
   bench:
     runs-on: ubuntu-latest
