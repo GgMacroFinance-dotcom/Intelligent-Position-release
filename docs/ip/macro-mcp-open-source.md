@@ -75,7 +75,7 @@ I.P. 这边实际用到了什么：真实验收和两遍评测里，研究员调
 
 - `macro-mcp/`：9 个工具、MCP（stdio 和 HTTP）、REST、命令行、测试页，`LICENSE` 是 MIT，`package.json` 的许可证字段改成 MIT（`private` 还留着，发不发 npm 另定）。
 - `get_fred_series` 改成请求 `<WHICHAPI_URL>/v1/tools/get_fred_series`，带 `Authorization: Bearer <WHICHAPI_API_KEY>`；没设 key 时返回 `requires_configuration`，不发请求。`fred.stlouisfed.org` 从上游白名单里删掉了，包里没有任何地方直连 FRED。
-- `BAML` 开头的序列 id 直接拒绝；快照去掉投资级 OAS、高收益 OAS、投资级有效收益率三个面板，剩 9 个。
+- `BAML` 开头的序列 id 直接拒绝；快照去掉投资级 OAS、高收益 OAS、投资级有效收益率三个面板，剩 9 个。2026-11-16 维护者定：`get_fred_series` 不再拒绝 `BAML` 开头的序列，快照仍是 9 个面板。
 - 去掉 `vendor/catalog.js`、`discover_apis`、`get_api`、`call_api` 和生成目录的脚本，打包进目录的 5 个第三方库也随之去掉。
 - 测试改成模拟 WhichAPI 的回复，新增没 key、key 被拒、错误转发、ICE 序列、改 `WHICHAPI_URL` 的用例；新增 CI 工作流 `macro-mcp`，在 Node 18.17 和 22 上跑。
 - `rust/ip.example.yaml` 的 `mcp_servers.macro` 改成本机启动 `node ../macro-mcp/bin/whichapi-macro.js mcp`，没有 key 也能启动；岗位说明去掉目录工具，写明 ICE 序列和没 key 时写“未取得”。

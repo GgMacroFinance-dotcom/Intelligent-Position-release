@@ -1,6 +1,6 @@
 {
   "name": "@whichapi/macro-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Read-only US macro data (New York Fed, Treasury, TIC, Daily Treasury Statement, Federal Register, SEC, and FRED through the WhichAPI hosted service) as an MCP server, HTTP API and CLI. No runtime dependencies.",
   "type": "module",
   "license": "MIT",

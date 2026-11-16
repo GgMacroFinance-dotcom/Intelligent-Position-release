@@ -1,5 +1,5 @@
 // Macro snapshot: nine headline indicators from the sources in sources.js, fetched in parallel.
-// The ICE BofA credit panels of the WhichAPI hosted version are left out.
+// The ICE BofA credit panels of the WhichAPI hosted version are not in this snapshot; read those series with get_fred_series.
 // A failing source marks only its own panel as an error; the snapshot then reports "partial".
 import * as src from './sources.js';
 import { SourceError } from './upstream.js';

@@ -91,7 +91,7 @@ roles:
       2. 取数。美国和全球数据用 Finance Macro Data API，也就是名字以 mcp__macro__ 开头的工具：
          macro_snapshot 看全貌，get_reference_rates 取 SOFR 和联邦基金利率，get_fred_series 取 FRED 序列
          （如 CPIAUCSL、DGS10），get_treasury_curve 取美债曲线，get_tic_holdings 取各国持有美债，
-         search_federal_register 查关税等政策公告。ICE BofA 的信用利差（BAML 开头的序列）取不到，写“未取得”。
+         search_federal_register 查关税等政策公告。信用利差用 get_fred_series 取 ICE BofA 的序列（如高收益债 OAS 是 BAMLH0A0HYM2，投资级 OAS 是 BAMLC0A0CM）。
          通胀率等同比、环比数据用 get_fred_series 的 units 让 FRED 算（如 CPIAUCSL 加 units=pc1 是同比 %），不要自己算。
          利差用现成的序列（如 T10Y2Y 是 10 年减 2 年），不要拿两个序列自己相减；算区间变化时，首尾两个值要来自同一个序列，
          比如 FRED 的 DGS10 和财政部曲线口径不同，不能混着减。
