@@ -112,7 +112,7 @@ ssh -L 7878:127.0.0.1:7878 <主机>
 
 **应该看到**：命令正常结束，没有要拉的序列。示例配置默认不开 `public` 数据源：美国、全球和中国国家统计局的数据都走 Finance Macro Data API 的工具。要定时拉 FRED 序列时，在 `ip.yaml` 里打开 `public`，序列写进 `examples/public-data/catalog.yaml`，拉完再跑一次 `ip check`，`数据源 public` 应该是 ✓。
 
-- [ ] 公开数据拉取成功；国家统计局的指标代码核对无误
+- [ ] `ip data pull` 正常结束（示例配置下没有要拉的序列）
 
 ## 4. M2-5：Slack 端到端
 

@@ -116,7 +116,7 @@ export OPENAI_API_KEY=你的密钥
 
 先后顺序已经定下，真实跑通之前不加新功能。每一项的状态在 [`docs/ip/backlog.md`](docs/ip/backlog.md)。
 
-1. **先验证。** 宏观岗位已用真实模型跑通一次。Codex 也用真实的跑通过一次示例项目。还差：国家统计局指标代码核对、Slack 真实验收、工程师照手册从头跑一遍。
+1. **先验证。** 宏观岗位已用真实模型跑通一次。Codex 也用真实的跑通过一次示例项目。国家统计局的数据 2026-11-15 在境内网络上真实取到过。还差：Slack 真实验收、工程师照手册从头跑一遍。
 2. **质量评测。** 两个问题的冒烟测试已有，以后扩到 10 到 20 题再比较模型。
 3. **开源发布准备。** 从一个干净的新仓库公开；Finance Macro Data API 已放进 `macro-mcp/`；CI 已恢复；还差工程师通读代码。
 4. **上下文机制和员工记忆。** 设计已写，分 7 步做，都已做；2026-11-15 用真实模型跑过一遍，默认开不开等维护者定。
@@ -135,7 +135,7 @@ export OPENAI_API_KEY=你的密钥
 | [`rust/README.md`](rust/README.md) | harness 的结构、接口、性能实测、各阶段做了什么 |
 | [`docs/ip/m2-spec.md`](docs/ip/m2-spec.md) | 渠道、MCP 服务端、外部引擎的接口规格 |
 | [`docs/ip/m2-acceptance.md`](docs/ip/m2-acceptance.md) | 真实验收手册 |
-| [`macro-mcp/README.md`](macro-mcp/README.md) | Finance Macro Data API 开源版：10 个宏观数据工具（9 个美国、1 个中国），MIT |
+| [`macro-mcp/README.md`](macro-mcp/README.md) | Finance Macro Data API 开源版：13 个宏观数据工具（9 个美国、4 个中国国家统计局），MIT |
 | [`docs/ip/macro-mcp-open-source.md`](docs/ip/macro-mcp-open-source.md) | Finance Macro Data API 开源前的核对和维护者的决定 |
 | [`homepage/`](homepage/) | 项目主页的静态原型 |
 
