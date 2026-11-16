@@ -45,7 +45,7 @@
 ## 许可和签名
 
 - `rust/`、`homepage/` 和文档以 Apache-2.0 发布，`macro-mcp/` 以 MIT 发布。你提交的内容按所在目录的许可证发布。
-- 用 DCO（[Developer Certificate of Origin](https://developercertificate.org/)）确认你有权提交这些内容：每个提交用 `git commit -s` 加上 `Signed-off-by` 一行。不需要签 CLA。（待维护者定：是否采用 DCO、是否在 CI 里检查。）
+- 用 DCO（[Developer Certificate of Origin](https://developercertificate.org/)）确认你有权提交这些内容：每个提交用 `git commit -s` 加上 `Signed-off-by` 一行。不需要签 CLA。CI 的 `dco` 工作流会检查 PR 里每个非合并提交都有这一行，缺了就不通过；补签用 `git rebase --signoff <目标分支>`。
 
 ## 行为准则
 
