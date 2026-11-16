@@ -13,6 +13,7 @@ pub mod devices;
 pub mod events;
 mod mcp;
 mod memory_admin;
+pub mod notify;
 mod origin;
 pub mod protocol;
 mod reports;

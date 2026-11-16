@@ -30,6 +30,9 @@ import { renderMarkdown } from './markdown.js';
 /** @typedef {import('./types/NewPairing').NewPairing} NewPairing */
 /** @typedef {import('./types/WhoAmI').WhoAmI} WhoAmI */
 /** @typedef {import('./types/Scope').Scope} Scope */
+/** @typedef {import('./types/Alert').Alert} Alert */
+/** @typedef {import('./types/NotifySettings').NotifySettings} NotifySettings */
+/** @typedef {import('./types/NotifyLevel').NotifyLevel} NotifyLevel */
 /** @typedef {import('./types/Claimed').Claimed} Claimed */
 
 /** @type {Record<TaskStatus, string>} */
@@ -96,6 +99,7 @@ const state = {
   /** 关掉了记忆的对话。 @type {string[]} */ memoryOff: [],
   /** 员工写的报告，新改的在前。 @type {ReportInfo[]} */ reports: [],
   /** 这个连接是哪台设备。 @type {WhoAmI | null} */ whoami: null,
+  /** 这台设备的通知设置；旧服务没有时为空。 @type {NotifySettings | null} */ notify: null,
   /** 配对过的设备（只有共用令牌看得到）。 @type {DeviceInfo[]} */ devices: [],
   /** 刚生成、还没用掉的配对码。 @type {NewPairing | null} */ pairing: null,
 };
@@ -109,7 +113,7 @@ const PAGES = [
   { id: 'approvals', title: '审批', short: '审批' },
   { id: 'router', title: '路由规则', short: '路由', admin: true },
   { id: 'memory', title: '记忆', short: '记忆', admin: true },
-  { id: 'devices', title: '设备', short: '设备' },
+  { id: 'devices', title: '设备与通知', short: '设备' },
 ];
 
 /** 这个连接有没有“管理”权限。共用令牌是“管理”；旧服务没有 who_am_i，也按“管理”算。 */
@@ -1591,7 +1595,7 @@ function renderDevices() {
           : h('p.muted', null, '“日常”权限能对话、审批、处理任务、看报告；路由规则、定时任务、记忆和设备管理要“管理”权限，请用共用令牌或有“管理”权限的设备在这一页给。改了权限后刷新一下页面。'),
       )
     : null;
-  if (me.scope !== 'admin') return h('section.devices', null, mine);
+  if (me.scope !== 'admin') return h('section.devices', null, mine, notifyCard());
   const name = /** @type {HTMLInputElement} */ (h('input', { placeholder: '设备名，例如：张三的手机', maxlength: 40 }));
   const create = async () => {
     if (!name.value.trim()) return name.focus();
@@ -1607,6 +1611,7 @@ function renderDevices() {
     'section.devices',
     null,
     mine,
+    notifyCard(),
     state.pairing ? pairingCard(state.pairing) : h('div.card', null, h('h3', null, '添加设备'), h('div.row', null, name, h('button.primary', { onclick: create }, '生成配对码'))),
     h(
       'div.card',
@@ -1750,6 +1755,147 @@ async function revokeDevice(d) {
   } catch (e) {
     alert(`吊销失败：${/** @type {Error} */ (e).message}`);
   }
+}
+
+// ---------- 通知（backlog F-9） ----------
+
+/** 没有 Service Worker 时用 new Notification 弹的通知，按标签记着，撤的时候关掉。 @type {Map<string, Notification>} */
+const shownAlerts = new Map();
+
+const LEVEL_TEXT = /** @type {Record<NotifyLevel, string>} */ ({ needs_me: '只通知要我处理的', all: '全部', off: '不通知' });
+
+async function loadNotify() {
+  try {
+    state.notify = await client.request({ type: 'get_notify_settings' });
+  } catch {
+    /* 旧服务没有这个请求 */
+    state.notify = null;
+  }
+}
+
+/** 页面在前台时界面自己会更新，不弹通知（apps-plan.md 5.2）。 */
+function pageInFront() {
+  return document.visibilityState === 'visible' && document.hasFocus();
+}
+
+/** 服务端已按这台设备的设置筛过；这里只管弹不弹、怎么弹。 @param {Alert} alert */
+async function showAlert(alert) {
+  if (pageInFront() || !('Notification' in window) || Notification.permission !== 'granted') return;
+  /** @type {NotificationOptions} */
+  const options = { body: alert.body, tag: alert.tag, icon: '/assets/icon-192.png', data: { thread_id: alert.thread_id ?? null } };
+  try {
+    // 手机上的浏览器只认 Service Worker 弹的通知。
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) {
+      await reg.showNotification(alert.title, options);
+      return;
+    }
+    const n = new Notification(alert.title, options);
+    n.onclick = () => {
+      window.focus();
+      openAlert(alert.thread_id ?? null);
+      n.close();
+    };
+    shownAlerts.get(alert.tag)?.close();
+    shownAlerts.set(alert.tag, n);
+  } catch (e) {
+    console.warn('弹通知失败', e);
+  }
+}
+
+/** 审批在别处处理过了：撤掉这台设备上同一标签的通知。 @param {string} tag */
+async function dismissAlert(tag) {
+  shownAlerts.get(tag)?.close();
+  shownAlerts.delete(tag);
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    for (const n of (await reg?.getNotifications({ tag })) ?? []) n.close();
+  } catch {
+    /* 不支持就算了 */
+  }
+}
+
+/** 点开通知：有对话去那个对话，没有去待办。 @param {string | null} threadId */
+function openAlert(threadId) {
+  if (!threadId) {
+    location.hash = '#/inbox';
+    return;
+  }
+  history.replaceState(null, '', `${location.pathname}#/chat`);
+  openThread(threadId);
+}
+
+/** 地址是 #/chat/<对话 id>（通知点开的新窗口）时打开那个对话，地址改回 #/chat。 */
+function openLinkedThread() {
+  const id = /^#\/chat\/([^/]+)$/.exec(location.hash)?.[1];
+  if (!id) return false;
+  history.replaceState(null, '', `${location.pathname}#/chat`);
+  openThread(decodeURIComponent(id));
+  return true;
+}
+
+function nextMorning() {
+  const d = new Date();
+  d.setHours(8, 0, 0, 0);
+  if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+function permissionLine() {
+  if (!('Notification' in window)) return h('p.muted', null, '这个浏览器不支持系统通知。iPhone 要先“添加到主屏幕”，再从主屏幕打开。');
+  if (Notification.permission === 'granted') return h('p', null, '浏览器通知：已允许。');
+  if (Notification.permission === 'denied') return h('p.muted', null, '浏览器通知被拒绝了，要在浏览器的网站设置里重新允许。');
+  return h('p', null, h('button', { onclick: () => Notification.requestPermission().then(() => render()) }, '允许浏览器通知'));
+}
+
+function notifyCard() {
+  const s = state.notify;
+  if (!s) return null;
+  /** @param {Partial<NotifySettings>} change */
+  const save = async (change) => {
+    try {
+      state.notify = await client.request({ type: 'set_notify_settings', settings: { ...s, ...change } });
+    } catch (e) {
+      alert(`保存通知设置失败：${/** @type {Error} */ (e).message}`);
+    }
+    render();
+  };
+  const level = /** @type {HTMLSelectElement} */ (
+    h('select', { 'aria-label': '通知哪些事' }, ...Object.entries(LEVEL_TEXT).map(([value, text]) => h('option', { value, selected: value === s.level }, text)))
+  );
+  level.onchange = () => save({ level: /** @type {NotifyLevel} */ (level.value) });
+  const preview = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', checked: s.preview }));
+  preview.onchange = () => save({ preview: preview.checked });
+  const now = Date.now();
+  const until = s.mute_until_ms;
+  const mute =
+    until !== null && until > now
+      ? [h('span', null, `静音到 ${formatTime(until)}`), h('button.link', { onclick: () => save({ mute_until_ms: null }) }, '取消静音')]
+      : [
+          h('button.link', { onclick: () => save({ mute_until_ms: now + 60 * 60 * 1000 }) }, '静音 1 小时'),
+          h('button.link', { onclick: () => save({ mute_until_ms: nextMorning() }) }, '静音到明早 8 点'),
+        ];
+  const roles = state.roles.map((r) => {
+    const box = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', checked: !s.muted_roles.includes(r.id) }));
+    box.onchange = () => save({ muted_roles: box.checked ? s.muted_roles.filter((id) => id !== r.id) : [...s.muted_roles, r.id] });
+    return h('label.check', null, box, ` ${r.name ?? r.id}`);
+  });
+  return h(
+    'div.card.notify',
+    null,
+    h('h3', null, state.whoami?.device ? '这台设备的通知' : '通知'),
+    permissionLine(),
+    h('div.row', null, h('span', null, '通知哪些事'), level),
+    h('label.check', null, preview, ' 通知里显示内容预览（密钥会打码）'),
+    h('div.row', null, ...mute),
+    roles.length ? h('div.row', null, h('span', null, '这些岗位的事要通知：'), ...roles) : null,
+    h(
+      'p.muted.small',
+      null,
+      '要我处理的：审批卡、员工提问、一轮失败、任务受阻。“全部”另外包括员工回复和任务完成。页面开着但不在前台时弹系统通知，在前台时不弹；关掉页面后也能收到的推送（Web Push）是下一步。',
+      state.whoami?.device ? '' : '用共用令牌打开的控制台共用这一份设置。',
+    ),
+  );
 }
 
 /** 用 6 位配对码换这台设备的令牌，存好后重新打开控制台。 @param {string} code */
@@ -1898,6 +2044,7 @@ async function loadAll() {
     client.request({ type: 'list_memory_off_threads' }),
     refreshReports(),
     loadDevices(),
+    loadNotify(),
   ]);
   state.memory = null;
   memoryEl = null;
@@ -1905,6 +2052,7 @@ async function loadAll() {
   // 配了路由规则时，新对话默认自动分派。
   if (!state.agentForNew) state.agentForNew = state.rules?.spec.rules.length ? AUTO : (state.agents[0]?.id ?? '');
   composerEl = null;
+  if (openLinkedThread()) return;
   await loadThread();
   render();
 }
@@ -1915,11 +2063,15 @@ client.onStatus((s) => {
   render();
 });
 client.onEvent(onEvent);
+client.onAlert((a) => void showAlert(a));
+client.onDismiss((tag) => void dismissAlert(tag));
 // 补不上断开期间或跟不上时漏掉的事件：整个重新拉。
 client.onLagged(() => {
   loadAll().catch((e) => console.error(e));
 });
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => {
+  if (!openLinkedThread()) render();
+});
 // 地址栏没指定页面时，窗口跨过窄屏断点要换默认页。
 narrow.addEventListener('change', () => {
   const id = location.hash.replace(/^#\/?/, '').split('/')[0];
@@ -1934,6 +2086,10 @@ else client.connect();
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {
     /* 忽略：比如用 http:// 连非本机地址 */
+  });
+  // 点了 Service Worker 弹的通知，它把要打开的对话发过来（sw.js 的 notificationclick）。
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'open-alert') openAlert(e.data.thread_id ?? null);
   });
 }
 if (!pairCode) render();

@@ -31,7 +31,7 @@ rmcp = { version = "3.9", default-features = false, features = [
     "server",
     "transport-streamable-http-server",
 ] }
-regex = { version = "1", default-features = false, features = ["std", "unicode"] }
+regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 reqwest = { version = "0.13", features = ["json"] }
 ts-rs = { version = "12", features = ["serde-json-impl"] }
 rusqlite = { version = "0.41", features = ["bundled"] }

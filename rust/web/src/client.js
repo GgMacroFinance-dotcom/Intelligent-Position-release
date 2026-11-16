@@ -5,6 +5,7 @@
 /** @typedef {import('./types/ServerFrame').ServerFrame} ServerFrame */
 /** @typedef {import('./types/Request').Request} Request */
 /** @typedef {import('./types/RuntimeEvent').RuntimeEvent} RuntimeEvent */
+/** @typedef {import('./types/Alert').Alert} Alert */
 /** @typedef {'connecting' | 'open' | 'closed'} Status */
 
 /** 这份控制台代码说的 `/ws` 协议版本，和服务端 `PROTOCOL_VERSION` 对应。 */
@@ -25,6 +26,10 @@ export class Client {
     this.statusListeners = new Set();
     /** @type {Set<() => void>} */
     this.lagListeners = new Set();
+    /** @type {Set<(a: Alert) => void>} */
+    this.alertListeners = new Set();
+    /** @type {Set<(tag: string) => void>} */
+    this.dismissListeners = new Set();
     this.retryMs = 500;
     /** @type {Status} */
     this.status = 'connecting';
@@ -96,6 +101,12 @@ export class Client {
       case 'lagged':
         for (const fn of this.lagListeners) fn();
         return;
+      case 'alert':
+        for (const fn of this.alertListeners) fn(frame.alert);
+        return;
+      case 'dismiss':
+        for (const fn of this.dismissListeners) fn(frame.tag);
+        return;
     }
   }
 
@@ -128,5 +139,15 @@ export class Client {
   /** @param {() => void} fn */
   onLagged(fn) {
     this.lagListeners.add(fn);
+  }
+
+  /** 服务端按这台设备的通知设置筛过的通知（docs/ip/m2-spec.md D-32）。 @param {(a: Alert) => void} fn */
+  onAlert(fn) {
+    this.alertListeners.add(fn);
+  }
+
+  /** 撤掉某个标签的通知。 @param {(tag: string) => void} fn */
+  onDismiss(fn) {
+    this.dismissListeners.add(fn);
   }
 }

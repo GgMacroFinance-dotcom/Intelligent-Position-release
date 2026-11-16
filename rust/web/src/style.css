@@ -297,7 +297,9 @@ body.report-open { overflow: hidden; }
 /* 设备（backlog F-7）。 */
 .devices { padding: 16px; display: flex; flex-direction: column; gap: 16px; max-width: 900px; margin: 0 auto; width: 100%; overflow: auto; }
 .devices .row { display: flex; gap: 8px; flex-wrap: wrap; }
-.devices .row input { flex: 1; min-width: 180px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.devices .row input:not([type='checkbox']) { flex: 1; min-width: 180px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.devices .notify .row { align-items: center; gap: 6px 16px; margin: 10px 0; }
+.devices select { padding: 4px 8px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); color: inherit; }
 .devices td.actions { white-space: nowrap; text-align: right; }
 .devices .online { color: var(--ok); }
 .pair-code { font: 600 36px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 6px; margin: 8px 0; }

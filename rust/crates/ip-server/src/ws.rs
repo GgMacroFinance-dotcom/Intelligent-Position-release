@@ -110,6 +110,9 @@ fn daily_allows(request: &Request) -> bool {
             | Request::ListReports { .. }
             | Request::ReadReport { .. }
             | Request::WhoAmI
+            // 自己的通知设置
+            | Request::GetNotifySettings
+            | Request::SetNotifySettings { .. }
     )
 }
 
@@ -120,6 +123,8 @@ async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>, caller
         None => None,
     };
     let mut revoked = app.devices.subscribe_revoked();
+    app.notifier.start(app.runtime.clone());
+    let mut alerts = app.notifier.subscribe();
     let log = app.events.clone();
     log.start_pump(app.runtime.subscribe());
     // 先收听再取留着的事件，两步之间来的事件不会漏；重复的按序号跳过。
@@ -168,6 +173,14 @@ async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>, caller
                     break;
                 }
             }
+            // 丢几条通知不要紧（Lagged）；发送端跟着 App 一直在，不会关。
+            Ok(out) = alerts.recv() => {
+                if let Some(frame) = alert_frame(&app, &caller, &out)
+                    && socket.send(WsMessage::Text(frame.to_json().into())).await.is_err()
+                {
+                    break;
+                }
+            }
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 match msg {
@@ -203,6 +216,18 @@ async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>, caller
                     break;
                 }
             }
+        }
+    }
+}
+
+/// 按这个连接的通知设置筛一条通知；撤通知的一律发。
+fn alert_frame(app: &App, caller: &Caller, out: &crate::notify::Outgoing) -> Option<ServerFrame> {
+    match out {
+        crate::notify::Outgoing::Dismiss(tag) => Some(ServerFrame::Dismiss { tag: tag.clone() }),
+        crate::notify::Outgoing::Alert(alert) => {
+            let who = caller.device.as_ref().map_or(crate::notify::SHARED, |d| d.id.as_str());
+            let alert = app.notifier.settings(who).filter(alert, ip_core::now_ms())?;
+            Some(ServerFrame::Alert { alert })
         }
     }
 }
@@ -462,7 +487,21 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
         Request::SetDeviceScope { device_id, scope } => {
             to_json(serde_json::to_value(app.devices.set_scope(&device_id, scope).await?))
         }
-        Request::RevokeDevice { device_id } => to_json(serde_json::to_value(app.devices.revoke(&device_id).await?)),
+        Request::RevokeDevice { device_id } => {
+            let list = app.devices.revoke(&device_id).await?;
+            if let Err(e) = app.notifier.forget(&device_id).await {
+                tracing::warn!(device = %device_id, "删掉吊销设备的通知设置失败：{e}");
+            }
+            to_json(serde_json::to_value(list))
+        }
+        Request::GetNotifySettings => {
+            let who = device.as_ref().map_or(crate::notify::SHARED, |d| d.id.as_str());
+            to_json(serde_json::to_value(app.notifier.settings(who)))
+        }
+        Request::SetNotifySettings { settings } => {
+            let who = device.as_ref().map_or(crate::notify::SHARED, |d| d.id.as_str());
+            to_json(serde_json::to_value(app.notifier.save(who, settings).await?))
+        }
         Request::ReadReport { agent_id, path } => {
             to_json(serde_json::to_value(crate::reports::read(app, &agent_id, &path).await?))
         }
