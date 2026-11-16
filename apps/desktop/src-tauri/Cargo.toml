@@ -1,0 +1,40 @@
+[package]
+name = "ip-desktop"
+version = "0.8.0"
+description = "intelligent-position 桌面 App：自带控制台的 Tauri 壳"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/GgMacroFinance-dotcom/Intelligent-Position-release"
+publish = false
+
+# 不进 rust/ 的工作区：Tauri 的依赖多，服务端的 CI 不用编它。
+[workspace]
+
+[lib]
+name = "ip_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+# 设备令牌放系统钥匙串：macOS 钥匙串、Windows 凭据管理器、Linux 的 Secret Service（GNOME 钥匙串、KWallet）。
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+# 配对（POST /pair）在壳里发，不走网页，免得主机要为桌面 App 开跨域。
+reqwest = { version = "0.13", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

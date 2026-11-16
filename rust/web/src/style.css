@@ -307,3 +307,8 @@ canvas.qr { display: block; width: 216px; max-width: 100%; height: auto; image-r
 @media (max-width: 720px) {
   .devices { padding: 12px; }
 }
+
+/* 桌面 App 的“连接主机”（backlog F-11） */
+.connect label { display: block; margin: 12px 0; }
+.connect input { display: block; width: 100%; margin-top: 4px; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.connect .row { display: flex; gap: 12px; align-items: center; margin-top: 16px; }

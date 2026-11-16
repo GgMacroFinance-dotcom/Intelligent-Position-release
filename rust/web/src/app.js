@@ -70,8 +70,20 @@ if (params.get('token')) {
   store.set(TOKEN_KEY, params.get('token') ?? '');
   history.replaceState(null, '', location.pathname + location.hash);
 }
-const token = store.get(TOKEN_KEY);
-const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+
+/**
+ * 在桌面 App（Tauri，backlog F-11）里运行时有它，浏览器里是 null。只用来调壳的几条命令（`apps/desktop/src-tauri/src/lib.rs`）。
+ * @type {{ core: { invoke(cmd: string, args?: Record<string, unknown>): Promise<any> } } | null}
+ */
+const desktop = /** @type {any} */ (window).__TAURI__ ?? null;
+/** 桌面 App 连的主机和这台设备的令牌（令牌存在系统钥匙串里）；还没连过时为 null。 @type {{ url: string, token: string | null } | null} */
+const desktopHost = desktop ? await desktop.core.invoke('get_host').catch((/** @type {unknown} */ e) => (console.error(e), null)) : null;
+/** 主机地址：浏览器里就是打开控制台的这个地址；桌面 App 还没连主机时为 null。 */
+const hostUrl = desktop ? (desktopHost?.url ?? null) : location.origin;
+const token = desktop ? (desktopHost?.token ?? null) : store.get(TOKEN_KEY);
+const wsUrl = hostUrl
+  ? `${hostUrl.startsWith('https:') ? 'wss' : 'ws'}://${new URL(hostUrl).host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`
+  : '';
 const client = new Client(wsUrl);
 
 const state = {
@@ -144,6 +156,8 @@ function agentName(id) {
 }
 
 function render() {
+  if (connectShown) return;
+  syncTray();
   const current = page();
   root.replaceChildren(renderHeader(current), h('main', null, renderPage(current)));
   if (current === 'chat') scrollMessages();
@@ -1601,7 +1615,7 @@ function renderDevices() {
   const create = async () => {
     if (!name.value.trim()) return name.focus();
     try {
-      state.pairing = await client.request({ type: 'create_pairing', name: name.value, link_base: location.origin });
+      state.pairing = await client.request({ type: 'create_pairing', name: name.value, link_base: hostUrl ?? location.origin });
       watchPairing();
       render();
     } catch (e) {
@@ -1781,6 +1795,11 @@ function pageInFront() {
 
 /** 服务端已按这台设备的设置筛过；这里只管弹不弹、怎么弹。 @param {Alert} alert */
 async function showAlert(alert) {
+  // 桌面 App 用系统通知，关掉窗口后它还在托盘里连着（backlog F-11）。点通知目前只能把窗口叫出来，去不了那个对话。
+  if (desktop) {
+    if (!pageInFront()) desktop.core.invoke('notify', { title: alert.title, body: alert.body }).catch((e) => console.warn(e));
+    return;
+  }
   // 开了推送时由主机推送、Service Worker 弹，这里再弹就重复了。
   if (state.push === 'on' || pageInFront() || !('Notification' in window) || Notification.permission !== 'granted') return;
   /** @type {NotificationOptions} */
@@ -1844,6 +1863,7 @@ function nextMorning() {
 }
 
 function permissionLine() {
+  if (desktop) return h('p', null, '桌面 App 用系统通知。关掉窗口后 App 留在托盘里，照样能收到；从托盘菜单“退出”才不再收。');
   if (!('Notification' in window)) return h('p.muted', null, '这个浏览器不支持系统通知。iPhone 要先“添加到主屏幕”，再从主屏幕打开。');
   if (Notification.permission === 'granted') return h('p', null, '浏览器通知：已允许。');
   if (Notification.permission === 'denied') return h('p.muted', null, '浏览器通知被拒绝了，要在浏览器的网站设置里重新允许。');
@@ -1878,6 +1898,11 @@ function registerPush(sub) {
 
 /** 打开控制台时看这个浏览器订阅过没有。订阅过就再登记一次：主机换了密钥时换个新订阅，主机删了订阅时补上。 */
 async function checkPush() {
+  // 桌面 App 常驻托盘、连接不断，用不着推送。
+  if (desktop) {
+    state.push = null;
+    return;
+  }
   /** @type {import('./types/VapidKey').VapidKey} */
   let key;
   try {
@@ -2016,10 +2041,90 @@ function notifyCard() {
     h(
       'p.muted.small',
       null,
-      '要我处理的：审批卡、员工提问、一轮失败、任务受阻。“全部”另外包括员工回复和任务完成。页面在前台时不弹；开了推送，页面关着也能收到，不开推送时只有页面开着才弹。',
+      '要我处理的：审批卡、员工提问、一轮失败、任务受阻。“全部”另外包括员工回复和任务完成。',
+      desktop ? '窗口在前台时不弹。' : '页面在前台时不弹；开了推送，页面关着也能收到，不开推送时只有页面开着才弹。',
       state.whoami?.device ? '' : '用共用令牌打开的控制台共用这一份设置。',
     ),
   );
+}
+
+// ---------- 桌面 App（backlog F-11） ----------
+
+/** 正在显示“连接主机”，这时不画控制台。 */
+let connectShown = false;
+/** 上次告诉托盘的待办数。 */
+let trayCount = -1;
+
+/** 托盘图标上的待办数，和导航上“待办”的角标一样。 */
+function syncTray() {
+  if (!desktop || client.status !== 'open') return;
+  const count = inboxCount();
+  if (count === trayCount) return;
+  trayCount = count;
+  desktop.core.invoke('set_pending', { count }).catch((e) => console.warn(e));
+}
+
+/** 桌面 App 的“连接主机”：填主机地址和 6 位配对码（或访问令牌），令牌由壳存进系统钥匙串。 */
+function showConnect() {
+  if (!desktop) return;
+  const app = desktop;
+  connectShown = true;
+  const url = /** @type {HTMLInputElement} */ (
+    h('input', { type: 'url', placeholder: 'https://ip.example.com', value: hostUrl ?? '', 'aria-label': '主机地址', autocomplete: 'url' })
+  );
+  const code = /** @type {HTMLInputElement} */ (h('input', { placeholder: '6 位配对码，或访问令牌', 'aria-label': '配对码或访问令牌', autocomplete: 'off' }));
+  const name = /** @type {HTMLInputElement} */ (
+    h('input', { placeholder: '你的名字（用访问令牌时显示在消息上，可不填）', value: store.get(NAME_KEY) ?? '', 'aria-label': '你的名字' })
+  );
+  const status = h('p.muted', null, '在主机上运行 ip device pair --name <这台电脑的名字>，或者在已经连上的控制台“设备”页生成配对码。主机要配访问令牌（auth_token_env）。');
+  const button = /** @type {HTMLButtonElement} */ (h('button.primary', { type: 'submit' }, '连接'));
+  const form = h(
+    'form.connect',
+    {
+      onsubmit: async (/** @type {Event} */ e) => {
+        e.preventDefault();
+        button.disabled = true;
+        status.className = 'muted';
+        status.textContent = '正在连接…';
+        const secret = code.value.trim();
+        try {
+          if (/^\d{6}$/.test(secret)) await app.core.invoke('pair', { url: url.value, code: secret });
+          else await app.core.invoke('save_token', { url: url.value, token: secret });
+          if (name.value.trim()) store.set(NAME_KEY, name.value.trim());
+          location.hash = '#/inbox';
+          location.reload();
+        } catch (err) {
+          status.className = 'error';
+          status.textContent = String(err);
+          button.disabled = false;
+        }
+      },
+    },
+    h('label', null, '主机地址', url),
+    h('label', null, '配对码或访问令牌', code),
+    h('label', null, '名字', name),
+    h('div.row', null, button, hostUrl ? h('button.link', { type: 'button', onclick: () => location.reload() }, '取消') : null),
+  );
+  const forget = hostUrl
+    ? h(
+        'p',
+        null,
+        h(
+          'button.link.danger',
+          {
+            type: 'button',
+            onclick: async () => {
+              if (!confirm(`断开 ${hostUrl}？这台电脑上存的令牌会删掉，要再用得重新配对。`)) return;
+              await app.core.invoke('forget_host').catch((/** @type {unknown} */ err) => alert(String(err)));
+              location.reload();
+            },
+          },
+          '断开这台主机',
+        ),
+      )
+    : null;
+  root.replaceChildren(h('section.placeholder.connect', null, h('h2', null, hostUrl ? '换主机或重新配对' : '连接主机'), form, status, forget));
+  url.focus();
 }
 
 /** 用 6 位配对码换这台设备的令牌，存好后重新打开控制台。 @param {string} code */
@@ -2138,6 +2243,10 @@ window.addEventListener('popstate', () => {
 });
 
 function askToken() {
+  if (desktop) {
+    showConnect();
+    return;
+  }
   const t = prompt('访问令牌（服务配置了 auth_token_env 时需要），或者 6 位配对码', store.get(TOKEN_KEY) ?? '');
   if (t === null) return;
   if (/^\d{6}$/.test(t.trim())) return pairDevice(t.trim());
@@ -2211,12 +2320,25 @@ narrow.addEventListener('change', () => {
   if (!PAGES.some((p) => p.id === id)) render();
 });
 // 扫配对二维码打开的地址是 #/pair/<6 位配对码>：先换令牌，不连 /ws。
-const pairCode = /^#\/pair\/(\d{6})$/.exec(location.hash)?.[1];
-if (pairCode) pairDevice(pairCode);
+const pairCode = desktop ? undefined : /^#\/pair\/(\d{6})$/.exec(location.hash)?.[1];
+if (desktop && !hostUrl) showConnect();
+else if (pairCode) pairDevice(pairCode);
 else client.connect();
 
+// 桌面 App 里的链接用系统浏览器打开，不在 App 窗口里跳走。
+if (desktop) {
+  document.addEventListener('click', (e) => {
+    const a = /** @type {Element | null} */ (e.target instanceof Element ? e.target.closest('a[href]') : null);
+    const href = a?.getAttribute('href') ?? '';
+    if (!/^(https?:|mailto:)/i.test(href)) return;
+    e.preventDefault();
+    desktop.core.invoke('open_url', { url: href }).catch((err) => console.warn(err));
+  });
+}
+
 // 注册 Service Worker，浏览器才会提供“安装应用”（backlog F-2）。只在 HTTPS 或本机地址上可用，失败不影响控制台。
-if ('serviceWorker' in navigator) {
+// 桌面 App 本身就是装好的应用，不用。
+if (!desktop && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {
     /* 忽略：比如用 http:// 连非本机地址 */
   });
@@ -2225,4 +2347,4 @@ if ('serviceWorker' in navigator) {
     if (e.data?.type === 'open-alert') openAlert(e.data.thread_id ?? null);
   });
 }
-if (!pairCode) render();
+if (!pairCode && !connectShown) render();

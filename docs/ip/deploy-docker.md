@@ -180,6 +180,8 @@ Codex 自带一份 bubblewrap，也靠这三项才能在容器里跑；不用 Co
 
 猜错配对码 10 次，所有待用的配对码都会作废。
 
+**桌面 App**：不想开浏览器的，可以装桌面 App（[`apps/desktop`](../../apps/desktop/README.md)）。它关掉窗口后留在托盘里，有事弹系统通知，托盘上显示待办数。打开后填控制台的对外地址和上面生成的配对码就能连上，令牌存在系统钥匙串里。主机必须配了 `auth_token_env`。安装包还没正式发布，要在仓库的 Actions 里手动运行 `desktop` 工作流打出来，只在 Linux 上试过。
+
 **不想把控制台放在公网：用 Tailscale**。主机和手机、电脑装上 Tailscale 并登进同一个 tailnet，打开 MagicDNS，就能用 `http://<主机名>.<tailnet>.ts.net:7878` 访问，流量在 WireGuard 隧道里加密。这时 `docker-compose.yml` 里的端口映射可以只绑 tailnet 的地址，`ip.yaml` 里照样要设 `auth_token_env`（监听非本机地址时必须设）。想要 `https://`（装 PWA 需要）可以用 `tailscale serve --https=443 http://127.0.0.1:7878`，Tailscale 会给 `*.ts.net` 签证书。以上 Tailscale 的用法照官方文档写，没有在这个项目里实测过。
 
 ## 日常维护
