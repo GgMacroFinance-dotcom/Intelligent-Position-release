@@ -481,13 +481,18 @@ async fn serves_embedded_console() {
         ("/", "200"),
         ("/assets/app.js", "200"),
         ("/assets/style.css", "200"),
+        ("/assets/icon-192.png", "200"),
+        ("/manifest.webmanifest", "200"),
+        ("/sw.js", "200"),
         ("/assets/nope.js", "404"),
     ] {
         let mut stream = tokio::net::TcpStream::connect(s.addr).await.unwrap();
         let req = format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
         stream.write_all(req.as_bytes()).await.unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).await.unwrap();
+        // 图标是二进制，按字节读再转成文字看响应头。
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).await.unwrap();
+        let response = String::from_utf8_lossy(&raw);
         assert!(
             response.starts_with(&format!("HTTP/1.1 {expect}")),
             "{path}: {response}"

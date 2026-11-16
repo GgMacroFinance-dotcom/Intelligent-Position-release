@@ -1,32 +1,57 @@
 //! Web 控制台：静态文件编译进可执行文件，部署时不需要额外的目录。
+//!
+//! 带 `/manifest.webmanifest` 和 `/sw.js`，浏览器能把控制台“安装”成桌面和手机上的应用（PWA，backlog F-2）。
+//! Service Worker 必须从根路径提供，才能管到整个站点。
 
 use axum::extract::Path;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
 const INDEX: &str = include_str!("../../../web/index.html");
+const MANIFEST: &str = include_str!("../../../web/manifest.webmanifest");
+const SERVICE_WORKER: &str = include_str!("../../../web/src/sw.js");
 
 /// (文件名, 内容, Content-Type)。
-const ASSETS: &[(&str, &str, &str)] = &[
+const ASSETS: &[(&str, &[u8], &str)] = &[
     (
         "app.js",
-        include_str!("../../../web/src/app.js"),
+        include_bytes!("../../../web/src/app.js"),
         "text/javascript; charset=utf-8",
     ),
     (
         "client.js",
-        include_str!("../../../web/src/client.js"),
+        include_bytes!("../../../web/src/client.js"),
         "text/javascript; charset=utf-8",
     ),
     (
         "dom.js",
-        include_str!("../../../web/src/dom.js"),
+        include_bytes!("../../../web/src/dom.js"),
         "text/javascript; charset=utf-8",
     ),
     (
         "style.css",
-        include_str!("../../../web/src/style.css"),
+        include_bytes!("../../../web/src/style.css"),
         "text/css; charset=utf-8",
+    ),
+    (
+        "icon.svg",
+        include_bytes!("../../../web/icons/icon.svg"),
+        "image/svg+xml",
+    ),
+    (
+        "icon-192.png",
+        include_bytes!("../../../web/icons/icon-192.png"),
+        "image/png",
+    ),
+    (
+        "icon-512.png",
+        include_bytes!("../../../web/icons/icon-512.png"),
+        "image/png",
+    ),
+    (
+        "apple-touch-icon.png",
+        include_bytes!("../../../web/icons/apple-touch-icon.png"),
+        "image/png",
     ),
 ];
 
@@ -34,7 +59,15 @@ const ASSETS: &[(&str, &str, &str)] = &[
 const CSP: &str = "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'";
 
 pub async fn index() -> Response {
-    respond(INDEX, "text/html; charset=utf-8")
+    respond(INDEX.as_bytes(), "text/html; charset=utf-8")
+}
+
+pub async fn manifest() -> Response {
+    respond(MANIFEST.as_bytes(), "application/manifest+json")
+}
+
+pub async fn service_worker() -> Response {
+    respond(SERVICE_WORKER.as_bytes(), "text/javascript; charset=utf-8")
 }
 
 pub async fn asset(Path(name): Path<String>) -> Response {
@@ -44,7 +77,7 @@ pub async fn asset(Path(name): Path<String>) -> Response {
     }
 }
 
-fn respond(body: &'static str, content_type: &'static str) -> Response {
+fn respond(body: &'static [u8], content_type: &'static str) -> Response {
     (
         [
             (header::CONTENT_TYPE, content_type),

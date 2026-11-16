@@ -72,6 +72,7 @@ const state = {
   /** 正在生成的文字，按员工 id。 @type {Map<string, string>} */ drafts: new Map(),
   /** 每个对话最近一次和哪个员工说话。 @type {Map<string, string>} */ threadAgent: new Map(),
   /** @type {string} */ agentForNew: '',
+  /** 窄屏上对话页显示列表还是对话本身；宽屏两栏都显示，不看这个值。 @type {'list' | 'thread'} */ chatPane: 'list',
   /** @type {SearchHit[] | null} */ searchHits: null,
   /** @type {Map<string, string>} 对话最近一轮的状态说明 */ turnNote: new Map(),
   /** @type {RulesView | null} */ rules: null,
@@ -87,13 +88,14 @@ const state = {
   /** 关掉了记忆的对话。 @type {string[]} */ memoryOff: [],
 };
 
+// short 是窄屏底部导航栏上的短名字。
 const PAGES = [
-  { id: 'chat', title: '对话' },
-  { id: 'roles', title: '岗位与员工' },
-  { id: 'tasks', title: '任务' },
-  { id: 'approvals', title: '审批' },
-  { id: 'router', title: '路由规则' },
-  { id: 'memory', title: '记忆' },
+  { id: 'chat', title: '对话', short: '对话' },
+  { id: 'roles', title: '岗位与员工', short: '岗位' },
+  { id: 'tasks', title: '任务', short: '任务' },
+  { id: 'approvals', title: '审批', short: '审批' },
+  { id: 'router', title: '路由规则', short: '路由' },
+  { id: 'memory', title: '记忆', short: '记忆' },
 ];
 
 const root = /** @type {HTMLElement} */ (document.getElementById('app'));
@@ -129,7 +131,8 @@ function renderHeader(current) {
           return h(
             'a' + (p.id === current ? '.active' : ''),
             { href: `#/${p.id}` },
-            p.title,
+            h('span.long', null, p.title),
+            h('span.short', null, p.short),
             pending ? h('span.badge', null, pending) : null,
           );
         }),
@@ -250,6 +253,7 @@ function startChat(agentId) {
   state.threadId = null;
   state.messages = [];
   state.agentForNew = agentId;
+  state.chatPane = 'thread';
   composerEl = null;
   location.hash = '#/chat';
   render();
@@ -1066,7 +1070,7 @@ function buildMemory(view) {
 // ---------- 对话 ----------
 
 function renderChat() {
-  return h('section.chat', null, renderSidebar(), renderThread());
+  return h('section.chat.pane-' + state.chatPane, null, renderSidebar(), renderThread());
 }
 
 /** 搜索框和输入框跨重绘保留，事件推送重绘时不丢正在输入的内容。 @type {HTMLElement | null} */
@@ -1129,7 +1133,19 @@ function renderThread() {
     composerEl = renderComposer();
     composerFor = state.threadId;
   }
-  return h('div.thread', null, threadMemoryBar(), msgs, composerEl);
+  return h('div.thread', null, threadHead(), threadMemoryBar(), msgs, composerEl);
+}
+
+/** 窄屏上对话顶部的返回栏（宽屏用 CSS 隐藏）。 */
+function threadHead() {
+  const agent = currentAgent();
+  const title = state.threadId ? agentName(state.threadAgent.get(state.threadId) ?? agent) : '新对话';
+  return h(
+    'div.thread-head',
+    null,
+    h('button.link', { onclick: () => ((state.chatPane = 'list'), render()), 'aria-label': '返回对话列表' }, '‹ 对话列表'),
+    h('span', null, title),
+  );
 }
 
 /** 对话页顶部的一行：这个对话进不进岗位记忆。 */
@@ -1280,6 +1296,7 @@ function scrollMessages() {
 /** @param {string} threadId */
 async function openThread(threadId) {
   state.threadId = threadId;
+  state.chatPane = 'thread';
   state.messages = [];
   render();
   await loadThread();
@@ -1427,4 +1444,11 @@ client.onLagged(() => {
 });
 window.addEventListener('hashchange', render);
 client.connect();
+
+// 注册 Service Worker，浏览器才会提供“安装应用”（backlog F-2）。只在 HTTPS 或本机地址上可用，失败不影响控制台。
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {
+    /* 忽略：比如用 http:// 连非本机地址 */
+  });
+}
 render();
