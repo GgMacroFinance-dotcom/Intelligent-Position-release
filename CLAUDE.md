@@ -12,17 +12,16 @@ intelligent-position（I.P.）是一个开源优先的“AI 原生组织架构�
 
 ## 工作规则
 
-1. 开工前看 `docs/ip/backlog.md` 和开放的 PR。两位工程师各自的 Claude 会同时推进，同一条不要做两遍；工程师之间线下沟通，拿不准就先问你的工程师。
+1. 开工前看 `docs/ip/backlog.md` 和开放的 PR。可能有别人（或别人的 Claude）在同时推进，同一条不要做两遍；拿不准先在 issue 里问。
 2. 一个 PR 只做一件事，尽量小。PR 描述按 `.github/pull_request_template.md` 写。
-3. 动到敏感路径（清单在 `rust/CONTRIBUTING.md`）的 PR，在描述里写明，等一位工程师读过代码再合并。其他 PR 本地检查通过后可以直接合并。
-4. CI 已恢复（2026-11-13）：改到 `rust/**` 的 PR 会自动跑 `rust` 工作流（fmt、clippy、test、前端类型检查、基准）。合并前看 CI 结果，在 PR 描述里写 CI 是否通过；CI 没覆盖或没跑到的，在 `rust/` 下本地跑 `cargo fmt --all --check`、`cargo clippy --all-targets --locked`、`cargo test --locked`，跑了什么写什么。提交信息不要加 `[skip ci]`。仓库还是私有的，Actions 分钟数有限，不要为了重跑而重跑。
+3. 动到敏感路径（清单在 `rust/CONTRIBUTING.md`）的 PR，在描述里写明，等一位维护者读过代码再合并。其他 PR 本地检查通过后可以直接合并。
+4. CI 已恢复（2026-11-13）：改到 `rust/**` 的 PR 会自动跑 `rust` 工作流（fmt、clippy、test、前端类型检查、基准）。合并前看 CI 结果，在 PR 描述里写 CI 是否通过；CI 没覆盖或没跑到的，在 `rust/` 下本地跑 `cargo fmt --all --check`、`cargo clippy --all-targets --locked`、`cargo test --locked`，跑了什么写什么。提交信息不要加 `[skip ci]`。不要为了重跑而重跑。
 5. 没在真实环境跑过的东西，不要写“已上线”“已验证”。用假模型、假 Slack、假 Codex 测的，写明是假的。主页和 README 里的说法以真实跑通为准。
 6. 密钥只放环境变量或云端环境的密钥设置，不写进仓库、PR、issue 和聊天。
 7. nightly-lab 是非商用许可，只能参考设计，不得复制代码。依赖只用与 Apache-2.0 兼容的许可。
 8. 性能是功能的一部分：新增热路径要有 `ip bench` 基准。
 9. 注释和文档用中文，标识符用英文。
 10. 做完一条，在同一个 PR 里更新 `docs/ip/backlog.md` 和 `rust/README.md` 里对应的勾选项。
-11. 和用户对话时，每次回复都用中文写，最后附一段英文摘要（以 **English summary:** 开头）。维护者在练习中文，2026-11-14 定。这一条只管聊天里的回复；提交信息、PR 和代码照现有习惯写。
 
 ## 小提示
 

@@ -2,6 +2,7 @@
 
 > 2026-11-15 核对，基于 `main` 的 `382f807`（PR #57 合并后）。
 > 这份清单只回答一个问题：打包发布前还差什么。挑活仍然看 [`backlog.md`](backlog.md)，已敲定的决定看 [`project-spec.md`](project-spec.md)。
+> 2026-11-16 之前提到的 PR 编号（如 PR #31）指私有开发仓库里的 PR，那个仓库不公开。本仓库从 2026-11-16 的初始提交开始。
 
 **结论：还不能公开发布。** 六条开源门槛里，工程师通读代码和新建干净仓库还没开始，`macro-mcp` 还差上游条款的原文核对和发 key 的办法。代码本身是健康的：`main` 最新提交的 CI 通过，没有 issue，除了加这份清单的 PR 没有开放的 PR。
 
@@ -33,19 +34,19 @@
 | R-2 | 通读发现的问题：修掉，或写进发布说明的已知限制 | Claude 改，工程师审 | 等 R-1 |
 | R-3 | 上游数据源的使用条款读原文（backlog C-2 的一部分） | Claude 读，维护者或律师定 | 原文已读（2026-11-15，[条款核对](upstream-terms-2026-11-15.md)）：FRED、纽约联储、SEC、国家统计局网站。结论：纽约联储、SEC 可以用，要补声明和限速；**FRED 现在经托管服务用共用 key 转发、缓存的做法和条款冲突**（条款要求每个用户用自己的 key，不许缓存后提供给第三方）；国家统计局自己用没问题，托管转发和商业用途要人定。待定 8 件，见那份文档第 6 节，第 1 件维护者 2026-11-16 定了：保留经 WhichAPI 转发，写信请圣路易斯联储书面同意，同意书到之前算未完成。没核对：财政部官网、TIC、Federal Register、`data.stats.gov.cn` 自己的页面 |
 | R-4 | which-api 那边的两件事：给用户发 WhichAPI key 的办法；托管服务拒绝 ICE BofA（`BAML` 开头）的序列 | 维护者 | 等人。发 key：2026-11-13 的记录是托管服务只有一个共用的 key，这次没能核对 which-api 仓库。拒绝 ICE 序列：没做，2026-11-15 请求托管服务的 `get_fred_series`，`BAMLC0A0CM` 仍然返回数据。ICE 可以作为第三方受益人直接主张权利。维护者 2026-11-16 定：先不停，写信向 ICE 申请授权，授权到之前算未完成（[条款核对](upstream-terms-2026-11-15.md)第 6 节第 2 条）。另外 FRED 的条款要求每个用户用自己的 key，FRED 保留转发（2026-11-16 定），另写信请圣路易斯联储书面同意 |
-| R-5 | 新建干净的公开仓库，只放 `main` 当前的文件，不带历史（backlog C-4） | 维护者建仓库和公开，Claude 迁移 | 迁移完成（2026-11-16）：维护者建了 `GgMacroFinance-dotcom/Intelligent-Position-release`，旧仓库 `main` 的 `fc7912d` 导出成一个不带历史的初始提交，两边的文件树哈希一致（`c17087d`）。新仓库**现在是私有的**，改成公开是维护者的事，改之前先定 R-6。旧仓库留作私有存档；迁移之后的开发要在新仓库做，否则两边会分叉 |
+| R-5 | 新建干净的公开仓库，只放 `main` 当前的文件，不带历史（backlog C-4） | 维护者建仓库和公开，Claude 迁移 | 迁移完成（2026-11-16）：维护者建了 `GgMacroFinance-dotcom/Intelligent-Position-release`，旧仓库 `main` 的 `fc7912d` 导出成一个不带历史的初始提交，两边的文件树哈希一致（`c17087d`）。新仓库**现在是私有的**，改成公开是维护者的事，改之前先定 R-6。旧仓库留作私有存档。维护者 2026-11-16 定：以后都在新仓库开发 |
 
 ## 二、公开前要清理的内容
 
 | 编号 | 事项 | 谁做 | 状态 |
 | --- | --- | --- | --- |
-| R-6 | 定哪些内部文档进公开仓库 | 维护者定，Claude 改 | 待定，**公开前必须定**：这些文件现在都在新仓库的初始提交里。要拿掉哪个，得在公开之前重做初始提交（仓库只有几个提交，重做很便宜），公开之后就留在历史里了。要看的有 `CLAUDE.md`（内部协作规则）、[`nightly-lab-reference.md`](nightly-lab-reference.md)（提到私有分支和 PR #1）、[`open-core-boundary.md`](open-core-boundary.md)（草案，含商业化注意事项）、[`homepage-copy-wireframe.md`](homepage-copy-wireframe.md)（主页文案草案） |
+| R-6 | 定哪些内部文档进公开仓库 | 维护者定，Claude 改 | 维护者 2026-11-16 选了按 Claude 的建议处理：删掉 `open-core-boundary.md`（商业化草案，律师还没看）和 `homepage-copy-wireframe.md`（主页文案草案），两份留在私有开发仓库；`nightly-lab-reference.md` 删掉提到私有分支的那句后保留；`CLAUDE.md` 删掉只对内部有用的几条后保留。文档里旧的 PR 编号加了说明。这些文件还在初始提交里，要连历史一起去掉，公开前得把提交压成一个 |
 | ~~R-7~~ | 去掉 2 个外人打不开的 claude.ai 链接 | — | 完成（2026-11-15）：`project-spec.md` 开头的导出说明、`rust/README.md` 开头的“整体方案”都改掉了。仓库里除了这份清单，没有别的 claude.ai 链接 |
 | ~~R-8~~ | 5 处仓库地址换成新仓库 | — | 完成（2026-11-16，在新仓库里改）：根 `README.md` 和 `m2-acceptance.md` 的 `git clone`、`homepage/data.js` 的 `github`、`rust/Cargo.toml` 的 `repository`、`rust/crates/ip-data/src/fetch.rs` 的 User-Agent。仓库改名的话要再改一次 |
 | R-9 | 把文档里过时的说法改对 | Claude 改；门槛的勾由维护者确认 | 说法已改（2026-11-15，见下面“过时的说法”）。还差：`project-spec.md` “开源发布门槛”里宏观验收、根目录 README 和 LICENSE 两个勾，等维护者确认后再打 |
 | R-10 | 给外部贡献者的文件：根目录 CONTRIBUTING、CODE_OF_CONDUCT、SECURITY（漏洞报告渠道）、DCO 说明、issue 模板 | Claude 起草，维护者定 | 草稿已写（2026-11-15）：根目录 `CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`（采用 Contributor Covenant 2.1）、`SECURITY.md`，`.github/ISSUE_TEMPLATE/` 两个模板。三个文件开头都标了草稿。待维护者定：行为准则的举报联系渠道；漏洞报告用 GitHub 私下报告还是专用邮箱、承诺几天内答复；是否采用 DCO、是否在 CI 里检查。现有的 `rust/CONTRIBUTING.md` 和 PR 模板写的还是内部流程，公开时要不要改也待定 |
 | R-11 | 主页：定“验收中”是否改回“已上线”（backlog C-6），换掉标了“示意”的占位数字 | 维护者 | 待定 |
-| R-12 | 请律师看 `open-core-boundary.md` 第 1、5 节 | 维护者 | 等人。这是那份文档自己写的要求，仓库里没有做过的记录 |
+| R-12 | 请律师看 `open-core-boundary.md` 第 1、5 节（这份文档按 R-6 的建议留在私有开发仓库） | 维护者 | 等人。这是那份文档自己写的要求，仓库里没有做过的记录 |
 | R-28 | R-9 之外还过时的几处 | Claude | 一部分完成（2026-11-15）：根 `README.md` 的质量评测一行（2026-11-14 有一遍只过 1 题，修好后 3 遍全过，backlog B-1、E-8）；`project-spec.md` “数据”一节（还写着 12 个工具、没有中国数据、Render 上的部署由验收那边验证，backlog C-2、E-2、A-1）；`rust/README.md` 的 MCP 远程接入一条（Render 和真实模型还没验，A-1）和示例配置的模型一条（价格 2026-11-09 查的，PR #54）；`m2-acceptance.md` 准备一节的价格日期（同上）。待做：`m2-spec.md` 开头的版本说明、M2-4 和 M2-6 的状态、第 6 节“没有在真实的 Codex 上跑过”一句（Codex 2026-11-14 已真实跑通，A-4）。它是活文档，改状态要升版本、加修订记录，单独做 |
 
 ### 过时的说法（R-9）
