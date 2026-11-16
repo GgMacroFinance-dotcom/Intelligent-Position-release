@@ -77,7 +77,7 @@
 | 编号 | 事项 | 谁做 | 状态 |
 | --- | --- | --- | --- |
 | R-13 | 定发布形式：只发源码，还是另发预编译二进制和镜像 | 维护者 | 待定。现在只有源码编译（第一次约 5 分钟）和 `docker compose` 自行构建 |
-| R-14 | 定首个版本号，打 tag，写发布说明 | 维护者定，Claude 写 | 待定。workspace 版本是 `0.0.1`，`macro-mcp` 是 `0.2.1`；没有 tag，没有 release |
+| R-14 | 定首个版本号，打 tag，写发布说明 | 维护者定，Claude 写 | 待定。workspace 版本是 `0.0.1`，`macro-mcp` 是 `0.2.2`；没有 tag，没有 release |
 | R-15 | 发二进制或镜像时：发布工作流、校验和、第三方许可声明 | Claude | 等 R-13。都没有；只发源码则不需要 |
 | ~~R-16~~ | 依赖许可证扫描加进 CI（`cargo-deny`） | — | 完成（2026-11-15）：允许清单在 `rust/deny.toml`，`licenses` 工作流在依赖或清单有变动时跑 `cargo deny check licenses`。本地用 cargo-deny 0.20.2 跑过：现有依赖全部通过；从清单里去掉一个在用的许可证，检查会失败 |
 | R-17 | 定 `macro-mcp` 发不发 npm | 维护者 | 待定。`package.json` 里 `"private": true` 还留着 |

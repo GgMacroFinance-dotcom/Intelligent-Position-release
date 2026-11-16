@@ -43,6 +43,15 @@ test('FRED goes through the WhichAPI service with the key, newest first, nulls k
   } finally { m.restore(); }
 });
 
+test('ICE BofA series ids are forwarded like any other FRED series', async () => {
+  const m = mockFetch();
+  try {
+    const r = await src.fredSeries({ series_id: 'bamlh0a0hym2', start_date: '2026-10-07' }, keyed);
+    assert.equal(new URL(m.calls[0].href).searchParams.get('series_id'), 'BAMLH0A0HYM2');
+    assert.equal(r.series_id, 'BAMLH0A0HYM2');
+  } finally { m.restore(); }
+});
+
 test('FRED units are forwarded only when asked for, and a service that ignores them is refused', async () => {
   const m = mockFetch();
   try {
@@ -61,12 +70,10 @@ test('FRED units are forwarded only when asked for, and a service that ignores t
   try { await rejectsWith(src.fredSeries({ series_id: 'CPIAUCSL', units: 'pc1' }, keyed), 'mapping_failed'); } finally { old.restore(); }
 });
 
-test('FRED refuses without a key, refuses ICE series and bad input, and never calls FRED directly', async () => {
+test('FRED refuses without a key and bad input, and never calls FRED directly', async () => {
   const m = mockFetch();
   try {
     await rejectsWith(src.fredSeries({ series_id: 'DGS10' }, { env: {} }), 'requires_configuration');
-    await rejectsWith(src.fredSeries({ series_id: 'BAMLC0A0CM' }, keyed), 'invalid_request');
-    await rejectsWith(src.fredSeries({ series_id: 'bamlh0a0hym2' }, keyed), 'invalid_request');
     await rejectsWith(src.fredSeries({ series_id: 'DGS10', start_date: '11/01/2026' }, keyed), 'invalid_request');
     await rejectsWith(src.fredSeries({ series_id: 'bad id' }, keyed), 'invalid_request');
     await rejectsWith(src.fredSeries({ series_id: 'DGS10' }, { env: { WHICHAPI_API_KEY: 'k', WHICHAPI_URL: 'not a url' } }), 'requires_configuration');

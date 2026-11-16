@@ -37,8 +37,6 @@ export async function referenceRates(p = {}, o = {}) {
 // This package does not call FRED itself. FRED's terms ask for its registered API instead of scraping, so FRED
 // series are read through the WhichAPI hosted service, which holds the FRED key. Users need a WhichAPI key.
 export const WHICHAPI_DEFAULT_URL = 'https://whichapi-macro.onrender.com';
-// ICE BofA series (ids starting with BAML) are not served by this package.
-const ICE_SERIES = /^BAML/;
 // FRED-side transformations the WhichAPI service passes to the FRED API (which-api PR #13, 2026-11-14).
 export const FRED_UNITS = {
   lin: 'levels (no transformation)', chg: 'change', ch1: 'change from a year ago', pch: 'percent change',
@@ -59,7 +57,6 @@ export function whichapiConfig(env = process.env) {
 export async function fredSeries(p, o = {}) {
   const id = String(p?.series_id || '').toUpperCase();
   if (!/^[A-Z0-9_]{1,40}$/.test(id)) throw invalid('series_id must be a FRED series id such as DGS10 or CPIAUCSL.');
-  if (ICE_SERIES.test(id)) throw invalid(`${id} is an ICE BofA series; this package does not serve it.`);
   const start = p.start_date ?? new Date((o.now ?? new Date()).getTime() - 365 * 86400000).toISOString().slice(0, 10);
   if (!DATE.test(start) || (p.end_date !== undefined && !DATE.test(p.end_date))) throw invalid('Dates must be YYYY-MM-DD.');
   const limit = int(p.limit, 'limit', 1, 5000, 100);

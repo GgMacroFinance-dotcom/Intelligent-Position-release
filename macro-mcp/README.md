@@ -13,7 +13,7 @@
 | 能力目录 `discover_apis`、`get_api`、`call_api` | 有，187 个免 key API | 没有。它是 WhichAPI 网关代码的打包产物，不随这个包公开 |
 | FRED | 托管服务自己取 | 不直接连 FRED，转发到 WhichAPI 托管服务，要 WhichAPI 的 key |
 | 中国数据 | 有（同一套统计局工具，which-api PR #14） | 国家统计局 4 个工具：按中文名搜指标、按目录浏览、按指标取数（月度、季度、年度），以及 CPI、PPI、PMI、M2 的快捷入口 |
-| ICE BofA 序列（`BAML` 开头，如投资级、高收益 OAS） | 快照里有三个面板 | 没有。`get_fred_series` 遇到 `BAML` 开头的 id 直接拒绝 |
+| ICE BofA 序列（`BAML` 开头，如投资级、高收益 OAS） | 快照里有三个面板 | 快照里没有这三个面板；序列用 `get_fred_series` 按 id 取，如 `BAMLH0A0HYM2`（高收益 OAS）、`BAMLC0A0CM`（投资级 OAS） |
 
 ## 快速开始
 
@@ -51,7 +51,7 @@ FRED 为什么要经 WhichAPI：FRED 的条款要求用注册 key 的官方 API�
 | `macro_snapshot` | 9 个面板：SOFR、EFFR（含目标区间）、广义美元指数、USD/CNY、10 年期美债（含整条曲线和 2s10s）、中国大陆和日本持有美债、债务上限余量、最新 232 公告。每个面板有最新值、观测日期、较前值变化、短序列；失败的面板单独报错 | 下列各来源 |
 | `list_macro_panels` | 面板清单、单位与口径说明（不联网） | — |
 | `get_reference_rates` | SOFR、TGCR、BGCR、EFFR、OBFR 日度，含分位数和成交量 | 纽约联储 |
-| `get_fred_series` | FRED 序列（如 `DGS10`、`T10Y2Y`、`CPIAUCSL`、`UNRATE`），缺失日为 null；不含 ICE BofA 序列。`units` 让 FRED 做变换，如 `pc1` 是同比 %，算通胀率用它 | FRED 官方 API，经 WhichAPI |
+| `get_fred_series` | FRED 序列（如 `DGS10`、`T10Y2Y`、`CPIAUCSL`、`UNRATE`），缺失日为 null；ICE BofA 的信用利差序列（`BAML` 开头）也从这里取。`units` 让 FRED 做变换，如 `pc1` 是同比 %，算通胀率用它 | FRED 官方 API，经 WhichAPI |
 | `get_treasury_curve` | 1 个月到 30 年期面值收益率曲线（2025 年起） | 美国财政部 |
 | `get_tic_holdings` | 某国持有美债、机构债、公司债、股票，月度，单位百万美元 | 财政部 TIC |
 | `get_debt_limit` | 法定上限、受限债务、余量（由每日国库报表推算） | Fiscal Data |

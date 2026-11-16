@@ -125,7 +125,6 @@ test('HTTP: MCP endpoint, REST endpoints and origin checks', async () => {
     assert.equal((await post(base, '/mcp', { jsonrpc: '2.0', id: 1, method: 'ping' }, { origin: 'http://localhost:5173' })).status, 200);
     assert.equal((await (await fetch(base + '/v1/panels')).json()).panels.length, PANEL_IDS.length);
     assert.equal((await fetch(base + '/v1/tools/get_fred_series?series_id=bad%20id')).status, 400);
-    assert.equal((await fetch(base + '/v1/tools/get_fred_series?series_id=BAMLC0A0CM')).status, 400);
     assert.equal((await fetch(base + '/v1/apis?query=fx')).status, 404);
     assert.equal((await fetch(base + '/v1/tools/nope')).status, 404);
     assert.equal((await fetch(base + '/health')).status, 200);
