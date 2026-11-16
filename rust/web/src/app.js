@@ -1444,4 +1444,11 @@ client.onLagged(() => {
 });
 window.addEventListener('hashchange', render);
 client.connect();
+
+// 注册 Service Worker，浏览器才会提供“安装应用”（backlog F-2）。只在 HTTPS 或本机地址上可用，失败不影响控制台。
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {
+    /* 忽略：比如用 http:// 连非本机地址 */
+  });
+}
 render();

@@ -45,6 +45,8 @@ pub fn router(app: Option<App>) -> Router {
         Some(app) => base
             .route("/", get(console::index))
             .route("/assets/{name}", get(console::asset))
+            .route("/manifest.webmanifest", get(console::manifest))
+            .route("/sw.js", get(console::service_worker))
             .merge(mcp::routes(&app))
             .merge(Router::new().route("/ws", get(ws::handler)).with_state(app)),
         None => base,

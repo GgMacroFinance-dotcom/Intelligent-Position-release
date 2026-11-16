@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 应用图标：一个协调节点连着三个岗位节点。图形都在中间 80% 的安全区内，可以当 maskable 图标用。 -->
+  <rect width="512" height="512" fill="#2f5bd3"/>
+  <g stroke="#ffffff" stroke-width="22" stroke-linecap="round" fill="none">
+    <path d="M256 196 L256 256 M256 256 L156 316 M256 256 L256 316 M256 256 L356 316"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="256" cy="166" r="46"/>
+    <circle cx="156" cy="346" r="36"/>
+    <circle cx="256" cy="346" r="36"/>
+    <circle cx="356" cy="346" r="36"/>
+  </g>
+</svg>
