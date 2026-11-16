@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.11（2026-11-15）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是真实验收（M2-5、M2-6，按 `docs/ip/m2-acceptance.md` 做），以及第 7 节的待定问题。
+> 当前版本：v0.12（2026-11-16）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -35,9 +35,9 @@
 | M2-1 | 通用渠道接口、四张表、投递器、假渠道、渠道测试 T1–T11（第 3 节） | Claude | M2-0 | 已实现（#24） |
 | M2-2 | Slack 渠道，用 Socket Mode（第 4 节） | Claude | M2-1 | 已实现（#25），用假 Slack 服务器验证 |
 | M2-3 | MCP 服务端：把组织工具开放给外部引擎（第 5 节） | Claude | — | 已实现（#21） |
-| M2-4 | 引擎接口和 Codex 引擎，只给运维测试岗位用（第 6 节） | Claude | M2-3 | 已实现（#22），用假 codex 验证 |
+| M2-4 | 引擎接口和 Codex 引擎，只给运维测试岗位用（第 6 节） | Claude | M2-3 | 已实现（#22），先用假 codex 验证；2026-11-14 用真实 Codex 跑通过一次示例项目（M2-6） |
 | M2-5 | 真实验收：在 Slack 线程里提需求，经协调员派给宏观研究员，交回报告，结论回到 Slack 线程（同时完成 M0、M1 的真实验收） | Claude | M2-2、维护者提供 Slack 工作区（按 `examples/slack/manifest.yaml` 建好应用）、两个 Slack 令牌和模型 API key | 验收手册和 `ip check` 已就绪（#26），等维护者提供账号和 key 后按 `docs/ip/m2-acceptance.md` 第 4 节做 |
-| M2-6 | 真实验收：用真实 Codex 跑 `examples/ops-demo`，经历跑测试失败 → 修复 → 复跑通过 → 写报告 → 交回 | Claude | M2-4、维护者提供 Codex API key | 验收手册已就绪（#26），按 `docs/ip/m2-acceptance.md` 第 5 节做 |
+| M2-6 | 真实验收：用真实 Codex 跑 `examples/ops-demo`，经历跑测试失败 → 修复 → 复跑通过 → 写报告 → 交回 | Claude | M2-4、维护者提供 Codex API key | 完成（2026-11-14，`codex-cli 0.169.0`，见 `docs/ip/acceptance-2026-11-14-codex.md`）。消息从控制台发，没经 Slack；还没在真实项目上跑过；续接会话时用量重复记账没修（backlog E-10） |
 
 M2-1 和 M2-3 改的文件基本不重叠，可以同时做。
 
@@ -615,7 +615,7 @@ engines:
 - 进程放在单独的进程组里，超时就整组终止，和 `ip-tools` 处理 shell 超时一样。
 - `turn_timeout_secs` 从排队等空位就开始算（`max_concurrency` 用满时要排队），否则本轮令牌可能在 Codex 还没开始时就过期。
 - 提示词在单独的任务里写进标准输入：提示词超过管道缓冲、而进程又不读时，不会卡在超时保护之外。
-- 参数顺序（`exec` 的选项放在 `resume` 之前）和 JSONL 格式，都是按 2026-11 的资料写的，没有在真实的 Codex 上跑过。用真实 Codex 验收（M2-6）时要核对，有出入就改这里和 `ip-engines/src/codex.rs`。
+- 参数顺序（`exec` 的选项放在 `resume` 之前）和 JSONL 格式，原来是按 2026-11 的资料写的。2026-11-14 用真实 Codex（`codex-cli 0.169.0`）验收（M2-6）时核对过：参数顺序可用，输出解析改了四处（给组织工具的 MCP 服务器加 `default_tools_approval_mode="approve"`；中途的顶层 `error` 事件只当警告，成败看 `turn.failed` 和 `turn.completed`；空的 `"error": null` 不算出错；`cache_write_input_tokens` 计入用量）。见 `docs/ip/acceptance-2026-11-14-codex.md`。只在这一个版本上跑过。
 
 ### D-23 引擎会话表 · 已实现（#22）
 
@@ -720,3 +720,4 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 | 2026-11-10 | v0.9 | 分工改为：Claude 写代码、改规格、推 PR，维护者审查、合并并拍板待定问题。所有负责人都改为 Claude；M2-5、M2-6 的依赖写明需要维护者提供的账号和 key |
 | 2026-11-10 | v0.10 | 为真实验收做准备（#26）：新增 `ip check` 自检命令和验收手册 `docs/ip/m2-acceptance.md`，M2-5、M2-6 按手册做 |
 | 2026-11-15 | v0.11 | 新增 D-28（提议，#69）：确认前先存下信封，暂时失败重试，重启接着处理；去重改到处理成功之后，同一渠道串行处理。D-02 的 `Hub` 加 `stash`、`stashed`、`settle`；D-03 原来“去重在处理之前写入”的说明作废；D-08 加 `channel_envelopes` 表；D-10 加 T12–T14 |
+| 2026-11-16 | v0.12 | 只改状态，接口没变：M2-6 完成（真实 Codex 2026-11-14 跑通 `examples/ops-demo`），M2-4 和 D-22 里“没有在真实的 Codex 上跑过”的说法按验收记录改了。PR 编号指私有开发仓库里的 PR |
