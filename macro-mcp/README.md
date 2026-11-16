@@ -13,7 +13,7 @@
 | 能力目录 `discover_apis`、`get_api`、`call_api` | 有，187 个免 key API | 没有。它是 WhichAPI 网关代码的打包产物，不随这个包公开 |
 | FRED | 托管服务自己取 | 不直接连 FRED，转发到 WhichAPI 托管服务，要 WhichAPI 的 key |
 | 中国数据 | 有（同一套统计局工具，which-api PR #14） | 国家统计局 4 个工具：按中文名搜指标、按目录浏览、按指标取数（月度、季度、年度），以及 CPI、PPI、PMI、M2 的快捷入口 |
-| ICE BofA 序列（`BAML` 开头，如投资级、高收益 OAS） | 快照里有三个面板 | 没有。版权属 ICE Data Indices，使用要 ICE 书面许可；`get_fred_series` 遇到 `BAML` 开头的 id 直接拒绝 |
+| ICE BofA 序列（`BAML` 开头，如投资级、高收益 OAS） | 快照里有三个面板 | 没有。`get_fred_series` 遇到 `BAML` 开头的 id 直接拒绝 |
 
 ## 快速开始
 

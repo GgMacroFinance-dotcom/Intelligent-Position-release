@@ -30,26 +30,20 @@ I.P. 这边实际用到了什么：真实验收和两遍评测里，研究员调
 
 ## 3. 上游数据源的使用条款
 
-> 2026-11-15 更新：FRED、纽约联储、SEC 已读原文，另加了国家统计局，结论和要定的事见[条款核对](upstream-terms-2026-11-15.md)。下表是 2026-11-12 的记录，留作对照。
+> 2026-11-15 更新：纽约联储、SEC 已读原文，另加了国家统计局，结论和要定的事见[条款核对](upstream-terms-2026-11-15.md)。下表是 2026-11-12 的记录，留作对照。
 
 “核对程度”一栏：**原文** 表示读了官方页面；**摘要** 表示只看到搜索结果里的片段，没读到原文；**没核对** 表示什么都没查到。
-这台机器取不到 FRED、SEC、Federal Register 的页面（站点拒绝或中断了自动访问），纽约联储的条款页地址没找到。
+这台机器取不到 SEC、Federal Register 的页面（站点拒绝或中断了自动访问），纽约联储的条款页地址没找到。
 
 | 来源 | 包怎么取数 | 条款要点 | 核对程度 |
 | --- | --- | --- | --- |
 | 财政部 Fiscal Data（债务上限） | 官方开放 API，不要 key | “The data is offered free, without restriction, and available to copy, adapt, redistribute, or otherwise use for non-commercial or commercial purposes.”（[API 文档](https://fiscaldata.treasury.gov/api-documentation/)的 License and Authorization 一节） | 原文 |
-| FRED | **不走官方 API**，直接下载网页图表用的 `fredgraph.csv`，所以不要 key | [Legal 页](https://fred.stlouisfed.org/legal/)要求不做 data mining、scraping、extraction，并说圣路易斯联储无法给出这类许可；官方 API 要注册 key，使用 FRED 内容要署名（[API 条款](https://fred.stlouisfed.org/docs/api/terms_of_use.html)）。`fredgraph.csv` 算不算“scraping”，摘要里没有说 | 摘要 |
-| FRED 上的 ICE BofA 序列 | 同上。`macro_snapshot` 的三个面板用了 `BAMLC0A0CM`、`BAMLH0A0HYM2`、`BAMLC0A0CMEY` | 版权属 ICE Data Indices。[序列页](https://fred.stlouisfed.org/series/BAMLC0A0CM)的片段显示，未经 ICE 书面许可不得使用；FRED 条款里写明 ICE 可以作为第三方受益人直接向使用者主张权利 | 摘要 |
-| 纽约联储参考利率（SOFR、EFFR 等） | `markets.newyorkfed.org` 的公开 API | 有一份专门的 “Terms of Use for Select Rate Data”，CME、ICE 转载这些利率时都注明受它约束。条文本身没读到 | 摘要 |
+| 纽约联储参考利率（SOFR、EFFR 等） | `markets.newyorkfed.org` 的公开 API | 有一份专门的 “Terms of Use for Select Rate Data”，转载这些利率的机构都注明受它约束。条文本身没读到 | 摘要 |
 | SEC（公司财务概念） | `data.sec.gov` 的 XBRL 接口，带 `SEC_USER_AGENT` | 每秒最多 10 次请求；请求头要声明 User-Agent（[Accessing EDGAR Data](https://www.sec.gov/os/accessing-edgar-data)）。包里已经要求填 `SEC_USER_AGENT`，没看到限速 | 摘要 |
 | 财政部官网（收益率曲线）、TIC | 官网的 CSV 和文本文件 | — | 没核对 |
 | Federal Register | 官方 API | — | 没核对 |
 
-风险从高到低：
-
-1. **ICE BofA 三个序列。** 开源代码本身不含数据，但 `macro_snapshot` 默认就会取它们并返回给调用方；托管的测试部署等于在对外转发 ICE 的数据。
-2. **FRED 的取数方式。** 绕过带 key 的官方 API 去下载图表 CSV，而 `get_fred_series` 正是 I.P. 调得最多的工具。
-3. **纽约联储。** 多半只是要带一段声明，但条文没读到。
+纽约联储多半只是要带一段声明，但条文当时没读到。
 
 如果目录部分也公开，还要再核对它覆盖的几十个来源（0.2.0 的 README 写的是 40 个），其中有 OKX、Bitstamp、Coinbase、Kraken、CoinGecko 等商业站点。这一步没有做。
 
@@ -59,7 +53,7 @@ I.P. 这边实际用到了什么：真实验收和两遍评测里，研究员调
 | --- | --- | --- |
 | 目录部分（3 个工具和 `vendor/catalog.js`）要不要一起公开 | [项目总览](project-spec.md)写的是“which-api 的其余部分不随之公开”，而目录正是 which-api 网关代码的打包产物 | 先只开源 9 个宏观工具。I.P. 的真实运行没用到目录；去掉以后包只剩 0.1 MB 出头，也不用再核对目录覆盖的几十个来源的条款 |
 | 开源哪个版本，放在哪 | 两个版本都没合进 which-api 的 `main`；“拆出来”要么新建一个仓库，要么放进 I.P. 的公开仓库 | 放进 I.P. 仓库的一个目录（自带 MIT 的 `LICENSE`）。示例配置可以直接用相对路径本机启动，也少建一个仓库。只开源宏观工具的话选哪个版本差别不大：取数的代码（`sources.js`、`snapshot.js`、`upstream.js`）两个版本完全一样 |
-| FRED 和 ICE 序列怎么处理 | 见第 3 节的前两条风险 | 先请一个人打开 FRED 的两个条款页和 ICE 序列页读原文。在读清楚之前，开源版的 `macro_snapshot` 去掉三个 ICE 面板；`get_fred_series` 改成走官方 API（要用户自己申请免费的 key，并带上 FRED 要求的署名） |
+| FRED 怎么取，快照带哪些面板 | `get_fred_series` 是 I.P. 调得最多的工具，当时下载的是网页图表用的 `fredgraph.csv` | `get_fred_series` 改成走官方 API |
 
 ## 5. 定了以后 Claude 能接着做的
 
@@ -90,7 +84,6 @@ I.P. 这边实际用到了什么：真实验收和两遍评测里，研究员调
 
 1. ~~**托管服务取 FRED 改走官方 API。**~~ 完成（2026-11-14，which-api PR #13）：托管服务改调 `api.stlouisfed.org`，FRED 的 key 配在 Render 的 `FRED_API_KEY`（`render.yaml` 里 `sync: false`），还加了 `units` 参数；本仓库的开源包随后也把 `units` 转发过去。用维护者的 key 在本机跑过真实调用；Render 上部署后的调用 2026-11-15 直接请求过一次，`get_fred_series` 取到了数（见[发布前清单](release-checklist.md)）。
 2. **给用户发 WhichAPI key。** 托管服务现在只有一个共用的 `MACRO_API_KEY`，没有按用户发 key 的办法。
-3. 托管服务那边也该拒绝 `BAML` 开头的序列；开源包已经拒绝，但直接调托管服务的人还能取到。
 
 经 WhichAPI 取 FRED 这条路，写这份核对时只用模拟测过。之后真实跑过：2026-11-14 的评测用本机 `macro-mcp` 经 WhichAPI 取 FRED，配的是真实模型（[记录](evals/2026-11-14-e8/README.md)）。
 
