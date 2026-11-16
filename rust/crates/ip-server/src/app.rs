@@ -35,6 +35,8 @@ pub struct App {
     pub(crate) schedules: Arc<crate::schedule::Schedules>,
     /// 有工作目录的员工和他们的工作目录，控制台从这里读报告（backlog F-4）。
     pub(crate) workspaces: Arc<std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>>,
+    /// 编好号、留着备补发的事件（`docs/ip/m2-spec.md` D-29）。转发任务在第一个 `/ws` 连接进来时启动。
+    pub(crate) events: Arc<crate::events::EventLog>,
 }
 
 impl App {
@@ -56,6 +58,7 @@ impl App {
             channels: Arc::default(),
             schedules: Arc::default(),
             workspaces: Arc::default(),
+            events: Arc::default(),
         }
     }
 

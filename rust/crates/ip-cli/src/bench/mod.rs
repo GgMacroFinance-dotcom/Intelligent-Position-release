@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use clap::{Args, ValueEnum};
 
 mod agents;
+mod events;
 mod store;
 use serde::Serialize;
 
@@ -42,6 +43,8 @@ enum Which {
     Store,
     /// 500 个常驻数字员工的内存和并发处理延迟。
     Agents,
+    /// `/ws` 事件编号转发的吞吐和重连补发的耗时。
+    Events,
 }
 
 #[derive(Serialize)]
@@ -62,6 +65,7 @@ pub fn run(args: BenchArgs) -> anyhow::Result<()> {
         Which::Startup => startup(&args),
         Which::Store => store::run(args.check),
         Which::Agents => agents::run(args.check),
+        Which::Events => events::run(args.check),
     }
 }
 

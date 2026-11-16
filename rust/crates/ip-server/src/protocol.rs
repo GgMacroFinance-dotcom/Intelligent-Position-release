@@ -314,6 +314,18 @@ pub struct SendResult {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
 pub enum ServerFrame {
+    /// 连上后的第一帧（`docs/ip/m2-spec.md` D-29）。客户端收到它才算连上。
+    Hello {
+        /// 协议版本号，只有不兼容的改动才加一（服务端 `events.rs` 的 `PROTOCOL_VERSION`，控制台 `client.js` 的 `PROTOCOL`）。
+        protocol: u32,
+        /// 本次启动的标识。序号每次启动重新编号，重连补发时要和它一起用。
+        epoch: String,
+        /// 从哪个序号接着推：补发时是客户端给的 `since`，否则是当前最新的序号。
+        #[ts(type = "number")]
+        seq: u64,
+        /// 是否补发了断开期间的事件。为 false 时客户端要重新拉列表。
+        resumed: bool,
+    },
     /// 对某个请求的回复。`ok` 为 true 时看 `data`，否则看 `error`。
     Reply {
         id: Option<Value>,
@@ -325,9 +337,14 @@ pub enum ServerFrame {
         #[ts(optional)]
         error: Option<String>,
     },
-    /// 运行时事件，推给所有连接。装箱是因为事件远比另外两种帧大。
-    Event { event: Box<RuntimeEvent> },
-    /// 本连接处理太慢，跳过了 `skipped` 个事件；客户端应重新拉取历史。
+    /// 运行时事件，推给所有连接。装箱是因为事件远比其他帧大。
+    Event {
+        /// 事件序号，从 1 起、连续，每次启动重新编号。
+        #[ts(type = "number")]
+        seq: u64,
+        event: Box<RuntimeEvent>,
+    },
+    /// 本连接跳过了 `skipped` 个事件，留着的事件里也补不上；客户端应重新拉取。不知道跳过几个时为 0。
     Lagged {
         #[ts(type = "number")]
         skipped: u64,

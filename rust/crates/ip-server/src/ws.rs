@@ -2,7 +2,8 @@
 //!
 //! 客户端发请求：`{"id": 1, "type": "send", "agent_id": "macro-1", "text": "..."}`，
 //! 服务回 `{"type": "reply", "id": 1, "ok": true, "data": ...}`。
-//! 运行时事件（流式文字、新消息、一轮结束）以 `{"type": "event", "event": {...}}` 推送给所有连接。
+//! 运行时事件（流式文字、新消息、一轮结束）以 `{"type": "event", "seq": 1, "event": {...}}` 推送给所有连接。
+//! 连上后服务先发 `hello`；重连时带 `?since=<序号>&epoch=<epoch>` 补发断开期间的事件（`docs/ip/m2-spec.md` D-29）。
 
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -14,6 +15,7 @@ use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::App;
+use crate::events::{EventLog, Stamped};
 use crate::memory_admin;
 use crate::protocol::{Envelope, Request, ServerFrame};
 use crate::work;
@@ -25,6 +27,16 @@ const MAX_LIMIT: usize = 500;
 #[derive(Deserialize)]
 pub struct AuthQuery {
     token: Option<String>,
+    /// 重连补发：上次收到的最后一个事件序号（`docs/ip/m2-spec.md` D-29）。
+    since: Option<u64>,
+    /// 重连补发：上次连接 `hello` 里的 `epoch`。
+    epoch: Option<String>,
+}
+
+/// 客户端要求从哪里接着收事件。
+struct Resume {
+    since: u64,
+    epoch: String,
 }
 
 pub async fn handler(
@@ -52,13 +64,39 @@ pub async fn handler(
             return (StatusCode::UNAUTHORIZED, "需要访问令牌").into_response();
         }
     }
-    upgrade.on_upgrade(move |socket| session(app, socket))
+    let resume = match (q.since, q.epoch) {
+        (Some(since), Some(epoch)) => Some(Resume { since, epoch }),
+        _ => None,
+    };
+    upgrade.on_upgrade(move |socket| session(app, socket, resume))
 }
 
-async fn session(app: App, mut socket: WebSocket) {
-    let mut events = app.runtime.subscribe();
+async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>) {
+    let log = app.events.clone();
+    log.start_pump(app.runtime.subscribe());
+    // 先收听再取留着的事件，两步之间来的事件不会漏；重复的按序号跳过。
+    let mut events = log.subscribe();
     let mut closing = app.closing.subscribe();
     if *closing.borrow() {
+        return;
+    }
+    let replay = resume
+        .filter(|r| r.epoch == log.epoch())
+        .and_then(|r| log.since(r.since).ok().map(|frames| (r.since, frames)));
+    let resumed = replay.is_some();
+    let (start, frames) = replay.unwrap_or_else(|| (log.latest(), Vec::new()));
+    let hello = ServerFrame::Hello {
+        protocol: crate::events::PROTOCOL_VERSION,
+        epoch: log.epoch().to_string(),
+        seq: start,
+        resumed,
+    };
+    if socket.send(WsMessage::Text(hello.to_json().into())).await.is_err() {
+        return;
+    }
+    // 已经发给这个连接的最后一个序号。
+    let mut last = start;
+    if !send_frames(&mut socket, &frames, &mut last).await {
         return;
     }
     let (out_tx, mut out_rx) = mpsc::channel::<String>(256);
@@ -91,15 +129,43 @@ async fn session(app: App, mut socket: WebSocket) {
                 }
             }
             event = events.recv() => {
-                let frame = match event {
-                    Ok(event) => ServerFrame::Event { event: Box::new(event) },
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => ServerFrame::Lagged { skipped },
+                let sent = match event {
+                    Ok(stamped) if stamped.seq <= last => true,
+                    Ok(stamped) if stamped.seq == last + 1 => send_frames(&mut socket, &[stamped], &mut last).await,
+                    // 序号不连续（转发任务丢过事件）或这个连接跟不上：先从留着的事件里补。
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => catch_up(&mut socket, &log, &mut last).await,
                     Err(broadcast::error::RecvError::Closed) => break,
                 };
-                if socket.send(WsMessage::Text(frame.to_json().into())).await.is_err() {
+                if !sent {
                     break;
                 }
             }
+        }
+    }
+}
+
+/// 按顺序发出序号比 `last` 新的帧，更新 `last`。连接断了返回 false。
+async fn send_frames(socket: &mut WebSocket, frames: &[Stamped], last: &mut u64) -> bool {
+    for stamped in frames {
+        if stamped.seq <= *last {
+            continue;
+        }
+        if socket.send(WsMessage::Text(stamped.frame.clone())).await.is_err() {
+            return false;
+        }
+        *last = stamped.seq;
+    }
+    true
+}
+
+/// 从留着的事件里补上 `last` 之后的；补不上就发 `lagged`，从最新的序号接着推。连接断了返回 false。
+async fn catch_up(socket: &mut WebSocket, log: &EventLog, last: &mut u64) -> bool {
+    match log.since(*last) {
+        Ok(frames) => send_frames(socket, &frames, last).await,
+        Err(gap) => {
+            *last = log.latest();
+            let frame = ServerFrame::Lagged { skipped: gap.skipped };
+            socket.send(WsMessage::Text(frame.to_json().into())).await.is_ok()
         }
     }
 }

@@ -9,6 +9,7 @@ pub mod channels;
 pub mod check;
 pub mod config;
 mod console;
+pub mod events;
 mod mcp;
 mod memory_admin;
 mod origin;

@@ -72,3 +72,5 @@ jobs:
         run: ./target/release/ip bench store --check | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Concurrent agents targets
         run: ./target/release/ip bench agents --check | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Event fan-out and replay targets
+        run: ./target/release/ip bench events --check | tee -a "$GITHUB_STEP_SUMMARY"

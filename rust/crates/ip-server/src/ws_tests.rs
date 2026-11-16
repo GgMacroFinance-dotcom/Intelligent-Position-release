@@ -202,6 +202,122 @@ async fn chat_roundtrip_over_websocket() {
     assert_eq!(hits["data"].as_array().unwrap().len(), 1, "{hits}");
 }
 
+/// 收事件直到一轮结束，返回途中所有事件帧。
+async fn until_turn_finished(ws: &mut Ws, mut frames: Vec<Value>) -> Vec<Value> {
+    while !frames.iter().any(|e| e["event"]["type"] == "turn_finished") {
+        frames.push(next_json(ws).await);
+    }
+    frames
+}
+
+/// 断线重连补发（`docs/ip/m2-spec.md` D-29）。
+#[tokio::test]
+async fn resumes_events_after_reconnect() {
+    let s = start(None).await;
+    let mut ws = connect(s.addr, "").await.unwrap();
+    let hello = next_json(&mut ws).await;
+    assert_eq!(hello["type"], "hello");
+    assert_eq!(hello["protocol"], crate::events::PROTOCOL_VERSION);
+    assert_eq!(hello["resumed"], false);
+    assert_eq!(hello["seq"], 0);
+    let epoch = hello["epoch"].as_str().unwrap().to_string();
+
+    let (_, events) = request(
+        &mut ws,
+        1,
+        json!({"type": "send", "agent_id": "macro-1", "text": "第一轮"}),
+    )
+    .await;
+    let events = until_turn_finished(&mut ws, events).await;
+    let seqs: Vec<u64> = events.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
+    assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>(), "序号从 1 起、连续");
+    let seen = *seqs.last().unwrap();
+    drop(ws);
+
+    // 断开期间另一个连接发了一轮
+    let mut other = connect(s.addr, "").await.unwrap();
+    assert_eq!(next_json(&mut other).await["seq"], seen);
+    let (_, events) = request(
+        &mut other,
+        1,
+        json!({"type": "send", "agent_id": "macro-1", "text": "第二轮"}),
+    )
+    .await;
+    let missed: Vec<Value> = until_turn_finished(&mut other, events).await;
+    let latest = missed.last().unwrap()["seq"].as_u64().unwrap();
+
+    // 带上次的序号重连：先 hello，再按顺序补发断开期间的事件
+    let mut back = connect(s.addr, &format!("?since={seen}&epoch={epoch}")).await.unwrap();
+    let hello = next_json(&mut back).await;
+    assert_eq!(
+        (hello["resumed"].clone(), hello["seq"].clone()),
+        (json!(true), json!(seen))
+    );
+    let mut replayed = Vec::new();
+    for _ in seen..latest {
+        replayed.push(next_json(&mut back).await);
+    }
+    assert_eq!(replayed, missed);
+    // 补完之后接着收请求的回复，没有多余的帧
+    let (r, extra) = request(&mut back, 2, json!({"type": "list_roles"})).await;
+    assert_eq!(r["ok"], true);
+    assert!(extra.is_empty(), "{extra:?}");
+
+    // epoch 不对（服务重启过）或序号比服务端还新：不补发，客户端重新拉
+    for query in [
+        format!("?since={seen}&epoch=old"),
+        format!("?since={}&epoch={epoch}", latest + 5),
+    ] {
+        let mut ws = connect(s.addr, &query).await.unwrap();
+        let hello = next_json(&mut ws).await;
+        assert_eq!(hello["resumed"], false, "{query}");
+        assert_eq!(hello["seq"], latest);
+        let (_, extra) = request(&mut ws, 1, json!({"type": "list_roles"})).await;
+        assert!(extra.is_empty(), "{query}: {extra:?}");
+    }
+}
+
+/// 连接跟不上广播时，从留着的事件里补上；留着的也补不上才发 `lagged`。
+#[tokio::test]
+async fn slow_connections_catch_up_from_kept_events() {
+    let s = start(None).await;
+    // 广播通道只积压 1 帧，事件一多这个连接必然跟不上。
+    let mut app = s.app.clone();
+    app.events = Arc::new(crate::events::EventLog::new(4096, usize::MAX, 1));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let r = router(Some(app.clone()));
+    tokio::spawn(async move { axum::serve(listener, r).await.unwrap() });
+    let delta = |n: u32| ip_runtime::RuntimeEvent::Delta {
+        agent_id: "macro-1".into(),
+        thread_id: "t".into(),
+        text: n.to_string(),
+    };
+
+    let mut ws = connect(addr, "").await.unwrap();
+    assert_eq!(next_json(&mut ws).await["type"], "hello");
+    // 测试跑在单线程运行时上，这个循环里连接的任务插不进来，广播通道一定会溢出。
+    for n in 1..=2000 {
+        app.events.push(delta(n));
+    }
+    for seq in 1..=2000u64 {
+        let frame = next_json(&mut ws).await;
+        assert_eq!(
+            (frame["type"].clone(), frame["seq"].clone()),
+            (json!("event"), json!(seq))
+        );
+    }
+
+    // 一下子来 5000 个，超过留着的 4096 个：补不上，发一次 lagged，然后接着推新的。
+    for n in 1..=5000 {
+        app.events.push(delta(n));
+    }
+    let lagged = next_json(&mut ws).await;
+    assert_eq!(lagged, json!({"type": "lagged", "skipped": 7000 - 4096 - 2000}));
+    app.events.push(delta(0));
+    assert_eq!(next_json(&mut ws).await["seq"], 7001);
+}
+
 #[tokio::test]
 async fn bad_requests_get_error_replies() {
     let s = start(None).await;

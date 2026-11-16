@@ -148,7 +148,9 @@ function renderHeader(current) {
           );
         }),
       ),
-      h('div.status.' + client.status, { title: '与服务的连接' }, { open: '已连接', connecting: '连接中', closed: '已断开' }[client.status]),
+      client.outdated
+        ? h('button.ghost.danger', { onclick: () => location.reload(), title: '服务端的协议版本和这个页面不同' }, '服务已更新，点此刷新')
+        : h('div.status.' + client.status, { title: '与服务的连接' }, { open: '已连接', connecting: '连接中', closed: '已断开' }[client.status]),
       h('button.ghost', { onclick: askToken, title: '设置访问令牌' }, '令牌'),
     )
   );
@@ -1663,13 +1665,14 @@ async function loadAll() {
 }
 
 client.onStatus((s) => {
-  if (s === 'open') loadAll().catch((e) => console.error(e));
+  // 重连时服务端补发了断开期间的事件，界面已经跟上，不用整个重新拉（backlog F-6）。
+  if (s === 'open' && !client.resumed) loadAll().catch((e) => console.error(e));
   render();
 });
 client.onEvent(onEvent);
+// 补不上断开期间或跟不上时漏掉的事件：整个重新拉。
 client.onLagged(() => {
-  loadThread();
-  refreshThreadsSoon();
+  loadAll().catch((e) => console.error(e));
 });
 window.addEventListener('hashchange', render);
 // 地址栏没指定页面时，窗口跨过窄屏断点要换默认页。

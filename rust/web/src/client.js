@@ -1,10 +1,14 @@
 // @ts-check
 // WebSocket 客户端：请求/回复按 id 配对，事件广播给订阅者，断线后自动重连。
+// 重连时带上次收到的事件序号，服务端补发断开期间的事件（docs/ip/m2-spec.md D-29）。
 
 /** @typedef {import('./types/ServerFrame').ServerFrame} ServerFrame */
 /** @typedef {import('./types/Request').Request} Request */
 /** @typedef {import('./types/RuntimeEvent').RuntimeEvent} RuntimeEvent */
 /** @typedef {'connecting' | 'open' | 'closed'} Status */
+
+/** 这份控制台代码说的 `/ws` 协议版本，和服务端 `PROTOCOL_VERSION` 对应。 */
+export const PROTOCOL = 1;
 
 export class Client {
   /** @param {string} url */
@@ -24,15 +28,27 @@ export class Client {
     this.retryMs = 500;
     /** @type {Status} */
     this.status = 'connecting';
+    /** 服务端本次启动的标识；连上过才有。 @type {string | null} */
+    this.epoch = null;
+    /** 收到的最后一个事件序号。 */
+    this.seq = 0;
+    /** 这次连上时服务端是否补发了断开期间的事件。为 false 时要重新拉列表。 */
+    this.resumed = false;
+    /** 服务端说的协议版本；和 PROTOCOL 不同时页面该刷新了。 @type {number | null} */
+    this.serverProtocol = null;
   }
 
   connect() {
     this.setStatus('connecting');
-    const ws = new WebSocket(this.url);
+    let url = this.url;
+    if (this.epoch !== null) {
+      url += `${url.includes('?') ? '&' : '?'}since=${this.seq}&epoch=${encodeURIComponent(this.epoch)}`;
+    }
+    const ws = new WebSocket(url);
     this.ws = ws;
+    // 收到服务端的 hello 才算连上。
     ws.onopen = () => {
       this.retryMs = 500;
-      this.setStatus('open');
     };
     ws.onmessage = (msg) => this.onFrame(/** @type {ServerFrame} */ (JSON.parse(msg.data)));
     ws.onclose = () => {
@@ -50,6 +66,11 @@ export class Client {
     for (const fn of this.statusListeners) fn(s);
   }
 
+  /** 服务端的协议版本和这份代码不同（比如服务升级了，页面还是旧的）。 */
+  get outdated() {
+    return this.serverProtocol !== null && this.serverProtocol !== PROTOCOL;
+  }
+
   /** @param {ServerFrame} frame */
   onFrame(frame) {
     switch (frame.type) {
@@ -61,7 +82,15 @@ export class Client {
         else p.reject(new Error(frame.error ?? '请求失败'));
         return;
       }
+      case 'hello':
+        this.epoch = frame.epoch;
+        this.seq = frame.seq;
+        this.resumed = frame.resumed;
+        this.serverProtocol = frame.protocol;
+        this.setStatus('open');
+        return;
       case 'event':
+        this.seq = frame.seq;
         for (const fn of this.eventListeners) fn(frame.event);
         return;
       case 'lagged':
