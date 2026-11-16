@@ -29,6 +29,11 @@ const ASSETS: &[(&str, &[u8], &str)] = &[
         "text/javascript; charset=utf-8",
     ),
     (
+        "markdown.js",
+        include_bytes!("../../../web/src/markdown.js"),
+        "text/javascript; charset=utf-8",
+    ),
+    (
         "style.css",
         include_bytes!("../../../web/src/style.css"),
         "text/css; charset=utf-8",

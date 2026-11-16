@@ -12,13 +12,14 @@
 const sw = self;
 
 /** 改了缓存的文件列表时把版本号加一，旧缓存会在 activate 时删掉。 */
-const CACHE = 'ip-console-v1';
+const CACHE = 'ip-console-v2';
 
 const SHELL = [
   '/',
   '/assets/app.js',
   '/assets/client.js',
   '/assets/dom.js',
+  '/assets/markdown.js',
   '/assets/style.css',
   '/assets/icon.svg',
   '/assets/icon-192.png',

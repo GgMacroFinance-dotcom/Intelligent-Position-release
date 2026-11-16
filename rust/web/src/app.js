@@ -3,6 +3,7 @@
 
 import { Client } from './client.js';
 import { h, formatTime } from './dom.js';
+import { renderMarkdown } from './markdown.js';
 
 /** @typedef {import('./types/Role').Role} Role */
 /** @typedef {import('./types/Agent').Agent} Agent */
@@ -418,7 +419,7 @@ function taskTable(tasks) {
               `由 ${t.created_by.kind === 'human' ? t.created_by.name : t.created_by.kind === 'agent' ? agentName(t.created_by.agent_id) : '系统'} 创建`,
               ...threadLinks(t),
             ),
-            t.result ? h('div.task-result', null, `结果：${t.result}`) : null,
+            t.result ? h('div.task-result', null, h('span.muted', null, '结果'), renderMarkdown(t.result)) : null,
           ),
           h('td', null, t.assignee ? agentName(t.assignee) : t.role ?? '—'),
           h('td', null, t.due_ms ? formatTime(t.due_ms) : '—'),
@@ -1171,7 +1172,7 @@ function messageNodes() {
   for (const m of state.messages) msgs.push(renderMessage(m));
   for (const [id, text] of state.drafts) {
     if (state.threadId && state.threadAgent.get(state.threadId) !== id) continue;
-    msgs.push(h('div.msg.agent.draft', null, h('div.who', null, agentName(id), h('span.muted', null, ' 正在输入…')), h('div.text', null, text)));
+    msgs.push(h('div.msg.agent.draft', null, h('div.who', null, agentName(id), h('span.muted', null, ' 正在输入…')), h('div.text.md-text', null, renderMarkdown(text))));
   }
   const note = state.threadId ? state.turnNote.get(state.threadId) : undefined;
   if (note) msgs.push(h('div.turn-note', null, note));
@@ -1255,15 +1256,37 @@ function currentAgent() {
   return state.agentForNew || state.agents[0]?.id || '';
 }
 
+/**
+ * 渲染过的消息按 id 缓存：消息写进存储后不再变，流式输出时每来一段文字就重绘整个消息区，
+ * 不缓存的话每次都要把整段对话的 Markdown 重新解析一遍。
+ * @type {Map<string, HTMLElement>}
+ */
+const messageCache = new Map();
+
 /** @param {Message} m */
 function renderMessage(m) {
   const who =
     m.author.kind === 'human' ? m.author.name : m.author.kind === 'agent' ? agentName(m.author.agent_id) : '系统';
+  // 员工名单晚于消息加载时显示名会变，所以名字也算进缓存的键。
+  const key = `${m.id}\u0000${who}`;
+  const hit = messageCache.get(key);
+  if (hit) return hit;
+  if (messageCache.size > 2000) messageCache.clear();
+  const el = buildMessage(m, who);
+  messageCache.set(key, el);
+  return el;
+}
+
+/** @param {Message} m @param {string} who */
+function buildMessage(m, who) {
   const cls = m.author.kind === 'human' ? '.human' : m.author.kind === 'agent' ? '.agent' : '.system';
   const head = h('div.who', null, who, h('span.muted', null, ` ${formatTime(m.at_ms)}`));
   switch (m.body.kind) {
     case 'text':
-      return h('div.msg' + cls, null, head, h('div.text', null, m.body.text));
+      // 人写的消息照原样显示；员工和系统的消息按 Markdown 渲染（backlog F-3）。
+      return m.author.kind === 'human'
+        ? h('div.msg' + cls, null, head, h('div.text', null, m.body.text))
+        : h('div.msg' + cls, null, head, h('div.text.md-text', null, renderMarkdown(m.body.text)));
     case 'tool_call':
       return h(
         'details.tool',
