@@ -1,0 +1,19 @@
+# 宏观研报冒烟评测：两个固定问题，只用来发现明显退步，不足以比较两个模型谁更好（见 docs/ip/project-spec.md）。
+# 运行：./target/release/ip eval --config ip.yaml --set evals/macro-smoke.yaml
+# 第二题要用 get_fred_series 取 CPI，FRED 经 WhichAPI 取：先设 WHICHAPI_API_KEY，并取消 ip.yaml 里 mcp_servers.macro.env_from 的注释。
+# 检查项都用程序判定，规则见 crates/ip-cli/src/eval/checks.rs。
+cases:
+  # 有数据的问题：数字要全部来自工具结果、带观测日期，报告结构齐全。
+  - id: us-10y-week
+    agent: macro-1
+    question: 美国 10 年期国债收益率最近一周怎么走？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series, mcp__macro__get_treasury_curve, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # 一半取不到的问题：2030 年的数据不存在，必须写“未取得”，不能估算。
+  - id: us-cpi-missing
+    agent: macro-1
+    question: 美国最新一期 CPI（CPIAUCSL）指数是多少？2030 年 1 月的 CPI 指数又是多少？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+    must_contain: [未取得]

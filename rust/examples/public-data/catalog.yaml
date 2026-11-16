@@ -1,0 +1,16 @@
+# 公开数据目录：`ip data pull --config ip.yaml` 按这里的 `fetch` 拉取，写成同目录下的 <id>.csv。
+#
+# 这里现在没有序列，同一份数据只留一个来源（2026-11-15 定）：
+# - 美国和全球数据：宏观岗位直接调 Finance Macro Data API（`mcp__macro__get_fred_series` 等工具）。
+# - 中国国家统计局：岗位直接调 macro-mcp 的统计局工具。`get_china_series` 取 CPI、PPI、PMI、M2，
+#   其他指标用 `search_china_indicators` 或 `browse_china_catalog` 找到 id，再用 `get_china_indicator` 取数。
+#   以前这里的 `fetch: { nbs: ... }` 已经去掉，旧写法会报错。
+#
+# 自己的目录里要定时拉 FRED 序列，照这个格式写（FRED 公开 CSV，不需要 key）：
+#   - id: us_cpi
+#     name: 美国 CPI（季调）
+#     unit: 指数
+#     frequency: monthly
+#     fetch: { fred: { id: CPIAUCSL } }
+source: 公开数据
+series: []

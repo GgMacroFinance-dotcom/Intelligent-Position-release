@@ -1,0 +1,24 @@
+# E-8 探测问题：故意留口径歧义，看研究员是自己定口径还是发卡片。不是正式评测集，CI 不跑。
+# 运行（在 rust/ 下）：./target/release/ip eval --config ip.yaml --set ../docs/ip/evals/2026-11-14-e8/probe.yaml
+# 看每题“实际成功调用”里有没有 ask_human。p-no-topic 没写报告是预期的：它应该问人。
+cases:
+  - id: p-yield-recent
+    agent: macro-1
+    question: 美国国债收益率最近怎么走？写一份数据点评。
+    tools_any: [ask_human, mcp__macro__get_fred_series, mcp__macro__get_treasury_curve, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+  - id: p-inflation-week
+    agent: macro-1
+    question: 最近一周美国通胀怎么样？写一份数据点评。
+    tools_any: [ask_human, mcp__macro__get_fred_series, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+  - id: p-funding
+    agent: macro-1
+    question: 美元资金面最近紧不紧？写一份数据点评。
+    tools_any: [ask_human, mcp__macro__get_fred_series, mcp__macro__get_reference_rates, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+  # 真该问的：没有主题。改完以后这里还应该问人。
+  - id: p-no-topic
+    agent: macro-1
+    question: 写一份数据点评。
+    tools_any: [ask_human, mcp__macro__get_fred_series, mcp__macro__macro_snapshot]

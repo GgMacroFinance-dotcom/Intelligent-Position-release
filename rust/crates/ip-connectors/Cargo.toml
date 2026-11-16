@@ -1,0 +1,30 @@
+[package]
+name = "ip-connectors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# 测试用的假渠道（D-09）和假 Slack 服务器。ip-server 的测试打开它。
+fake = ["dep:axum"]
+
+[dependencies]
+axum = { workspace = true, optional = true }
+futures-util.workspace = true
+ip-core.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

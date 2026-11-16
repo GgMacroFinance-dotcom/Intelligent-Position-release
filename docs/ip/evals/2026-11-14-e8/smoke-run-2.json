@@ -1,0 +1,113 @@
+{
+  "cases": [
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series、mcp__macro__get_treasury_curve、mcp__macro__macro_snapshot；实际成功调用：mcp__macro__get_fred_series、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-11-12-US-10Y-yield.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "12/12 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-11-06、2026-11-09、2026-11-10、2026-11-11、2026-11-12",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0018588000000000003,
+      "elapsed_ms": 16792,
+      "error": null,
+      "id": "us-10y-week",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "report_path": "/tmp/ip-eval-01a1da89-45a5-7380-8c9d-1957b2abdcdc/workspaces/macro-1/reports/2026-11-12-US-10Y-yield.md",
+      "steps": 3,
+      "untraceable": [],
+      "usage": {
+        "cached_tokens": 11583,
+        "completion_tokens": 1269,
+        "prompt_tokens": 12243
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series；实际成功调用：mcp__macro__get_fred_series、shell、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-11-14-us-cpi-index-commentary.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "5/5 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-09-01、2026-10-01",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "取不到的写明",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0022722000000000003,
+      "elapsed_ms": 18514,
+      "error": null,
+      "id": "us-cpi-missing",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "report_path": "/tmp/ip-eval-01a1da89-45a5-7380-8c9d-1957b2abdcdc/workspaces/macro-1/reports/2026-11-14-us-cpi-index-commentary.md",
+      "steps": 4,
+      "untraceable": [],
+      "usage": {
+        "cached_tokens": 15625,
+        "completion_tokens": 1228,
+        "prompt_tokens": 16582
+      }
+    }
+  ],
+  "cost_usd": 0.004131000000000001,
+  "passed": 2,
+  "total": 2,
+  "usage": {
+    "cached_tokens": 27208,
+    "completion_tokens": 2497,
+    "prompt_tokens": 28825
+  }
+}

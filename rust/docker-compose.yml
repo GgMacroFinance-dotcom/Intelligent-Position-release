@@ -1,0 +1,38 @@
+# 用 Docker 跑 harness。步骤见 docs/ip/deploy-docker.md，简单说：
+#
+#   cd rust
+#   cp ip.example.yaml ip.yaml        # 取消 auth_token_env: IP_TOKEN 的注释，按需改岗位、渠道、引擎
+#   cp deploy/env.example .env        # 填密钥
+#   docker compose run --rm ip check --config /srv/ip/ip.yaml
+#   docker compose up -d --build
+services:
+  ip:
+    build:
+      context: .
+      # macro-mcp/ 在 rust/ 之外，作为命名构建上下文传给 Dockerfile 里的 COPY --from=macro-mcp。
+      additional_contexts:
+        macro-mcp: ../macro-mcp
+      args:
+        INSTALL_CODEX: ${INSTALL_CODEX:-false}
+    image: intelligent-position:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # 只给本机。要从别处访问控制台，放在 HTTPS 反向代理后面，或者用 ssh -L 转发。
+      - "127.0.0.1:7878:7878"
+    volumes:
+      - ./ip.yaml:/srv/ip/ip.yaml:ro
+      - ip-data:/srv/ip/data
+      - public-data:/srv/ip/examples/public-data
+    # 工具沙箱 bubblewrap 要在容器里建用户命名空间、挂新的 /proc，Docker 默认的限制不允许，需要放开这三项。
+    # 服务本身仍然以普通用户运行；不要改成 sandbox: { mode: none }，那样员工的 shell 命令能读到服务进程的环境变量（里面有密钥）。
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      - systempaths=unconfined
+    # 收到停止信号后，等正在进行的一轮做完再退出。
+    stop_grace_period: 60s
+
+volumes:
+  ip-data:
+  public-data:

@@ -1,0 +1,71 @@
+name: rust
+
+on:
+  pull_request:
+    paths: ["rust/**", ".github/workflows/rust.yml"]
+  push:
+    branches: [main]
+    paths: ["rust/**", ".github/workflows/rust.yml"]
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+defaults:
+  run:
+    working-directory: rust
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --all-targets --locked
+      - name: Install bubblewrap
+        # Ubuntu 24.04 默认禁止非特权用户命名空间，bwrap 需要它。
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Test
+        env:
+          IP_REQUIRE_BWRAP: "1"
+        run: cargo test --locked
+      - name: Generated TypeScript types are committed
+        # `cargo test` 会用 ts-rs 重新导出 web/src/types；改了 Rust 类型却没提交导出结果时失败。
+        run: |
+          git diff --exit-code -- web/src/types
+          test -z "$(git status --porcelain -- web/src/types)"
+      - name: Type-check web console
+        working-directory: rust/web
+        run: npx -y -p typescript@5.9.3 tsc -p tsconfig.json
+
+  bench:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Build release
+        run: cargo build --release --locked
+      - name: Startup and memory targets
+        run: ./target/release/ip bench startup --check | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Store write and search targets
+        run: ./target/release/ip bench store --check | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Concurrent agents targets
+        run: ./target/release/ip bench agents --check | tee -a "$GITHUB_STEP_SUMMARY"

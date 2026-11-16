@@ -1,0 +1,50 @@
+name: 问题报告
+description: 跑不起来、结果不对、文档写错了
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        安全问题不要在这里报，见 SECURITY.md。贴配置和日志之前，请去掉 API key、令牌和密码。
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交号
+      description: "`ip --version` 的输出，或 `git rev-parse --short HEAD`"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 环境
+      description: 系统和版本；怎么跑的（源码编译还是 Docker）；沙箱模式；用的模型服务商
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 做了什么
+      description: 能复现的最少步骤。相关的 ip.yaml 片段贴在这里，去掉密钥
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 看到了什么
+      description: 报错原文、日志片段，`ip check` 的输出
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 本来以为会怎样
+  - type: dropdown
+    id: real
+    attributes:
+      label: 是在什么上面遇到的
+      options:
+        - 真实模型和真实服务
+        - 假模型或测试
+        - 不确定
+    validations:
+      required: true

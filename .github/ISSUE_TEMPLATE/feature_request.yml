@@ -1,0 +1,33 @@
+name: 功能建议
+description: 想加的功能，或想改的设计
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先看一眼 docs/ip/backlog.md：已经排了先后的事项和“现在不做”的范围都在那里。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决什么问题
+      description: 你在做什么的时候遇到的，现在是怎么绕过去的
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你的想法
+      description: 希望它怎么工作。有别的做法也写上
+    validations:
+      required: true
+  - type: input
+    id: backlog
+    attributes:
+      label: 和 backlog 的哪一条有关
+      description: 有就写编号，例如 D-3
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: 参与
+      options:
+        - label: 我愿意自己提 PR

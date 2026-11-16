@@ -1,0 +1,65 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/ggmacrofinance-dotcom/intelligent-position"
+
+[workspace.dependencies]
+ip-core = { path = "crates/ip-core" }
+ip-store = { path = "crates/ip-store" }
+ip-runtime = { path = "crates/ip-runtime" }
+ip-models = { path = "crates/ip-models" }
+ip-router = { path = "crates/ip-router" }
+ip-tools = { path = "crates/ip-tools" }
+ip-mcp = { path = "crates/ip-mcp" }
+ip-browser = { path = "crates/ip-browser" }
+ip-connectors = { path = "crates/ip-connectors" }
+ip-engines = { path = "crates/ip-engines" }
+ip-server = { path = "crates/ip-server" }
+ip-data = { path = "crates/ip-data" }
+
+anyhow = "1"
+rmcp = { version = "3.9", default-features = false, features = [
+    "client",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+    "server",
+    "transport-streamable-http-server",
+] }
+regex = { version = "1", default-features = false, features = ["std", "unicode"] }
+reqwest = { version = "0.13", features = ["json"] }
+ts-rs = { version = "12", features = ["serde-json-impl"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde-saphyr = "2"
+thiserror = "2"
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+http = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "ws", "query"] }
+clap = { version = "4", features = ["derive"] }
+mimalloc = { version = "0.1", default-features = false }
+nix = { version = "0.30", default-features = false, features = ["signal", "process", "fs", "dir"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio-util = { version = "0.7", default-features = false }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "process", "io-util", "sync", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

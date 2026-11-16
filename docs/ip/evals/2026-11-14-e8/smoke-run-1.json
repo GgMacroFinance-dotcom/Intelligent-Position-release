@@ -1,0 +1,113 @@
+{
+  "cases": [
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series、mcp__macro__get_treasury_curve、mcp__macro__macro_snapshot；实际成功调用：mcp__macro__get_fred_series、mcp__macro__get_treasury_curve、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-11-13-美国10年期国债收益率.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "15/15 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-11-06、2026-11-09、2026-11-10、2026-11-11、2026-11-12",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0024657999999999998,
+      "elapsed_ms": 20505,
+      "error": null,
+      "id": "us-10y-week",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "report_path": "/tmp/ip-eval-01a1da89-3dd4-77b7-80c5-b2a93c860a18/workspaces/macro-1/reports/2026-11-13-美国10年期国债收益率.md",
+      "steps": 4,
+      "untraceable": [],
+      "usage": {
+        "cached_tokens": 15472,
+        "completion_tokens": 1605,
+        "prompt_tokens": 16633
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series；实际成功调用：mcp__macro__get_fred_series、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-10-01-美国CPI数据点评.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "6/6 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-09-01、2026-10-01",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "取不到的写明",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0026815000000000003,
+      "elapsed_ms": 27032,
+      "error": null,
+      "id": "us-cpi-missing",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "report_path": "/tmp/ip-eval-01a1da89-3dd4-77b7-80c5-b2a93c860a18/workspaces/macro-1/reports/2026-10-01-美国CPI数据点评.md",
+      "steps": 4,
+      "untraceable": [],
+      "usage": {
+        "cached_tokens": 15631,
+        "completion_tokens": 1982,
+        "prompt_tokens": 16905
+      }
+    }
+  ],
+  "cost_usd": 0.0051473000000000005,
+  "passed": 2,
+  "total": 2,
+  "usage": {
+    "cached_tokens": 31103,
+    "completion_tokens": 3587,
+    "prompt_tokens": 33538
+  }
+}

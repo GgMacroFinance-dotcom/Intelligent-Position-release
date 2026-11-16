@@ -1,0 +1,245 @@
+# 组织配置示例。复制为 ip.yaml 后修改，启动：ip serve --config ip.yaml
+# 密钥只写环境变量名，不写进本文件。
+
+data_dir: ./data                  # 数据库和各员工工作目录；相对路径以本文件所在目录为准
+# auth_token_env: IP_TOKEN        # 监听非本机地址（如 0.0.0.0）时必须设置
+# allowed_origins: [https://ip.example.com]  # 反向代理把 Host 改成上游地址时，写上控制台对外的地址
+utc_offset: "+08:00"              # 员工看到的消息时间按这个时区显示（北京时间 +08:00）；省略时是 UTC。每日预算仍按 UTC 0 点重置
+org_prompt: |
+  你在一家 AI 原生的研究机构工作。结论先行；引用数据注明来源和日期；不确定时直接说明。
+sandbox:
+  mode: bubblewrap                # 开发机没有 bwrap 时可改为 none（不隔离）
+  network: false                  # 员工的 shell 命令能否联网
+max_steps: 16                     # 一轮里最多调用模型的次数
+context_budget_chars: 60000       # 上下文超过这么多字时，把较早的对话压缩成摘要；0 不压缩
+
+# 岗位记忆（docs/ip/context-memory-design.md）：默认关。打开后，后台从结束的对话里提炼摘要（闲置 6 小时后，
+# 费用记在岗位账上），再按岗位合并成岗位记忆摘要，放进这个岗位每个员工的系统提示词；员工多了 memory_search、
+# memory_read、memory_note 三个工具。控制台“记忆”页可以看、改、抹掉、清空，也能按对话关掉记忆；
+# 命令行用 ip context show 查看，摘要也可以人来写：ip context set --config ip.yaml --role macro-researcher memory --file 摘要.txt
+# 2026-11-15 的真实模型实测见 docs/ip/memory-2026-11-15-real-run.md：合并用岗位自己的模型（gpt-6-luna）就够，换 gpt-6-astra 约贵 25 倍。
+# 决策者笔记不受这个开关影响，写了就生效：ip context set --config ip.yaml --role macro-researcher notes --file 笔记.txt
+# memory:
+#   enabled: true
+#   roles: [macro-researcher]     # 省略表示所有岗位
+#   notes_max_chars: 4000
+#   summary_max_chars: 10000
+#   min_idle_hours: 6             # 对话闲置满多久才提炼
+#   max_threads_per_pass: 2       # 每轮（默认每小时一轮）最多提炼几份
+#   extract_model: openai/gpt-6-luna   # 省略时用岗位自己的模型；用外部引擎的岗位必须写
+#   consolidation_model: openai/gpt-6-astra   # 合并成岗位记忆摘要用的模型；省略时用岗位自己的模型
+
+endpoints:
+  openai:
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    max_concurrency: 16
+    # OpenAI 的推理模型（gpt-6-astra、gpt-6-luna）在 Chat Completions 里不能带工具，必须走 Responses 接口。
+    # 其他服务商一般不支持 responses，省略这一行即默认的 chat_completions。
+    api: responses
+    # reasoning_effort: medium      # 推理强度，省略时用模型默认值；越高越贵
+    # 价格（美元 / 百万 token），配了才能算费用、执行岗位的 budget_per_day_usd。
+    # cached_input 是命中提示前缀缓存的输入，cache_write 是写进缓存的输入（OpenAI 按输入价的 1.25 倍收），省略时都按 input 算。
+    # 下面两行是 2026-11-14 从 OpenAI 的模型文档（developers.openai.com/api/docs/models/<模型>）核对的标准价，用之前请再核对；
+    # 超过 27.2 万输入 token 的长请求 OpenAI 另按 2 倍输入价、1.5 倍输出价收，这里没算。
+    prices:
+      gpt-6-astra: { input: 10, cached_input: 1, cache_write: 12.5, output: 50 }
+      gpt-6-luna: { input: 0.10, cached_input: 0.01, cache_write: 0.125, output: 0.50 }
+  # 换别的服务商：只要是 OpenAI 兼容接口，照样写一个端点，再把岗位的 model 改成 <端点>/<模型>。
+  # deepseek:
+  #   base_url: https://api.deepseek.com/v1
+  #   api_key_env: DEEPSEEK_API_KEY
+  #   prices:
+  #     deepseek-chat: { input: 0.27, cached_input: 0.07, output: 1.10 }
+  # 外接 GPU 后，岗位小模型（基座 + LoRA）用 vLLM / SGLang 提供同样的接口：
+  # local:
+  #   base_url: http://gpu-box:8000/v1
+
+roles:
+  # 协调层：接住没有明确归属的需求，拆成任务派给执行岗位，收齐结果后汇总回复。它自己不动手做事。
+  - id: coordinator
+    name: 协调员
+    description: |
+      你是组织的协调员，负责接需求、拆任务、派活、汇总，不亲自做具体工作。
+      1. 需求清楚时，按同事名单用 create_task 派给最合适的执行员工，一件事一个任务，说明里写清要交付什么。
+      2. 需求不清楚、或要在几个方案里取舍时，用 ask_human 发选择卡片，给出推荐项。
+      3. 任务结果会以系统消息回到这个对话。全部回来后，给提需求的人一份简短汇总；有任务受阻就说明卡在哪、建议怎么办。
+      4. 派完活就结束这一轮，不要等待或反复查询。
+    # 协调层用最强的一档模型，价格是执行层的约 100 倍，所以设了每日费用上限（UTC 自然日），
+    # 用满后这一岗位当天不再调用模型；需要先配 prices。
+    budget_per_day_usd: 10
+    model:
+      default: openai/gpt-6-astra
+  # 执行层样板：宏观研报岗位。工作流程写在 description 里。
+  # 美国和中国数据都来自 Finance Macro Data API（见下面的 mcp_servers.macro）；中国数据取不到时，退回 data_sources 里本地拉取的数据。
+  - id: macro-researcher
+    name: 宏观研究员
+    budget_per_day_usd: 2
+    description: |
+      跟踪国内外宏观数据（CPI、PPI、PMI、货币、利率、GDP），撰写宏观研究报告和数据点评。
+      工作流程：
+      1. 弄清要回答的问题和时间范围。口径上的小歧义自己按常见做法定，在报告里写明按什么时间范围取的数，不要为此发卡片：
+         “最近一周”按最近 5 个交易日，“最近一个月”按最近一期月度数据，“国债收益率”没说期限就看 2 年和 10 年，
+         “资金面”看 SOFR、联邦基金利率、准备金和隔夜逆回购；问的时间比数据频率还短（比如问一周的通胀，CPI 是月度数据），
+         就用最近一期并写明。只有连主题都不清楚、或不同选择会让结论完全不同时，
+         才用 ask_human 问，给出推荐选项。
+      2. 取数。美国和全球数据用 Finance Macro Data API，也就是名字以 mcp__macro__ 开头的工具：
+         macro_snapshot 看全貌，get_reference_rates 取 SOFR 和联邦基金利率，get_fred_series 取 FRED 序列
+         （如 CPIAUCSL、DGS10），get_treasury_curve 取美债曲线，get_tic_holdings 取各国持有美债，
+         search_federal_register 查关税等政策公告。ICE BofA 的信用利差（BAML 开头的序列）取不到，写“未取得”。
+         通胀率等同比、环比数据用 get_fred_series 的 units 让 FRED 算（如 CPIAUCSL 加 units=pc1 是同比 %），不要自己算。
+         利差用现成的序列（如 T10Y2Y 是 10 年减 2 年），不要拿两个序列自己相减；算区间变化时，首尾两个值要来自同一个序列，
+         比如 FRED 的 DGS10 和财政部曲线口径不同，不能混着减。
+         get_fred_series 报 requires_configuration 时，说明没配 WhichAPI 的 key，FRED 数据写“未取得”。
+         中国数据用国家统计局的工具：CPI、PPI 同比，制造业 PMI，M2 用 get_china_series；其他指标先用
+         search_china_indicators 按中文名找（搜不到就用 browse_china_catalog 一层层找），再用 get_china_indicator 取数。
+         get_china_indicator 的值是统计局原样，“上年同月=100”的指数要减 100 才是同比 %，引用时写明口径。
+         统计局工具报错时写“未取得”，不要用别的数字顶替。
+         引用统计局数据时，在数据来源里照写工具结果的 attribution：“数据来自国家统计局网站（www.stats.gov.cn）”。
+      3. 报告写进工作目录 reports/<日期>-<主题>.md，结构：结论（三句话以内）→ 关键数据表 → 解读 → 风险与待观察 → 数据来源。
+         关键数据表每一行都写上观测日期。
+      4. 每个数字都要来自工具结果，和它的来源、观测日期（as_of）一起写；口径照工具的说明写，比如广义美元指数不能写成 DXY。
+         日期一律写完整的年月日（如 2026-11-06），列几个日期时也不要省略成“06、09”。
+         工具取不到的数据写“未取得”，不要估算；来源是“示例数据”时，在结论里写明“基于示例数据，仅供演示”。
+      5. 被派了任务时，完成后用 update_task 交回：结论摘要和报告路径。
+    model:
+      default: openai/gpt-6-luna
+  # 执行层第二个岗位：运维测试。工作目录指向要维护的项目（见 agents 里的 workspace）。
+  - id: ops-tester
+    name: 运维测试
+    # budget_per_day_usd: 2        # 这个岗位配了 Codex 引擎时，还要在 engines 里写 price
+    description: |
+      维护服务器和数据管道，编写并运行测试，发现问题后定位原因并给出修复。
+      工作流程：
+      1. 先复现：用 shell 跑出问题（测试命令、出错的脚本、日志），记下命令和关键输出。复现不了就如实说明，不要猜。
+      2. 定位：读代码和日志找到根因，说清楚是哪一行、为什么错；不要用“偶发”“环境问题”当结论。
+      3. 修复：用 edit_file 做最小修改；不删测试、不跳过测试、不放宽断言来让测试通过。
+      4. 验证：重跑第 1 步的命令，再跑全部测试；每个“已通过”都要有命令输出为证。
+      5. 报告写进工作目录 reports/<日期>-<主题>.md，结构：结论 → 复现 → 原因 → 修改 → 验证结果 → 遗留风险。
+      6. 涉及线上的操作（重启服务、删除数据、改生产配置、部署）先用 ask_human 说明影响并给出推荐选项，人选定后再做。
+      7. 被派了任务时，完成后用 update_task 交回：结论摘要和报告路径；做不下去设为 blocked 并写明缺什么。
+    model:
+      default: openai/gpt-6-luna
+
+agents:
+  - { id: coord-1, role: coordinator, name: 小协, tools: false }   # 协调员不需要工作目录
+  - { id: macro-1, role: macro-researcher, name: 小宏 }
+  - { id: ops-1, role: ops-tester, name: 小维 }
+  # 运维测试员工通常指向要维护的项目目录（必须已存在）。演示：cp -r examples/ops-demo /tmp/ops-demo 后改成
+  # - { id: ops-1, role: ops-tester, name: 小维, workspace: /tmp/ops-demo }
+
+# 路由：控制台里选“自动分派”或接口里不指定 agent_id 时，按规则把消息交给岗位。
+# 规则按顺序匹配，第一条命中的生效；都没命中时按 fallback 处理（ask = 交给人选，或写 { role: 岗位 }）。
+router:
+  rules:
+    - id: 线上故障
+      description: 服务器、部署、报错交给运维测试
+      when: { any: [报错, 宕机, 部署, 告警, error, deploy], none: [演练] }
+      to: { role: ops-tester }
+    - id: 宏观数据
+      description: 宏观指标的点评和研报交给宏观研究员
+      when: { regex: "(?i)(CPI|PPI|PMI|GDP|社融|M2|利率|研报)" }
+      to: { role: macro-researcher }
+  fallback: { role: coordinator }   # 规则没命中的交给协调员拆解；想让人来选就写 ask
+  # 语义匹配：规则都没命中时，请模型按各岗位的 description 判断该交给谁。
+  # 把握不低于 min_confidence 就直接分派；否则走 fallback，fallback 是 ask 时把模型的判断标为卡片上的推荐项。
+  # semantic: { model: openai/gpt-6-luna, min_confidence: 0.7 }
+
+# 定时任务：到点给岗位或员工发一条消息，每次开一段新对话，署名“定时任务·<id>”。
+# cron 五段：分 时 日 月 周（0 和 7 都是周日）；utc_offset 是时区，北京时间写 +08:00。
+# 不写 to 时按上面的路由规则分派。服务停机期间错过的时刻不补跑。控制台任务页能看到下次运行时间，也能立即运行。
+schedules:
+  - id: weekly-macro
+    description: 每周一早上写上周宏观周报
+    cron: "0 9 * * 1"
+    utc_offset: "+08:00"
+    to: { role: macro-researcher }
+    text: 写一份上周的宏观周报：CPI、PPI、PMI、利率有新数据的都覆盖到，按岗位说明的报告结构写进 reports/。
+    enabled: false                # 确认模型费用后改成 true
+  - id: daily-data-check
+    description: 工作日检查公开数据是否按时更新
+    cron: "30 9 * * 1-5"
+    utc_offset: "+08:00"
+    to: { role: ops-tester }
+    text: 检查数据目录里各序列的数据截至日期，有超过预期没更新的列出来，说明可能原因。
+    enabled: false
+
+# 数据源：员工用 data_catalog / data_series 两个工具查数据（只读）。
+# csv_dir：目录里放 catalog.yaml 和每个序列一个 CSV；数据管道按这个格式定时写入真实数据即可。
+# demo：程序生成的虚构数据，只用于演示和测试；接好真实数据后可以删掉。
+# public：要用 `ip data pull --config ip.yaml` 定时拉公开数据（如 FRED 序列）时打开，序列写进
+#   examples/public-data/catalog.yaml。默认关着：美国、全球和中国国家统计局的数据都走下面的 mcp_servers.macro，
+#   同一份数据只留一个来源。
+data_sources:
+  # public:
+  #   kind: csv_dir
+  #   path: ./examples/public-data  # 相对路径以本文件所在目录为准
+  #   roles: [macro-researcher]     # 省略表示所有岗位都能用
+  demo:
+    kind: csv_dir
+    path: ./examples/macro-data
+    roles: [macro-researcher]
+
+# 外部渠道：在 Slack 线程里和数字员工对话（见 docs/ip/m2-spec.md 第 3、4 节）。
+# 先用 examples/slack/manifest.yaml 建 Slack 应用，用的是 Socket Mode，主机不需要公网入口。
+# channels:
+#   slack:
+#     kind: slack
+#     bot_token_env: SLACK_BOT_TOKEN   # xoxb-…，密钥只放环境变量
+#     app_token_env: SLACK_APP_TOKEN   # xapp-…，Socket Mode 用
+#     allow:                           # 省略表示工作区里所有人、所有频道
+#       users: [U012ABCDEF]
+#       channels: [C012ABCDEF]
+#     approvers: requester             # 谁能点卡片：requester（提需求的人）| anyone | [U012ABCDEF, …]
+#     # agent: macro-1                 # 可选：这个渠道的消息都交给固定员工，不走路由
+# 路由规则可以按 Slack 用户写：when: { from: ["slack:U012ABCDEF"] }（显示名谁都能改，所以只认用户 id）。
+
+# 外部引擎：把某个岗位的每一轮交给 Codex，不走内置循环（见 docs/ip/m2-spec.md 第 6 节）。
+# Codex 用自己的 shell 和改文件工具，跑在它自带的沙箱里；组织工具（create_task、update_task、ask_human 等）
+# 通过本服务的 /mcp 回调，每轮一个令牌。这个岗位的员工需要工作目录（不能 tools: false）。
+# engines:
+#   ops-tester:
+#     kind: codex
+#     command: codex                 # 可执行文件
+#     # model: <Codex 模型名>        # 省略时用 Codex 的默认模型
+#     api_key_env: CODEX_API_KEY     # 密钥只放环境变量
+#     sandbox: workspace-write       # read-only | workspace-write
+#     network: false                 # Codex 里执行的命令能否联网
+#     turn_timeout_secs: 1800
+#     # price: { input: 2, cached_input: 0.1, cache_write: 2.5, output: 10 }   # 美元 / 百万 token；设了 budget_per_day_usd 时必填。
+#     #   这是 Codex 默认模型 gpt-6.1-sol 的官方价（2026-11-14 核对）；换了 model 就换成那个模型的价
+
+# 外部 MCP 服务器：工具以 mcp__<名字>__<工具> 出现在员工的工具列表里。有两种接法：
+#   url      远程服务器（Streamable HTTP）。必须是 https，只有本机地址可以用 http；
+#            令牌用 bearer_token_env 从环境变量取，以 Authorization: Bearer 发送。
+#   command  本服务直接启动的 stdio 子进程，不在沙箱里；密钥用 env_from 从环境变量取。
+#            子进程不继承本服务的环境变量，只带 PATH、HOME、LANG 等几个基本变量；
+#            其他要用的写进 env_inherit（原样带过去，没设就不带）或 env_from（必须设置，没设时这个服务器连不上）。
+# 两种都只配置你信任的服务器：它们返回的内容会原样交给模型。
+# 启动时某个服务器连不上，只是它的工具暂时用不了，服务和其他服务器照常启动，日志和 ip check 里会列出来。
+# 没连上的在后台重连 5 次（30 秒起，间隔翻倍），连上后员工下一步就能用它的工具；5 次都失败就修好后重启服务。密钥没设的不重连。
+mcp_servers:
+  # Finance Macro Data API：10 个宏观数据工具（美国：纽约联储、美国财政部、TIC、Federal Register、SEC、FRED；中国：国家统计局），
+  # 代码在仓库根目录的 macro-mcp/（MIT），本机启动，要 Node.js 18.17 以上。见 macro-mcp/README.md。
+  # 路径相对于启动 ip serve 时所在的目录，按快速开始在 rust/ 下启动时就是下面这样。
+  # FRED 序列经 WhichAPI 托管服务取，要 WhichAPI 的 key：有 key 时取消 env_from 的注释，并 export WHICHAPI_API_KEY=...。
+  # 没有 key 也能启动，其余 8 个工具照常可用。get_company_concept 要 SEC_USER_AGENT（“名字 邮箱”），设了就带过去。
+  macro:
+    command: node
+    args: [../macro-mcp/bin/whichapi-macro.js, mcp]
+    env_inherit: [SEC_USER_AGENT, WHICHAPI_URL]
+    # env_from: { WHICHAPI_API_KEY: WHICHAPI_API_KEY }
+    roles: [macro-researcher]         # 省略表示所有岗位都能用
+    timeout_secs: 120                 # 单次调用和启动握手的超时；FRED 经 WhichAPI 冷启动要等 1 分钟左右
+  # 也可以直接连 WhichAPI 托管服务（要 WhichAPI 的 key；托管版另有 API 目录工具）：
+  # macro:
+  #   url: https://whichapi-macro.onrender.com/mcp
+  #   bearer_token_env: WHICHAPI_API_KEY
+  #   roles: [macro-researcher]
+  #   timeout_secs: 120
+  # github:
+  #   command: github-mcp-server
+  #   args: [stdio]
+  #   env_from: { GITHUB_PERSONAL_ACCESS_TOKEN: GITHUB_TOKEN }
+  #   roles: [ops-tester]
+  #   timeout_secs: 60

@@ -1,0 +1,32 @@
+name: macro-mcp
+
+on:
+  pull_request:
+    paths: ["macro-mcp/**", ".github/workflows/macro-mcp.yml"]
+  push:
+    branches: [main]
+    paths: ["macro-mcp/**", ".github/workflows/macro-mcp.yml"]
+
+concurrency:
+  group: macro-mcp-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: macro-mcp
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 18.17 是 package.json 里写的最低版本。
+        node: ["18.17.0", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Test
+        # 测试不联网，上游全部模拟。
+        run: node --test test/*.test.js

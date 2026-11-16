@@ -1,0 +1,7 @@
+/target
+ip.db
+# 示例配置的 data_dir（./data）：ip serve、ip check 会在这里建数据库
+/data/
+# 自己的配置和密钥（docker compose 用）
+/ip.yaml
+/.env

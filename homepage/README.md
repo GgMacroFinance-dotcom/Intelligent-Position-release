@@ -1,0 +1,28 @@
+# I.P. 主页原型
+
+可运行的静态原型，无构建、无依赖。
+
+## 运行
+
+直接用浏览器打开 `index.html`，或者起一个本地静态服务：
+
+```bash
+cd homepage
+python3 -m http.server 8080
+# 打开 http://localhost:8080
+```
+
+## 文件
+
+| 文件 | 内容 | 改什么来这里 |
+| --- | --- | --- |
+| `data.js` | 全部文案、宏观研报岗位与路线图、Router 任务与价格、共建方式、对比表、API 示例 | **改文案、改数字** |
+| `styles.css` | 配色与字体 token（文件顶部 `:root`）、布局 | 改颜色、字体、间距 |
+| `index.html` | 页面骨架与区块顺序 | 增删区块 |
+| `app.js` | 生成器、Router 沙盘、岗位抽屉等交互 | 改交互逻辑 |
+
+## 说明
+
+- 页面里标了"示意"的数字（Router 价格、API 返回值）和"待定"项都是占位，上线前换成实测数据或定稿方案。
+- 表单不提交到任何地方。
+- 文案与线框图见 [`docs/ip/homepage-copy-wireframe.md`](../docs/ip/homepage-copy-wireframe.md)；开源项目与商业化服务的边界见 [`docs/ip/open-core-boundary.md`](../docs/ip/open-core-boundary.md)。

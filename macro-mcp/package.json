@@ -1,0 +1,31 @@
+{
+  "name": "@whichapi/macro-mcp",
+  "version": "0.2.1",
+  "description": "Read-only US macro data (New York Fed, Treasury, TIC, Daily Treasury Statement, Federal Register, SEC, and FRED through the WhichAPI hosted service) as an MCP server, HTTP API and CLI. No runtime dependencies.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "bin": {
+    "whichapi-macro": "bin/whichapi-macro.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./sources": "./src/sources.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node bin/whichapi-macro.js serve",
+    "mcp": "node bin/whichapi-macro.js mcp",
+    "snapshot": "node bin/whichapi-macro.js snapshot",
+    "test": "node --test test/*.test.js",
+    "verify-live": "node test/live.js"
+  }
+}

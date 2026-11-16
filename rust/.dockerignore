@@ -1,0 +1,9 @@
+# 构建镜像时不用传进去的东西
+target
+data
+**/*.db
+**/*.db-wal
+**/*.db-shm
+.env
+ip.yaml
+examples/public-data/*.csv

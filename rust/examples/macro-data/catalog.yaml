@@ -1,0 +1,31 @@
+# 示例数据源：数值是程序生成的虚构数据，只用于演示和测试，不代表任何真实统计。
+# 接入真实数据时，让数据管道按同样的格式写 CSV，并把 source 改成真实来源（如“国家统计局”）。
+source: 示例数据（虚构，仅用于演示，不代表真实统计）
+series:
+  - id: cn_cpi_yoy
+    name: 中国 CPI 同比
+    unit: "%"
+    frequency: monthly
+  - id: cn_ppi_yoy
+    name: 中国 PPI 同比
+    unit: "%"
+    frequency: monthly
+  - id: cn_pmi_mfg
+    name: 中国制造业 PMI
+    unit: 指数
+    frequency: monthly
+    note: 50 为荣枯线
+  - id: cn_m2
+    name: 中国 M2 余额
+    unit: 万亿元
+    frequency: monthly
+    note: 增速用 transform=yoy 计算
+  - id: cn_gdp_real_yoy
+    name: 中国实际 GDP 同比
+    unit: "%"
+    frequency: quarterly
+  - id: us_fed_funds_upper
+    name: 美国联邦基金目标利率上限
+    unit: "%"
+    frequency: monthly
+    note: 月末值

@@ -1,0 +1,39 @@
+[package]
+name = "ip-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+ip-connectors.workspace = true
+ip-core.workspace = true
+ip-mcp.workspace = true
+ip-data.workspace = true
+ip-engines.workspace = true
+ip-models.workspace = true
+ip-router.workspace = true
+ip-runtime.workspace = true
+ip-store.workspace = true
+ip-tools.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde-saphyr.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ts-rs.workspace = true
+
+[dev-dependencies]
+ip-connectors = { workspace = true, features = ["fake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+rmcp.workspace = true
+tempfile = "3"
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake"] }
+
+[lints]
+workspace = true

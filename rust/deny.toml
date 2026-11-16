@@ -1,0 +1,22 @@
+# 依赖许可证检查（cargo-deny）。依赖有变动时，CI 的 licenses 工作流会跑：cargo deny --locked check licenses
+# 规则见 CONTRIBUTING.md 的“依赖和代码来源”：只引入与 Apache-2.0 兼容的依赖。
+#
+# 一个包声明“A OR B”时，其中一个在清单里就算通过；声明“A AND B”时，每一个都要在清单里。
+# 新依赖用了清单以外的许可证，检查会失败：先确认它和 Apache-2.0 兼容，再加进来，并在 PR 描述里写明。
+# 检查的是所有平台的依赖，不只是 Linux 上实际编译进去的那些。
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    # Unicode 数据表的许可证，icu_* 这些包在用。
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+exceptions = [
+    # Mozilla 根证书数据，是宽松的数据许可证。只对这一个包放行。
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
+]

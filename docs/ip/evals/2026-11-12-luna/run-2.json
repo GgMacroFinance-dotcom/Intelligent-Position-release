@@ -1,0 +1,98 @@
+{
+  "cases": [
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series、mcp__macro__get_treasury_curve、mcp__macro__macro_snapshot；实际成功调用：mcp__macro__get_fred_series、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-11-09-美国10年期国债收益率周度点评.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "11/11 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-11-02、2026-11-03、2026-11-04、2026-11-05、2026-11-06、2026-11-09",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0019255000000000003,
+      "elapsed_ms": 18346,
+      "error": null,
+      "id": "us-10y-week",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "report_path": "/tmp/ip-eval-01a1ce2e-4941-77c4-ab53-489dd1e2cdc7/workspaces/macro-1/reports/2026-11-09-美国10年期国债收益率周度点评.md",
+      "steps": 3,
+      "untraceable": []
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series；实际成功调用：mcp__macro__get_fred_series、shell、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-11-12-US-CPIAUCSL.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "4/4 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-10-01",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "取不到的写明",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0037873,
+      "elapsed_ms": 35127,
+      "error": null,
+      "id": "us-cpi-missing",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "report_path": "/tmp/ip-eval-01a1ce2e-4941-77c4-ab53-489dd1e2cdc7/workspaces/macro-1/reports/2026-11-12-US-CPIAUCSL.md",
+      "steps": 6,
+      "untraceable": []
+    }
+  ],
+  "cost_usd": 0.0057128000000000005,
+  "passed": 2,
+  "total": 2
+}

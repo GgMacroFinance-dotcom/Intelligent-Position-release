@@ -1,0 +1,38 @@
+name: licenses
+
+# 依赖许可证检查：只在依赖或允许清单有变动时跑。允许清单在 rust/deny.toml。
+on:
+  pull_request:
+    paths: ["rust/Cargo.lock", "rust/**/Cargo.toml", "rust/deny.toml", ".github/workflows/licenses.yml"]
+  push:
+    branches: [main]
+    paths: ["rust/Cargo.lock", "rust/**/Cargo.toml", "rust/deny.toml", ".github/workflows/licenses.yml"]
+
+concurrency:
+  group: licenses-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: rust
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # 升级 cargo-deny 时两个值一起改；sha256 取自发布页上同名的 .sha256 文件。
+      CARGO_DENY_VERSION: 0.20.2
+      CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-deny
+        run: |
+          name="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
+          curl -sSfL -o /tmp/cargo-deny.tar.gz \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${name}.tar.gz"
+          echo "${CARGO_DENY_SHA256}  /tmp/cargo-deny.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
+          install "/tmp/${name}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
+      - name: Dependency licenses
+        run: cargo deny --locked --all-features check licenses
