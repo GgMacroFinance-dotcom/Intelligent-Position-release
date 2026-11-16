@@ -4,7 +4,14 @@
   "description": "Read-only US macro data (New York Fed, Treasury, TIC, Daily Treasury Statement, Federal Register, SEC, and FRED through the WhichAPI hosted service) as an MCP server, HTTP API and CLI. No runtime dependencies.",
   "type": "module",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GgMacroFinance-dotcom/Intelligent-Position-release.git",
+    "directory": "macro-mcp"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "whichapi-macro": "bin/whichapi-macro.js"
   },

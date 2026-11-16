@@ -1003,11 +1003,11 @@ dependencies = [
 
 [[package]]
 name = "ip-browser"
-version = "0.0.1"
+version = "0.8.0"
 
 [[package]]
 name = "ip-cli"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1028,7 +1028,7 @@ dependencies = [
 
 [[package]]
 name = "ip-connectors"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "ip-core"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "serde",
  "serde-saphyr",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "ip-data"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "ip-core",
  "ip-models",
@@ -1073,7 +1073,7 @@ dependencies = [
 
 [[package]]
 name = "ip-engines"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "ip-core",
  "ip-models",
@@ -1088,7 +1088,7 @@ dependencies = [
 
 [[package]]
 name = "ip-mcp"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "http",
  "ip-core",
@@ -1104,7 +1104,7 @@ dependencies = [
 
 [[package]]
 name = "ip-models"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "axum",
  "reqwest",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "ip-router"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "ip-core",
  "regex",
@@ -1131,7 +1131,7 @@ dependencies = [
 
 [[package]]
 name = "ip-runtime"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "ip-core",
  "ip-data",
@@ -1152,7 +1152,7 @@ dependencies = [
 
 [[package]]
 name = "ip-server"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1182,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "ip-store"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "ip-core",
  "rusqlite",
@@ -1195,7 +1195,7 @@ dependencies = [
 
 [[package]]
 name = "ip-tools"
-version = "0.0.1"
+version = "0.8.0"
 dependencies = [
  "ip-models",
  "nix 0.30.1",

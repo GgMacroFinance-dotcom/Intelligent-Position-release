@@ -16,7 +16,7 @@ window.IP_DATA = {
     sub: "I.P. 把公司里的岗位重新设计成 AI 原生的单元：协调 Bot 用云端最顶尖的模型，执行 Bot 现阶段也调用云端模型，并为后训练的专家小模型预留了位置；人类决策者只在关键节点修改方案。整个 harness 用 Rust 重写。宏观研报岗位是第一个展示。",
     tags: ["AI 原生组织架构", "协调 / 执行两层 Bot", "Rust 重写整个 harness", "70/20/5/5 上下文设计理念"],
     install: "cargo install ip-cli && ip init --position macro-research",
-    trust: "Apache-2.0 开源 · 宏观研报岗位验收中 · 欢迎提交 PR",
+    trust: "Apache-2.0 开源 · 宏观研报岗位已上线 · 欢迎提交 PR",
   },
 
   arch: {
@@ -69,7 +69,7 @@ window.IP_DATA = {
     title: "展示：宏观研报智能岗位",
     sub: "现阶段只用一个岗位展示整套架构的真实生产力。",
     featured: {
-      name: "宏观研报 I.P.", en: "MACRO RESEARCH · IN ACCEPTANCE", status: "验收中", statusKind: "ind",
+      name: "宏观研报 I.P.", en: "MACRO RESEARCH · LIVE", status: "已上线", statusKind: "live",
       line: "追踪中国与全球宏观数据发布，整理政策文件，生成研究简报。美国和全球数据来自 Finance Macro Data API（测试版已部署），中国数据来自国家统计局。正在用真实模型和真实数据验收。",
       flow: [
         ["L1 上下文", "研究员公开 JD + 研究所报告口径 + 指标字典"],
