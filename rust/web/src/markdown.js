@@ -6,6 +6,7 @@
 // 链接只认 http、https 和 mailto，其他协议（javascript: 之类）按原文显示。
 // 支持：标题、段落、换行、无序和有序列表（可嵌套、可带复选框）、引用、代码块、表格、分隔线，
 // 行内的粗体、斜体、删除线、行内代码、链接和裸网址。不支持的写法按原文显示。
+// 调用方给了 `onReport` 时，文字和行内代码里提到的报告路径（`reports/<文件名>.md`）可以点开（backlog F-4）。
 
 import { h } from './dom.js';
 
@@ -383,33 +384,62 @@ function parseLink(src, i) {
   return { node: { t: 'link', href, c: parseInline(src.slice(i + 1, close)) }, end: end + 1 };
 }
 
+/** 文字里提到的报告路径。前面紧挨着路径字符的（比如 `/tmp/x/reports/a.md`）不算。 */
+const REPORT_REF = /reports\/([^\s\/\\`'"<>()（）[\]{}|*，。；：、！？]+?)\.md(?![A-Za-z0-9_.-])/g;
+
+/**
+ * 把一段文字按里面提到的报告路径切开。
+ * @param {string} text
+ * @returns {({ t: 'text', v: string } | { t: 'report', path: string })[]}
+ */
+export function splitReportRefs(text) {
+  /** @type {({ t: 'text', v: string } | { t: 'report', path: string })[]} */
+  const out = [];
+  let last = 0;
+  for (const m of text.matchAll(REPORT_REF)) {
+    const at = m.index ?? 0;
+    if ((at > 0 && /[A-Za-z0-9_./-]/.test(text[at - 1])) || m[1].startsWith('.')) continue;
+    if (at > last) out.push({ t: 'text', v: text.slice(last, at) });
+    out.push({ t: 'report', path: m[0] });
+    last = at + m[0].length;
+  }
+  if (last < text.length) out.push({ t: 'text', v: text.slice(last) });
+  return out;
+}
+
 // ---------- 生成 DOM ----------
+
+/** @typedef {{ onReport?: (path: string) => void }} RenderOptions */
 
 /**
  * 把 Markdown 文字渲染成一个 `div.md`。
  * @param {string} text
+ * @param {RenderOptions} [opts]
  * @returns {HTMLElement}
  */
-export function renderMarkdown(text) {
-  return h('div.md', null, ...parseBlocks(text).map(renderBlock));
+export function renderMarkdown(text, opts = {}) {
+  return h('div.md', null, ...parseBlocks(text).map((b) => renderBlock(b, opts)));
 }
 
 /**
  * @param {Block} b
+ * @param {RenderOptions} opts
  * @returns {HTMLElement}
  */
-function renderBlock(b) {
+function renderBlock(b, opts) {
+  /** @param {string} src */
+  const inline = (src) => renderInline(parseInline(src), opts);
   switch (b.type) {
     case 'paragraph':
-      return h('p', null, ...renderInline(parseInline(b.text)));
+      return h('p', null, ...inline(b.text));
     case 'heading':
-      return h(`h${b.level}`, null, ...renderInline(parseInline(b.text)));
+      return h(`h${b.level}`, null, ...inline(b.text));
     case 'code':
       return h('pre', null, h('code', null, b.text));
     case 'hr':
       return h('hr');
     case 'quote':
-      return h('blockquote', null, ...b.children.map(renderBlock));
+      return h('blockquote', null, ...b.children.map((c) => renderBlock(c, opts)));
     case 'list':
       return h(
         b.ordered ? 'ol' : 'ul',
@@ -417,7 +447,7 @@ function renderBlock(b) {
         ...b.items.map((item) => {
           // 只有一段文字的列表项直接放文字，不套段落，行距紧凑些。
           const only = item.children.length === 1 && item.children[0].type === 'paragraph' ? item.children[0] : null;
-          const body = only ? renderInline(parseInline(only.text)) : item.children.map(renderBlock);
+          const body = only ? inline(only.text) : item.children.map((c) => renderBlock(c, opts));
           return h(
             item.checked === null ? 'li' : 'li.task',
             null,
@@ -435,11 +465,11 @@ function renderBlock(b) {
         h(
           'table.md-table',
           null,
-          h('thead', null, h('tr', null, ...b.header.map((c, k) => h('th' + cls(b.align[k]), null, ...renderInline(parseInline(c)))))),
+          h('thead', null, h('tr', null, ...b.header.map((c, k) => h('th' + cls(b.align[k]), null, ...inline(c))))),
           h(
             'tbody',
             null,
-            ...b.rows.map((row) => h('tr', null, ...row.map((c, k) => h('td' + cls(b.align[k]), null, ...renderInline(parseInline(c)))))),
+            ...b.rows.map((row) => h('tr', null, ...row.map((c, k) => h('td' + cls(b.align[k]), null, ...inline(c))))),
           ),
         ),
       );
@@ -449,23 +479,39 @@ function renderBlock(b) {
 
 /**
  * @param {Inline[]} nodes
+ * @param {RenderOptions} opts
  * @returns {(Node | string)[]}
  */
-function renderInline(nodes) {
-  return nodes.map((n) => {
+function renderInline(nodes, opts) {
+  const onReport = opts.onReport;
+  return nodes.flatMap((n) => {
     switch (n.t) {
       case 'text':
-        return n.v;
-      case 'code':
-        return h('code', null, n.v);
+        if (!onReport) return [n.v];
+        return splitReportRefs(n.v).map((s) => (s.t === 'text' ? s.v : reportLink(s.path, s.path, onReport)));
+      case 'code': {
+        const code = h('code', null, n.v);
+        const refs = onReport ? splitReportRefs(n.v) : [];
+        return refs.length === 1 && refs[0].t === 'report' && onReport ? [reportLink(refs[0].path, code, onReport)] : [code];
+      }
       case 'br':
-        return h('br');
+        return [h('br')];
       case 'strong':
       case 'em':
       case 'del':
-        return h(n.t, null, ...renderInline(n.c));
+        return [h(n.t, null, ...renderInline(n.c, opts))];
       case 'link':
-        return h('a', { href: n.href, target: '_blank', rel: 'noopener noreferrer' }, ...renderInline(n.c));
+        // 链接里面不再套报告链接。
+        return [h('a', { href: n.href, target: '_blank', rel: 'noopener noreferrer' }, ...renderInline(n.c, {}))];
     }
   });
+}
+
+/**
+ * @param {string} path
+ * @param {Node | string} content
+ * @param {(path: string) => void} onReport
+ */
+function reportLink(path, content, onReport) {
+  return h('button.link.report-link', { type: 'button', title: '打开报告', onclick: () => onReport(path) }, content);
 }

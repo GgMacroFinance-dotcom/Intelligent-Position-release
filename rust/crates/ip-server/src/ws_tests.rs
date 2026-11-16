@@ -85,7 +85,12 @@ async fn start_with_schedules(
         })
         .unwrap();
     let org = OrgSpec { roles: vec![role] };
-    let mut app = App::new(runtime, org.clone(), token.map(String::from));
+    // 小宏的工作目录里放一份报告，测 list_reports、read_report。
+    let ws = dir.path().join("ws-macro-1");
+    std::fs::create_dir_all(ws.join("reports")).unwrap();
+    std::fs::write(ws.join("reports").join("2026-11-16-cpi.md"), "# CPI\n\n同比 2.9%").unwrap();
+    let mut app = App::new(runtime, org.clone(), token.map(String::from))
+        .with_workspaces(std::collections::HashMap::from([("macro-1".into(), ws)]));
     if let Some(spec) = rules {
         let agents = app.runtime().agents();
         app = app.with_router(ip_router::Router::new(serde_saphyr::from_str(spec).unwrap(), &org, &agents).unwrap());
@@ -505,6 +510,34 @@ async fn serves_embedded_console() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn lists_and_reads_reports() {
+    let s = start(None).await;
+    let mut ws = connect(s.addr, "").await.unwrap();
+    let (list, _) = request(&mut ws, 1, json!({"type": "list_reports", "agent_id": "macro-1"})).await;
+    assert_eq!(list["ok"], true, "{list}");
+    assert_eq!(list["data"][0]["path"], "reports/2026-11-16-cpi.md");
+    let (all, _) = request(&mut ws, 2, json!({"type": "list_reports"})).await;
+    assert_eq!(all["data"].as_array().unwrap().len(), 1);
+
+    let (report, _) = request(
+        &mut ws,
+        3,
+        json!({"type": "read_report", "agent_id": "macro-1", "path": "reports/2026-11-16-cpi.md"}),
+    )
+    .await;
+    assert_eq!(report["data"]["text"], "# CPI\n\n同比 2.9%");
+    assert_eq!(report["data"]["truncated"], false);
+
+    let (bad, _) = request(
+        &mut ws,
+        4,
+        json!({"type": "read_report", "agent_id": "macro-1", "path": "reports/../ip.db"}),
+    )
+    .await;
+    assert_eq!(bad["ok"], false);
 }
 
 #[tokio::test]

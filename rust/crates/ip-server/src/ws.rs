@@ -265,6 +265,12 @@ async fn dispatch(app: &App, request: Request) -> Result<Value, String> {
         Request::SetThreadMemory { thread_id, enabled } => to_json(serde_json::to_value(
             memory_admin::set_thread(app, &thread_id, enabled).await?,
         )),
+        Request::ListReports { agent_id, limit: l } => to_json(serde_json::to_value(
+            crate::reports::list(app, agent_id.as_ref(), limit(l, 100)).await?,
+        )),
+        Request::ReadReport { agent_id, path } => {
+            to_json(serde_json::to_value(crate::reports::read(app, &agent_id, &path).await?))
+        }
         Request::ResolveApproval {
             approval_id,
             choice,

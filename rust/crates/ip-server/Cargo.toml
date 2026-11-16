@@ -19,6 +19,7 @@ ip-router.workspace = true
 ip-runtime.workspace = true
 ip-store.workspace = true
 ip-tools.workspace = true
+nix.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde-saphyr.workspace = true

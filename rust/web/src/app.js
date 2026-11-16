@@ -24,6 +24,8 @@ import { renderMarkdown } from './markdown.js';
 /** @typedef {import('./types/ScheduleView').ScheduleView} ScheduleView */
 /** @typedef {import('./types/MemoryView').MemoryView} MemoryView */
 /** @typedef {import('./types/MemoryLayer').MemoryLayer} MemoryLayer */
+/** @typedef {import('./types/ReportInfo').ReportInfo} ReportInfo */
+/** @typedef {import('./types/ReportText').ReportText} ReportText */
 
 /** @type {Record<TaskStatus, string>} */
 const STATUS_TEXT = { open: '待开始', in_progress: '进行中', blocked: '受阻', done: '已完成', cancelled: '已取消' };
@@ -87,6 +89,7 @@ const state = {
   /** “记忆”页正在看的岗位。 @type {string | null} */ memoryRole: null,
   /** @type {MemoryView | null} */ memory: null,
   /** 关掉了记忆的对话。 @type {string[]} */ memoryOff: [],
+  /** 员工写的报告，新改的在前。 @type {ReportInfo[]} */ reports: [],
 };
 
 // short 是窄屏底部导航栏上的短名字。
@@ -239,8 +242,33 @@ function renderRoles() {
             h('button', { onclick: () => startChat(a.id) }, `和 ${a.name} 对话`),
           ),
         ),
+        roleReports(agents),
       );
     }),
+  );
+}
+
+/** 岗位卡片里这个岗位员工最近的报告，先列 5 份，其余收起来。 @param {Agent[]} agents */
+function roleReports(agents) {
+  const ids = new Set(agents.map((a) => a.id));
+  const list = state.reports.filter((r) => ids.has(r.agent_id));
+  if (!list.length) return null;
+  const many = agents.length > 1;
+  /** @param {ReportInfo} r */
+  const item = (r) =>
+    h(
+      'li',
+      null,
+      h('button.link.report-link', { type: 'button', onclick: () => openReport(r.path, r.agent_id) }, r.path.replace(/^reports\//, '')),
+      h('span.muted.small', null, ` ${many ? `${agentName(r.agent_id)} · ` : ''}${formatTime(r.modified_ms)}`),
+    );
+  const rest = list.slice(5);
+  return h(
+    'div.reports',
+    null,
+    h('div.muted.small', null, '最近的报告'),
+    h('ul.report-list', null, ...list.slice(0, 5).map(item)),
+    rest.length ? h('details', null, h('summary.muted.small', null, `还有 ${rest.length} 份`), h('ul.report-list', null, ...rest.map(item))) : null,
   );
 }
 
@@ -419,7 +447,9 @@ function taskTable(tasks) {
               `由 ${t.created_by.kind === 'human' ? t.created_by.name : t.created_by.kind === 'agent' ? agentName(t.created_by.agent_id) : '系统'} 创建`,
               ...threadLinks(t),
             ),
-            t.result ? h('div.task-result', null, h('span.muted', null, '结果'), renderMarkdown(t.result)) : null,
+            t.result
+              ? h('div.task-result', null, h('span.muted', null, '结果'), renderMarkdown(t.result, { onReport: (p) => openReport(p, t.assignee) }))
+              : null,
           ),
           h('td', null, t.assignee ? agentName(t.assignee) : t.role ?? '—'),
           h('td', null, t.due_ms ? formatTime(t.due_ms) : '—'),
@@ -1172,7 +1202,14 @@ function messageNodes() {
   for (const m of state.messages) msgs.push(renderMessage(m));
   for (const [id, text] of state.drafts) {
     if (state.threadId && state.threadAgent.get(state.threadId) !== id) continue;
-    msgs.push(h('div.msg.agent.draft', null, h('div.who', null, agentName(id), h('span.muted', null, ' 正在输入…')), h('div.text.md-text', null, renderMarkdown(text))));
+    msgs.push(
+      h(
+        'div.msg.agent.draft',
+        null,
+        h('div.who', null, agentName(id), h('span.muted', null, ' 正在输入…')),
+        h('div.text.md-text', null, renderMarkdown(text, { onReport: (p) => openReport(p, id) })),
+      ),
+    );
   }
   const note = state.threadId ? state.turnNote.get(state.threadId) : undefined;
   if (note) msgs.push(h('div.turn-note', null, note));
@@ -1281,12 +1318,12 @@ function renderMessage(m) {
 function buildMessage(m, who) {
   const cls = m.author.kind === 'human' ? '.human' : m.author.kind === 'agent' ? '.agent' : '.system';
   const head = h('div.who', null, who, h('span.muted', null, ` ${formatTime(m.at_ms)}`));
+  const hint = m.author.kind === 'agent' ? m.author.agent_id : null;
   switch (m.body.kind) {
     case 'text':
-      // 人写的消息照原样显示；员工和系统的消息按 Markdown 渲染（backlog F-3）。
-      return m.author.kind === 'human'
-        ? h('div.msg' + cls, null, head, h('div.text', null, m.body.text))
-        : h('div.msg' + cls, null, head, h('div.text.md-text', null, renderMarkdown(m.body.text)));
+      // 人写的消息照原样显示；员工和系统的消息按 Markdown 渲染（backlog F-3），里面提到的报告可以点开（F-4）。
+      if (m.author.kind === 'human') return h('div.msg' + cls, null, head, h('div.text', null, m.body.text));
+      return h('div.msg' + cls, null, head, h('div.text.md-text', null, renderMarkdown(m.body.text, { onReport: (p) => openReport(p, hint) })));
     case 'tool_call':
       return h(
         'details.tool',
@@ -1390,6 +1427,7 @@ function onEvent(e) {
     case 'turn_finished': {
       state.drafts.delete(e.agent_id);
       refreshSpendSoon();
+      refreshReportsSoon();
       const tokens = e.usage.prompt_tokens + e.usage.completion_tokens;
       const cached = e.usage.prompt_tokens ? Math.round((100 * e.usage.cached_tokens) / e.usage.prompt_tokens) : 0;
       state.turnNote.set(
@@ -1420,6 +1458,100 @@ function onEvent(e) {
   if (page() === 'chat') updateChat();
 }
 
+// ---------- 报告（backlog F-4） ----------
+
+/** 正在看的报告的遮罩层。 @type {HTMLElement | null} */
+let reportEl = null;
+/** 打开报告前有焦点的元素，关掉后把焦点还给它。 @type {Element | null} */
+let reportFocus = null;
+let reportsTimer = 0;
+
+async function refreshReports() {
+  try {
+    state.reports = await client.request({ type: 'list_reports', limit: 200 });
+  } catch {
+    /* 读不了就先用旧的 */
+  }
+}
+
+/** 一轮结束后员工可能写了新报告，刷新列表（合并短时间内的多次）。 */
+function refreshReportsSoon() {
+  clearTimeout(reportsTimer);
+  reportsTimer = window.setTimeout(async () => {
+    await refreshReports();
+    if (page() === 'roles') render();
+  }, 800);
+}
+
+/**
+ * 报告是谁写的。先在报告列表里找这个路径，找不到就用 hint（比如写这条消息的员工）。
+ * 协调员转述研究员的报告时 hint 是协调员，列表里能找到真正写报告的人。
+ * @param {string} path
+ * @param {string | null | undefined} hint
+ */
+function reportOwner(path, hint) {
+  const found = state.reports.filter((r) => r.path === path);
+  if (hint && found.some((r) => r.agent_id === hint)) return hint;
+  return found[0]?.agent_id ?? hint ?? null;
+}
+
+/**
+ * 在遮罩层里打开一份报告。手机上按返回键也能关掉。
+ * @param {string} path 形如 `reports/2026-11-16-cpi.md`
+ * @param {string | null} [hint] 可能写了这份报告的员工
+ */
+async function openReport(path, hint) {
+  const nested = reportEl !== null;
+  closeReport(true);
+  reportFocus = document.activeElement;
+  const title = h('div.report-title', null, h('strong', null, path.replace(/^reports\//, '')));
+  const body = h('div.report-body', null, h('p.muted', null, '正在读取…'));
+  const close = h('button.ghost', { type: 'button', onclick: () => closeReport() }, '关闭');
+  const el = h(
+    'div.overlay',
+    { onclick: (/** @type {Event} */ e) => e.target === el && closeReport() },
+    h('div.report-view', { role: 'dialog', 'aria-modal': 'true', 'aria-label': `报告 ${path}` }, h('header', null, title, close), body),
+  );
+  reportEl = el;
+  document.body.append(el);
+  document.body.classList.add('report-open');
+  if (!nested) history.pushState({ ipReport: true }, '');
+  close.focus();
+  try {
+    if (!state.reports.some((r) => r.path === path)) await refreshReports();
+    const agent = reportOwner(path, hint);
+    if (!agent) throw new Error(`找不到报告 ${path}`);
+    /** @type {ReportText} */
+    const r = await client.request({ type: 'read_report', agent_id: agent, path });
+    if (reportEl !== el) return;
+    title.append(h('div.muted.small', null, `${agentName(agent)} · ${formatTime(r.modified_ms)}`));
+    body.replaceChildren(
+      ...(r.truncated ? [h('p.notice', null, '报告太长，只显示前 1 MB。')] : []),
+      renderMarkdown(r.text, { onReport: (p) => openReport(p, agent) }),
+    );
+  } catch (err) {
+    if (reportEl === el) body.replaceChildren(h('p.error', null, err instanceof Error ? err.message : String(err)));
+  }
+}
+
+/** @param {boolean} [keepHistory] 返回键触发的、或者马上要打开另一份时，不再退一步历史记录 */
+function closeReport(keepHistory = false) {
+  if (!reportEl) return;
+  reportEl.remove();
+  reportEl = null;
+  document.body.classList.remove('report-open');
+  if (!keepHistory && history.state?.ipReport) history.back();
+  if (reportFocus instanceof HTMLElement && reportFocus.isConnected) reportFocus.focus();
+  reportFocus = null;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && reportEl) closeReport();
+});
+window.addEventListener('popstate', () => {
+  if (reportEl) closeReport(true);
+});
+
 function askToken() {
   const t = prompt('访问令牌（服务配置了 auth_token_env 时需要）', store.get(TOKEN_KEY) ?? '');
   if (t === null) return;
@@ -1445,6 +1577,7 @@ async function loadAll() {
     client.request({ type: 'spend_today' }),
     client.request({ type: 'list_schedules' }),
     client.request({ type: 'list_memory_off_threads' }),
+    refreshReports(),
   ]);
   state.memory = null;
   memoryEl = null;

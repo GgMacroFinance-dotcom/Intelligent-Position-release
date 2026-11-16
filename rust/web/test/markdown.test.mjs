@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseBlocks, parseInline, splitRow } from '../src/markdown.js';
+import { parseBlocks, parseInline, splitReportRefs, splitRow } from '../src/markdown.js';
 
 test('标题、段落和换行', () => {
   assert.deepEqual(parseBlocks('# 结论\n第一行\n第二行\n\n另一段'), [
@@ -114,4 +114,34 @@ test('裸网址去掉句末标点', () => {
 
 test('HTML 标签按文字保留', () => {
   assert.deepEqual(parseInline('<img src=x onerror=alert(1)>'), [{ t: 'text', v: '<img src=x onerror=alert(1)>' }]);
+});
+
+test('文字里提到的报告路径（backlog F-4）', () => {
+  assert.deepEqual(splitReportRefs('报告已写好：reports/2026-11-16-cpi.md。请看'), [
+    { t: 'text', v: '报告已写好：' },
+    { t: 'report', path: 'reports/2026-11-16-cpi.md' },
+    { t: 'text', v: '。请看' },
+  ]);
+  // 中文文件名、紧跟中文
+  assert.deepEqual(splitReportRefs('见reports/美国融资环境.md里的表'), [
+    { t: 'text', v: '见' },
+    { t: 'report', path: 'reports/美国融资环境.md' },
+    { t: 'text', v: '里的表' },
+  ]);
+  for (const plain of [
+    '/tmp/ops-demo/reports/a.md', // 别的目录下的
+    'reports/sub/a.md', // 子目录
+    'reports/../ip.db.md',
+    'reports/.hidden.md',
+    'reports/a.mdx',
+    'reports/a.md.bak',
+    'myreports/a.md',
+    'reports/',
+  ]) {
+    assert.deepEqual(splitReportRefs(plain), [{ t: 'text', v: plain }], plain);
+  }
+  assert.deepEqual(
+    splitReportRefs('reports/a.md 和 reports/b.md').filter((s) => s.t === 'report').map((s) => s.t === 'report' && s.path),
+    ['reports/a.md', 'reports/b.md'],
+  );
 });

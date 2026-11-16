@@ -28,7 +28,7 @@ WebSocket 接口在 `/ws`。发一条消息：
 服务先回 `{"type":"reply","id":1,"ok":true,"data":<消息>}`，随后推送 `{"type":"event","event":{...}}`：
 `turn_started`、`delta`（流式文字）、`message`（写入存储的每条消息，含工具调用和结果）、`turn_finished` 或 `turn_failed`。
 其他请求：`list_roles`、`list_agents`、`list_threads`、`history`（`thread_id`、`before_ms`、`limit`）、`search`（`query`、`thread_id`）、
-`route`、`list_rules`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`，以及“记忆”页用的 `get_memory`、`save_memory_text`、`forget_thread_memory`、`delete_memory_note`、`clear_memory`、`list_memory_off_threads`、`set_thread_memory`。完整格式见 `web/src/types/Request.ts`。
+`route`、`list_rules`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`，以及“记忆”页用的 `get_memory`、`save_memory_text`、`forget_thread_memory`、`delete_memory_note`、`clear_memory`、`list_memory_off_threads`、`set_thread_memory`，看报告用的 `list_reports`、`read_report`。完整格式见 `web/src/types/Request.ts`。
 不指定 `agent_id` 的 `send` 按路由规则分派。
 监听非本机地址时必须设置 `auth_token_env`，客户端用 `Authorization: Bearer <令牌>` 或 `/ws?token=<令牌>` 连接。
 握手时还检查来源，挡住别的网页借浏览器连控制台：没配令牌时 `Host` 必须是本机地址（`localhost`、`127.0.0.1`、`[::1]`），
@@ -119,6 +119,7 @@ docker compose up -d --build
 - [x] 控制台手机布局（backlog F-1）：窄屏（720px 以下）导航移到底部，对话页列表和对话分两屏、带返回栏，审批选项整行可点，输入框 16px 免得 iOS 放大，留出刘海和底部横条的安全区。只在 Playwright 的 390×844 手机视口里截图核对过（假模型），没在真手机上试过
 - [x] 控制台可安装成应用（PWA，backlog F-2）：`/manifest.webmanifest`、图标和根路径的 `/sw.js`；Service Worker 只缓存控制台自己的页面、脚本、样式和图标，先走网络、断网才用缓存，不碰 `/ws` 和数据。在 Playwright 的 Chromium 里核对过：没有可安装性错误，断网后页面外壳能从缓存打开。没在真手机和 Safari 上装过；装法见[《用 Docker 部署》](../docs/ip/deploy-docker.md)
 - [x] 员工回复渲染 Markdown（backlog F-3）：`web/src/markdown.js` 先解析成块和行内元素再生成 DOM，不执行 HTML，链接只认 http、https、mailto，表格在气泡里横向滚动；人写的消息照原样显示。渲染过的消息按 id 缓存，流式输出时不重复解析整段对话。解析器的单元测试在 `web/test/`（`node --test test/*.test.mjs`），CI 的 rust 工作流会跑。只在 Playwright 里用假模型核对过
+- [x] 看员工写的报告（backlog F-4）：`list_reports`、`read_report` 两个请求（`crates/ip-server/src/reports.rs`），只读员工工作目录 `reports/` 这一层的 `.md`，挡住子目录、`..`、隐藏文件和符号链接，再核对一次真实路径，单份最多读 1 MB。控制台岗位卡片列出最近的报告，对话、任务结果和报告里提到的 `reports/<文件名>.md` 都能点开，在浮层里按 Markdown 显示，手机上占满整屏、按返回键关掉。只在 Playwright 里用假模型和手写的示例报告核对过
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片
 - [x] 路由 v2（二）：语义匹配（可选）：规则都没命中时请模型按岗位职责判断，把握够就分派，不够时把判断作为审批卡片的推荐项
