@@ -4,6 +4,7 @@
 //! data_dir: ./data                 # 相对路径以配置文件所在目录为准
 //! auth_token_env: IP_TOKEN         # 访问令牌所在的环境变量；监听非本机地址时必填
 //! allowed_origins: [https://ip.example.com]  # 反向代理改写了 Host 时，控制台对外的地址
+//! push: { contact: mailto:ops@example.com }   # Web Push 的联系方式，推送服务有问题时找谁；Safari 要有
 //! utc_offset: "+08:00"             # 员工看到的消息时间按这个时区显示；省略时是 UTC
 //! org_prompt: |
 //!   你在一家 AI 原生的研究机构工作。结论先行，引用数据注明来源。
@@ -78,6 +79,18 @@ pub struct Config {
     /// 定时任务：到点给岗位或员工发一条消息。
     #[serde(default)]
     pub schedules: Vec<crate::schedule::ScheduleSpec>,
+    /// Web Push（`docs/ip/m2-spec.md` D-33）。
+    #[serde(default)]
+    pub push: PushConfig,
+}
+
+/// Web Push 的设置。
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PushConfig {
+    /// VAPID 的 `sub`：`mailto:` 或 `https://` 开头。推送服务有问题时联系谁；Safari 没有它会拒收。
+    #[serde(default)]
+    pub contact: Option<String>,
 }
 
 fn default_data_dir() -> PathBuf {
@@ -231,6 +244,8 @@ pub enum ConfigError {
     BadUtcOffset(String),
     #[error("allowed_origins：{0}")]
     BadOrigin(String),
+    #[error("push.contact `{0}` 要以 mailto: 或 https:// 开头")]
+    BadPushContact(String),
     #[error("数字员工 id `{0}` 重复")]
     DuplicateAgent(String),
     #[error("数字员工 `{0}` 的岗位 `{1}` 不存在")]
@@ -394,6 +409,11 @@ impl Config {
         self.schedules()?;
         self.utc_offset_minutes()?;
         self.allowed_origins()?;
+        if let Some(contact) = &self.push.contact
+            && !(contact.starts_with("mailto:") || contact.starts_with("https://"))
+        {
+            return Err(ConfigError::BadPushContact(contact.clone()));
+        }
         if let Some(sem) = &self.router.semantic
             && !known_model(&sem.model)
         {
