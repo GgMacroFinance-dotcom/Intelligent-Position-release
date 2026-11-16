@@ -37,6 +37,17 @@ fn agent(id: &str) -> Agent {
     }
 }
 
+/// 关掉岗位记忆的配置（记忆默认开）。
+fn memory_off() -> RuntimeConfig {
+    RuntimeConfig {
+        memory: crate::memory::MemoryConfig {
+            enabled: false,
+            ..crate::memory::MemoryConfig::default()
+        },
+        ..RuntimeConfig::default()
+    }
+}
+
 fn fixture(turns: Vec<ScriptedTurn>, config: RuntimeConfig) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().join("ip.db")).unwrap();
@@ -147,8 +158,16 @@ async fn text_reply_is_streamed_and_stored() {
     let names: Vec<&str> = req.tools.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(
         names,
-        ["create_task", "update_task", "list_tasks", "ask_human"],
-        "没有工作目录也有组织工具"
+        [
+            "create_task",
+            "update_task",
+            "list_tasks",
+            "ask_human",
+            "memory_search",
+            "memory_read",
+            "memory_note"
+        ],
+        "没有工作目录也有组织工具和记忆工具（记忆默认开）"
     );
     let ChatMessage::System { content } = &req.messages[0] else {
         panic!("首条应是系统提示词")
@@ -222,7 +241,7 @@ async fn tool_calls_are_executed_and_fed_back() {
     assert_eq!(kinds, ["text", "call", "result", "text"]);
 
     let reqs = f.model.requests();
-    assert_eq!(reqs[0].tools.len(), 9);
+    assert_eq!(reqs[0].tools.len(), 12);
     let second = &reqs[1].messages;
     assert_eq!(
         second[2],
@@ -1447,7 +1466,7 @@ async fn notes_and_role_memory_are_added_to_the_system_prompt() {
 }
 
 #[tokio::test]
-async fn role_memory_is_off_by_default_and_respects_roles_and_limits() {
+async fn role_memory_is_on_by_default_and_respects_the_switch_roles_and_limits() {
     use crate::memory::{self, Layer, MemoryConfig};
 
     let dir = tempfile::tempdir().unwrap();
@@ -1460,8 +1479,17 @@ async fn role_memory_is_off_by_default_and_respects_roles_and_limits() {
         .await
         .unwrap();
 
-    // 默认关：记忆不带，决策者笔记照带。
-    let off = memory::load(&store, &MemoryConfig::default(), &role).await.unwrap();
+    // 默认开：两层都带。
+    let on = memory::load(&store, &MemoryConfig::default(), &role).await.unwrap();
+    assert_eq!(on.notes.as_deref(), Some("一二三四五六"));
+    assert_eq!(on.summary.as_deref(), Some("甲乙丙丁戊己"));
+
+    // 关掉：记忆不带，决策者笔记照带。
+    let disabled = MemoryConfig {
+        enabled: false,
+        ..MemoryConfig::default()
+    };
+    let off = memory::load(&store, &disabled, &role).await.unwrap();
     assert_eq!(off.notes.as_deref(), Some("一二三四五六"));
     assert_eq!(off.summary, None);
 
@@ -1720,7 +1748,7 @@ async fn consolidation_respects_the_switch_and_takes_over_a_hand_written_memory(
         retry_after_ms: None,
     };
     // 没开记忆：有对话摘要也不合并。
-    let off = fixture(vec![ScriptedTurn::Text("新".into())], RuntimeConfig::default());
+    let off = fixture(vec![ScriptedTurn::Text("新".into())], memory_off());
     off.spawn("a1", false);
     off.runtime
         .store()
@@ -1883,7 +1911,7 @@ async fn memory_tools_only_see_the_callers_role_and_reads_count_as_usage() {
     // 没开记忆的岗位没有这两个工具，硬调也不行。
     let off = fixture(
         vec![ScriptedTurn::ToolCalls(calls()), ScriptedTurn::Text("好".into())],
-        RuntimeConfig::default(),
+        memory_off(),
     );
     off.spawn("a1", false);
     off.runtime
@@ -2117,7 +2145,7 @@ async fn people_can_turn_memory_off_per_thread_forget_and_clear() {
 #[tokio::test]
 async fn distilling_respects_the_switch_the_pass_limit_and_channel_threads() {
     // 没开记忆：什么都不做。
-    let off = fixture(vec![ScriptedTurn::Text("好".into())], RuntimeConfig::default());
+    let off = fixture(vec![ScriptedTurn::Text("好".into())], memory_off());
     off.spawn("a1", false);
     one_turn(&off, None, "你好").await;
     let later = ip_core::now_ms() + 7 * HOUR_MS;

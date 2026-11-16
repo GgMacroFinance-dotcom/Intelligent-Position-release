@@ -13,14 +13,15 @@ sandbox:
 max_steps: 16                     # 一轮里最多调用模型的次数
 context_budget_chars: 60000       # 上下文超过这么多字时，把较早的对话压缩成摘要；0 不压缩
 
-# 岗位记忆（docs/ip/context-memory-design.md）：默认关。打开后，后台从结束的对话里提炼摘要（闲置 6 小时后，
+# 岗位记忆（docs/ip/context-memory-design.md）：默认开，所有岗位都开；不想要就写 memory: { enabled: false }。
+# 开着时，后台从结束的对话里提炼摘要（闲置 6 小时后，
 # 费用记在岗位账上），再按岗位合并成岗位记忆摘要，放进这个岗位每个员工的系统提示词；员工多了 memory_search、
 # memory_read、memory_note 三个工具。控制台“记忆”页可以看、改、抹掉、清空，也能按对话关掉记忆；
 # 命令行用 ip context show 查看，摘要也可以人来写：ip context set --config ip.yaml --role macro-researcher memory --file 摘要.txt
 # 2026-11-15 的真实模型实测见 docs/ip/memory-2026-11-15-real-run.md：合并用岗位自己的模型（gpt-6-luna）就够，换 gpt-6-astra 约贵 25 倍。
 # 决策者笔记不受这个开关影响，写了就生效：ip context set --config ip.yaml --role macro-researcher notes --file 笔记.txt
 # memory:
-#   enabled: true
+#   enabled: true                # 默认就是 true；写 false 关掉
 #   roles: [macro-researcher]     # 省略表示所有岗位
 #   notes_max_chars: 4000
 #   summary_max_chars: 10000
