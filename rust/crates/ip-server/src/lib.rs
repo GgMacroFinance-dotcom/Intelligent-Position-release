@@ -9,6 +9,7 @@ pub mod channels;
 pub mod check;
 pub mod config;
 mod console;
+pub mod devices;
 pub mod events;
 mod mcp;
 mod memory_admin;
@@ -50,7 +51,12 @@ pub fn router(app: Option<App>) -> Router {
             .route("/manifest.webmanifest", get(console::manifest))
             .route("/sw.js", get(console::service_worker))
             .merge(mcp::routes(&app))
-            .merge(Router::new().route("/ws", get(ws::handler)).with_state(app)),
+            .merge(
+                Router::new()
+                    .route("/ws", get(ws::handler))
+                    .route("/pair", axum::routing::post(ws::pair))
+                    .with_state(app),
+            ),
         None => base,
     }
 }

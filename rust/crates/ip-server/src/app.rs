@@ -37,12 +37,15 @@ pub struct App {
     pub(crate) workspaces: Arc<std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>>,
     /// 编好号、留着备补发的事件（`docs/ip/m2-spec.md` D-29）。转发任务在第一个 `/ws` 连接进来时启动。
     pub(crate) events: Arc<crate::events::EventLog>,
+    /// 配对过的设备和设备令牌（backlog F-7）。
+    pub(crate) devices: Arc<crate::devices::Devices>,
 }
 
 impl App {
     /// 测试和嵌入使用：直接给出运行时。
     pub fn new(runtime: Runtime, org: OrgSpec, token: Option<String>) -> Self {
         let (closing, _) = tokio::sync::watch::channel(false);
+        let store = runtime.store().clone();
         Self {
             runtime,
             org: Arc::new(org),
@@ -59,6 +62,7 @@ impl App {
             schedules: Arc::default(),
             workspaces: Arc::default(),
             events: Arc::default(),
+            devices: Arc::new(crate::devices::Devices::new(store)),
         }
     }
 
@@ -307,6 +311,11 @@ impl App {
             .with_schedules(config.schedules()?)
             .with_workspaces(workspaces);
         app.mcp = mcp;
+        app.devices
+            .load()
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("读设备列表")?;
         crate::rules::load_saved(&app).await;
         for (name, channel) in &config.channels {
             let crate::config::ChannelConfig::Slack(slack) = channel;

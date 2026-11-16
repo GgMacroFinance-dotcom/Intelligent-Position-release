@@ -179,6 +179,22 @@ pub enum Request {
     },
     /// 回复 `ReportText`：读一份报告，`path` 是 `list_reports` 给出的 `reports/<文件名>.md`。
     ReadReport { agent_id: AgentId, path: String },
+    /// 回复 `WhoAmI`：这个连接是哪台设备、能不能管理设备。
+    WhoAmI,
+    /// 回复 `DeviceInfo[]`：配对过的设备。只有共用令牌能用。
+    ListDevices,
+    /// 回复 `NewPairing`：生成一个 2 分钟内有效的 6 位配对码。`link_base` 是控制台的地址，给了就附上扫码地址和二维码。
+    /// 只有共用令牌能用。
+    CreatePairing {
+        name: String,
+        #[serde(default)]
+        #[ts(optional)]
+        link_base: Option<String>,
+    },
+    /// 回复 `DeviceInfo[]`：改完后的设备列表。只有共用令牌能用。
+    RenameDevice { device_id: String, name: String },
+    /// 回复 `DeviceInfo[]`：吊销一台设备，它的连接立即断开。只有共用令牌能用。
+    RevokeDevice { device_id: String },
     /// 回复 `SendResult`；员工的回复随后以事件推送。
     Send {
         /// 省略时由路由规则决定。
@@ -272,6 +288,15 @@ pub struct ReportInfo {
     pub bytes: u64,
     #[ts(type = "number")]
     pub modified_ms: i64,
+}
+
+/// `who_am_i` 的回复。
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct WhoAmI {
+    /// 用设备令牌连上时是这台设备；共用令牌时为空。
+    pub device: Option<crate::devices::DeviceInfo>,
+    pub can_manage_devices: bool,
 }
 
 /// `read_report` 的回复。

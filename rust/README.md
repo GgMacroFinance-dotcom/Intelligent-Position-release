@@ -32,7 +32,7 @@ WebSocket 接口在 `/ws`。发一条消息：
 `route`、`list_rules`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`，以及“记忆”页用的 `get_memory`、`save_memory_text`、`forget_thread_memory`、`delete_memory_note`、`clear_memory`、`list_memory_off_threads`、`set_thread_memory`，看报告用的 `list_reports`、`read_report`。完整格式见 `web/src/types/Request.ts`。
 不指定 `agent_id` 的 `send` 按路由规则分派。
 事件带连续的序号。断线重连时在地址里带上 `since=<收到的最后一个序号>&epoch=<hello 里的 epoch>`，服务端补发断开期间的事件（`hello.resumed` 为 true）；补不上（服务重启过、断开太久）时 `resumed` 为 false，客户端重新拉列表。见 `docs/ip/m2-spec.md` D-29。
-监听非本机地址时必须设置 `auth_token_env`，客户端用 `Authorization: Bearer <令牌>` 或 `/ws?token=<令牌>` 连接。
+监听非本机地址时必须设置 `auth_token_env`，客户端用 `Authorization: Bearer <令牌>` 或 `/ws?token=<令牌>` 连接。令牌也可以是配对过的设备的令牌（`ip device pair`，见 `docs/ip/m2-spec.md` D-30）。
 握手时还检查来源，挡住别的网页借浏览器连控制台：没配令牌时 `Host` 必须是本机地址（`localhost`、`127.0.0.1`、`[::1]`），
 带 `Origin` 的请求（浏览器）必须和 `Host` 同源或写在 `allowed_origins` 里，否则 403。不带 `Origin` 的非浏览器客户端只看令牌。
 放在反向代理后面且代理改写了 `Host` 时，把对外地址写进 `allowed_origins`，如 `[https://ip.example.com]`。
@@ -124,6 +124,7 @@ docker compose up -d --build
 - [x] 看员工写的报告（backlog F-4）：`list_reports`、`read_report` 两个请求（`crates/ip-server/src/reports.rs`），只读员工工作目录 `reports/` 这一层的 `.md`，挡住子目录、`..`、隐藏文件和符号链接，再核对一次真实路径，单份最多读 1 MB。控制台岗位卡片列出最近的报告，对话、任务结果和报告里提到的 `reports/<文件名>.md` 都能点开，在浮层里按 Markdown 显示，手机上占满整屏、按返回键关掉。只在 Playwright 里用假模型和手写的示例报告核对过
 - [x] “待办”页（backlog F-5）：员工提问、等你决定的审批卡片、受阻的任务，以及最近 7 天完成的任务和新报告；导航角标是待决定的卡片加受阻的任务。手机上默认打开这一页，宽屏仍先打开对话。只在 Playwright 里用假模型核对过
 - [x] 断线续传（backlog F-6，`docs/ip/m2-spec.md` D-29）：`/ws` 连上先发 `hello`（协议版本号、本次启动的 `epoch`），事件带连续序号；服务端留最近 4096 个事件（不超过 4 MiB），重连带上次的序号就补发，补不上才让客户端重新拉。一个转发任务编号、序列化一次，各连接共用同一份文字；连接跟不上时也先从留着的事件里补。控制台重连后不再整个重新拉列表；服务端协议版本变了会提示刷新。`ip bench events` 量编号转发的吞吐和补发耗时（开发机上约 230 万个/秒，补发 4096 个约 0.1 毫秒），接入 CI。只在测试和 Playwright 里用假模型核对过断线重连
+- [x] 设备配对（backlog F-7，`docs/ip/m2-spec.md` D-30）：`ip device pair --name <设备名> [--url <控制台地址>]` 或控制台“设备”页生成 6 位配对码（2 分钟、一次性，终端和页面都能出二维码），设备用 `POST /pair` 换自己的令牌（库里只存 SHA-256）；`/ws` 认设备令牌，设备发的消息、做的审批署设备名；“设备”页看在线、改名、吊销（立即断开）。设备暂时不能管理设备，其余和共用令牌一样，分档权限在 F-8。只在测试和 Playwright 里核对过
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片
 - [x] 路由 v2（二）：语义匹配（可选）：规则都没命中时请模型按岗位职责判断，把握够就分派，不够时把判断作为审批卡片的推荐项

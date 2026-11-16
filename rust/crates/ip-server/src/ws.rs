@@ -15,6 +15,7 @@ use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::App;
+use crate::devices::Device;
 use crate::events::{EventLog, Stamped};
 use crate::memory_admin;
 use crate::protocol::{Envelope, Request, ServerFrame};
@@ -54,24 +55,59 @@ pub async fn handler(
         );
         return (StatusCode::FORBIDDEN, reason).into_response();
     }
-    if let Some(expected) = &app.token {
-        let bearer = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "));
-        let given = bearer.or(q.token.as_deref()).unwrap_or("");
-        if !constant_time_eq(given.as_bytes(), expected.as_bytes()) {
-            return (StatusCode::UNAUTHORIZED, "需要访问令牌").into_response();
-        }
+    let bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+    let given = bearer.or(q.token.as_deref()).unwrap_or("");
+    // 共用令牌，或者某台配对过的设备的令牌（backlog F-7）。没配共用令牌时只接受本机地址（上面查过），
+    // 不带令牌也放行；带了设备令牌就按那台设备算，署名用设备名。
+    let device = app.devices.authenticate(given);
+    if let Some(expected) = &app.token
+        && device.is_none()
+        && !constant_time_eq(given.as_bytes(), expected.as_bytes())
+    {
+        return (StatusCode::UNAUTHORIZED, "需要访问令牌").into_response();
     }
+    let caller = Caller { device };
     let resume = match (q.since, q.epoch) {
         (Some(since), Some(epoch)) => Some(Resume { since, epoch }),
         _ => None,
     };
-    upgrade.on_upgrade(move |socket| session(app, socket, resume))
+    upgrade.on_upgrade(move |socket| session(app, socket, resume, caller))
 }
 
-async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>) {
+/// 这个连接是谁：共用令牌（或本机不设令牌）时 `device` 为空。
+#[derive(Clone)]
+pub(crate) struct Caller {
+    device: Option<Device>,
+}
+
+impl Caller {
+    /// 请求里自填的署名。设备连上的一律用设备名（`docs/ip/apps-plan.md` 4.4），连着时改了名用新名字。
+    fn author(&self, app: &App, given: Option<String>) -> Option<String> {
+        match &self.device {
+            Some(d) => Some(app.devices.name(&d.id).unwrap_or_else(|| d.name.clone())),
+            None => given,
+        }
+    }
+
+    /// 管理设备只给共用令牌（F-8 之后改成看设备权限）。
+    fn manage_devices(&self) -> Result<(), String> {
+        match &self.device {
+            Some(_) => Err("只有用共用令牌连上的控制台能管理设备".into()),
+            None => Ok(()),
+        }
+    }
+}
+
+async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>, caller: Caller) {
+    // 设备连接：记在线，吊销时立即断开。
+    let _online = match &caller.device {
+        Some(d) => Some(app.devices.connected(d, ip_core::now_ms()).await),
+        None => None,
+    };
+    let mut revoked = app.devices.subscribe_revoked();
     let log = app.events.clone();
     log.start_pump(app.runtime.subscribe());
     // 先收听再取留着的事件，两步之间来的事件不会漏；重复的按序号跳过。
@@ -106,6 +142,20 @@ async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>) {
                 let _ = socket.send(WsMessage::Close(None)).await;
                 break;
             }
+            notice = revoked.recv(), if caller.device.is_some() => {
+                let mine = caller.device.as_ref().map_or("", |d| d.id.as_str());
+                let gone = match notice {
+                    Ok(id) => id == mine,
+                    // 吊销通知积压丢了：直接看这台设备还在不在。
+                    Err(broadcast::error::RecvError::Lagged(_)) => !app.devices.list().iter().any(|i| i.id == mine),
+                    // 发送端跟着 App 一直在，不会关；万一关了就断开，免得空转。
+                    Err(broadcast::error::RecvError::Closed) => true,
+                };
+                if gone {
+                    let _ = socket.send(WsMessage::Close(None)).await;
+                    break;
+                }
+            }
             incoming = socket.recv() => {
                 let Some(Ok(msg)) = incoming else { break };
                 match msg {
@@ -114,8 +164,9 @@ async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>) {
                         let app = app.clone();
                         let out = out_tx.clone();
                         let text = text.to_string();
+                        let caller = caller.clone();
                         tokio::spawn(async move {
-                            let reply = handle(&app, &text).await;
+                            let reply = handle(&app, &caller, &text).await;
                             let _ = out.send(reply.to_json()).await;
                         });
                     }
@@ -140,6 +191,42 @@ async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>) {
                     break;
                 }
             }
+        }
+    }
+}
+
+/// 设备连上的请求，署名换成设备名，忽略自填的 `author`。
+fn sign(mut request: Request, app: &App, caller: &Caller) -> Request {
+    match &mut request {
+        Request::Route { author, .. }
+        | Request::Send { author, .. }
+        | Request::CreateTask { author, .. }
+        | Request::UpdateTask { author, .. }
+        | Request::ResolveApproval { author, .. } => *author = caller.author(app, author.take()),
+        _ => {}
+    }
+    request
+}
+
+#[derive(Deserialize)]
+pub struct PairBody {
+    code: String,
+}
+
+/// `POST /pair`：用 6 位配对码换这台设备专属的令牌（backlog F-7）。来源检查和 `/ws` 一样。
+pub async fn pair(State(app): State<App>, headers: HeaderMap, axum::Json(body): axum::Json<PairBody>) -> Response {
+    if let Err(reason) = crate::origin::check(&headers, app.token.is_some(), &app.allowed_origins) {
+        return (StatusCode::FORBIDDEN, reason).into_response();
+    }
+    match app.devices.claim(&body.code, ip_core::now_ms()).await {
+        Ok(claimed) => axum::Json(claimed).into_response(),
+        Err(e) => {
+            let status = match e {
+                crate::devices::ClaimError::Invalid => StatusCode::BAD_REQUEST,
+                crate::devices::ClaimError::TooManyAttempts => StatusCode::TOO_MANY_REQUESTS,
+                crate::devices::ClaimError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, axum::Json(serde_json::json!({ "error": e.to_string() }))).into_response()
         }
     }
 }
@@ -170,7 +257,7 @@ async fn catch_up(socket: &mut WebSocket, log: &EventLog, last: &mut u64) -> boo
     }
 }
 
-async fn handle(app: &App, text: &str) -> ServerFrame {
+async fn handle(app: &App, caller: &Caller, text: &str) -> ServerFrame {
     let envelope: Envelope = match serde_json::from_str(text) {
         Ok(e) => e,
         Err(e) => {
@@ -180,10 +267,17 @@ async fn handle(app: &App, text: &str) -> ServerFrame {
             return ServerFrame::reply(id, Err(format!("请求格式错误：{e}")));
         }
     };
-    ServerFrame::reply(envelope.id, dispatch(app, envelope.request).await)
+    ServerFrame::reply(envelope.id, dispatch(app, caller, envelope.request).await)
 }
 
-async fn dispatch(app: &App, request: Request) -> Result<Value, String> {
+async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value, String> {
+    // 吊销和断开之间还没处理完的请求，一律拒绝。
+    if let Some(d) = &caller.device
+        && app.devices.name(&d.id).is_none()
+    {
+        return Err("这台设备已吊销".into());
+    }
+    let request = sign(request, app, caller);
     let rt = &app.runtime;
     let limit = |l: Option<usize>, default: usize| l.unwrap_or(default).clamp(1, MAX_LIMIT);
     let to_json = |v: serde_json::Result<Value>| v.map_err(|e| e.to_string());
@@ -334,6 +428,36 @@ async fn dispatch(app: &App, request: Request) -> Result<Value, String> {
         Request::ListReports { agent_id, limit: l } => to_json(serde_json::to_value(
             crate::reports::list(app, agent_id.as_ref(), limit(l, 100)).await?,
         )),
+        Request::WhoAmI => {
+            let device = caller
+                .device
+                .as_ref()
+                .and_then(|d| app.devices.list().into_iter().find(|i| i.id == d.id));
+            to_json(serde_json::to_value(crate::protocol::WhoAmI {
+                device,
+                can_manage_devices: caller.manage_devices().is_ok(),
+            }))
+        }
+        Request::ListDevices => {
+            caller.manage_devices()?;
+            to_json(serde_json::to_value(app.devices.list()))
+        }
+        Request::CreatePairing { name, link_base } => {
+            caller.manage_devices()?;
+            let pairing = app
+                .devices
+                .create_pairing(&name, link_base.as_deref(), ip_core::now_ms())
+                .await?;
+            to_json(serde_json::to_value(pairing))
+        }
+        Request::RenameDevice { device_id, name } => {
+            caller.manage_devices()?;
+            to_json(serde_json::to_value(app.devices.rename(&device_id, &name).await?))
+        }
+        Request::RevokeDevice { device_id } => {
+            caller.manage_devices()?;
+            to_json(serde_json::to_value(app.devices.revoke(&device_id).await?))
+        }
         Request::ReadReport { agent_id, path } => {
             to_json(serde_json::to_value(crate::reports::read(app, &agent_id, &path).await?))
         }
