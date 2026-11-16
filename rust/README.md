@@ -176,7 +176,7 @@ docker compose up -d --build
 - [x] Docker 部署：`rust/Dockerfile`、`docker-compose.yml`、`deploy/env.example`；镜像带 bubblewrap，可选带 Codex；以 uid 10001 运行，数据放命名卷，端口只绑本机。在容器里用假模型跑通了沙箱里的 shell，`ip check`、健康检查、令牌校验都测过；真实模型、Slack、Codex 和其他验收一起做。见[《用 Docker 部署》](../docs/ip/deploy-docker.md)
 - [x] 质量评测 `ip eval`（backlog B-1）：评测集 `evals/macro-smoke.yaml` 两个固定问题（有数据的、一半取不到的），检查项全由程序判定；2026-11-12 用 `gpt-6-luna` 真实跑两遍，都是 2/2 通过，每遍不到 0.01 美元，结果在 `docs/ip/evals/2026-11-12-luna/`
 - [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（容器只能经代理出网，backlog E-12）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
-- [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账还没修（E-10）
+- [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账 2026-11-16 修了（E-10，只用假 codex 测过）
 
 **M0 验收**：在云主机上用一个可执行文件启动；通过 WebSocket 和一个岗位对话，它能在沙箱里跑 shell 命令；中文能搜到历史消息；启动、内存、并发三项达到方案里的性能目标。
 

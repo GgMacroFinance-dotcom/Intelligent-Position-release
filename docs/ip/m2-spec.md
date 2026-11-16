@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.18（2026-11-16）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.20（2026-11-21）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -37,7 +37,7 @@
 | M2-3 | MCP 服务端：把组织工具开放给外部引擎（第 5 节） | Claude | — | 已实现（#21） |
 | M2-4 | 引擎接口和 Codex 引擎，只给运维测试岗位用（第 6 节） | Claude | M2-3 | 已实现（#22），先用假 codex 验证；2026-11-14 用真实 Codex 跑通过一次示例项目（M2-6） |
 | M2-5 | 真实验收：在 Slack 线程里提需求，经协调员派给宏观研究员，交回报告，结论回到 Slack 线程（同时完成 M0、M1 的真实验收） | Claude | M2-2、维护者提供 Slack 工作区（按 `examples/slack/manifest.yaml` 建好应用）、两个 Slack 令牌和模型 API key | 完成（2026-11-16，[记录](acceptance-2026-11-16-slack.md)）：真实工作区里手册第 4 节的 Slack 链路都符合。经本机转发器连接（Socket Mode 不走代理），回复里没有真实数据，私有频道和私信没验 |
-| M2-6 | 真实验收：用真实 Codex 跑 `examples/ops-demo`，经历跑测试失败 → 修复 → 复跑通过 → 写报告 → 交回 | Claude | M2-4、维护者提供 Codex API key | 完成（2026-11-14，`codex-cli 0.169.0`，见 `docs/ip/acceptance-2026-11-14-codex.md`）。消息从控制台发，没经 Slack；还没在真实项目上跑过；续接会话时用量重复记账没修（backlog E-10） |
+| M2-6 | 真实验收：用真实 Codex 跑 `examples/ops-demo`，经历跑测试失败 → 修复 → 复跑通过 → 写报告 → 交回 | Claude | M2-4、维护者提供 Codex API key | 完成（2026-11-14，`codex-cli 0.169.0`，见 `docs/ip/acceptance-2026-11-14-codex.md`）。消息从控制台发，没经 Slack；还没在真实项目上跑过；续接会话时用量重复记账 2026-11-16 修了（backlog E-10，只用假 codex 测过） |
 
 M2-1 和 M2-3 改的文件基本不重叠，可以同时做。
 
@@ -558,6 +558,7 @@ pub struct TurnContext<'a> {
     pub thread: &'a ThreadId,
     pub workspace: Option<&'a Path>,
     pub session: Option<&'a str>,     // 引擎在这个对话里已有的会话；None 表示第一轮
+    pub session_usage: Usage,         // 这个会话到上一轮为止累计报告的用量；没有会话时全是 0（v0.20）
     pub system_prompt: &'a str,       // 组织规则、岗位说明、同事名单
     pub input: &'a str,               // 上一轮之后的新消息（不含员工自己写的），已整理成文字
     pub mcp: Option<McpGrant>,        // 本轮的 /mcp 地址和令牌（D-18）
@@ -565,6 +566,7 @@ pub struct TurnContext<'a> {
 }
 
 pub struct TurnReport { pub steps: u32, pub usage: Usage, pub cost_usd: f64,
+                        pub session_usage: Option<Usage>,   // 会话到这一轮为止的累计用量；None 表示这一轮没拿到（v0.20）
                         pub session_id: Option<String>, pub error: Option<String> }
 ```
 
@@ -617,7 +619,7 @@ engines:
 - 提示词在单独的任务里写进标准输入：提示词超过管道缓冲、而进程又不读时，不会卡在超时保护之外。
 - 参数顺序（`exec` 的选项放在 `resume` 之前）和 JSONL 格式，原来是按 2026-11 的资料写的。2026-11-14 用真实 Codex（`codex-cli 0.169.0`）验收（M2-6）时核对过：参数顺序可用，输出解析改了四处（给组织工具的 MCP 服务器加 `default_tools_approval_mode="approve"`；中途的顶层 `error` 事件只当警告，成败看 `turn.failed` 和 `turn.completed`；空的 `"error": null` 不算出错；`cache_write_input_tokens` 计入用量）。见 `docs/ip/acceptance-2026-11-14-codex.md`。只在这一个版本上跑过。
 
-### D-23 引擎会话表 · 已实现（#22）
+### D-23 引擎会话表 · 已实现（#22）；累计用量四列是提议（v0.20，等工程师审查）
 
 ```sql
 CREATE TABLE IF NOT EXISTS engine_sessions (
@@ -627,6 +629,11 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
     session_id    TEXT NOT NULL,   -- Codex 的会话 id（thread.started 事件里给出），resume 时用
     last_message  TEXT NOT NULL,   -- 已交给引擎的最后一条消息；下一轮从它之后取新消息
     updated_at_ms INTEGER NOT NULL,
+    -- 这个会话到上一轮为止累计报告的用量（v0.20）
+    used_prompt_tokens      INTEGER NOT NULL DEFAULT 0,
+    used_cached_tokens      INTEGER NOT NULL DEFAULT 0,
+    used_cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    used_completion_tokens  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, thread_id)
 ) WITHOUT ROWID;
 ```
@@ -634,6 +641,11 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 - 这张表是运行状态，不写事件日志：每轮都会更新，写进日志只会让日志膨胀。
 - `last_message` 只在一轮成功后前移，并且取这一轮开始时对话里的最后一条消息。所以这一轮进行中新来的消息不会被跳过，失败的一轮下次会重新交一遍。
 - 岗位换了引擎种类时，旧会话不再续接，从头开始。
+- 累计用量（v0.20，backlog E-10）：`codex exec resume` 的 `turn.completed` 报的是整个会话的累计用量，不是这一轮的。运行时把已存的累计值经 `TurnContext::session_usage` 交给引擎，引擎报回这一轮的差值（`usage`、`cost_usd`，记账用）和新的累计值（`session_usage`，存回这张表）。
+  - 报的数每一项都不小于已存的累计值时，这一轮是两者之差。有一项更小，说明报的不是累计值，按这一轮的用量全额记，累计值往上加：宁可多记也不漏记。
+  - Codex 另开了会话（`thread.started` 给的 id 和续接的不一样）时，基线是 0。
+  - 失败的一轮不前移 `last_message`，但累计用量照存，否则下一轮会把这一轮已经记过的用量再记一次。
+  - 旧库打开时自动补上这四列，默认 0；旧会话的下一轮会按全量记一次（多记这一次），之后正常。
 
 ### D-24 Codex 输出怎么记进对话 · 已实现（#22）
 
@@ -850,3 +862,4 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 | 2026-11-16 | v0.17 | 新增 D-33（提议，backlog F-10）：Web Push、`push_key`、`subscribe_push`、`unsubscribe_push`、`presence` 四个请求，`ip.yaml` 的 `push.contact` |
 | 2026-11-16 | v0.18 | 新增 D-34（提议，backlog F-11）：配了令牌时 `/ws` 和 `/pair` 接受桌面 App 的来源 |
 | 2026-11-21 | v0.19 | 新增 D-35（提议，backlog F-21）：手机 App 的锁屏推送照 Web Push 发给项目运营的中转 `ip-relay`，中转转给 APNs、FCM；`ip.yaml` 加 `push.hosts`，推送负载上限降到 2800 字节。`/ws` 协议不变 |
+| 2026-11-21 | v0.20 | 修 Codex 续接会话时用量重复记账（backlog E-10，提议，等工程师审查）：D-23 的引擎会话表加四列累计用量，D-20 的 `TurnContext` 加 `session_usage`、`TurnReport` 加 `session_usage`；每轮只记和上一轮累计值的差。只用假 codex 测过，累计值的数字取自 2026-11-14 真实 Codex 的核对 |

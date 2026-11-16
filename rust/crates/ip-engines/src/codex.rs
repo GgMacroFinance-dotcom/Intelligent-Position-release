@@ -226,8 +226,14 @@ impl CodexEngine {
         };
 
         report.steps = state.steps;
-        report.usage = state.usage;
-        report.cost_usd = self.config.price.map_or(0.0, |p| p.cost(&state.usage));
+        // 续接的会话里，`turn.completed` 报的是整个会话的累计用量（2026-11-14 用 codex-cli 0.169.0 核对过），
+        // 只有减掉以前几轮的才是这一轮的。没续接、或者 Codex 另开了会话时，基线是 0。
+        let resumed = ctx.session.is_some() && state.session.as_deref().is_none_or(|id| Some(id) == ctx.session);
+        let baseline = if resumed { ctx.session_usage } else { Usage::default() };
+        let (turn_usage, session_usage) = split_usage(baseline, state.usage);
+        report.usage = turn_usage;
+        report.cost_usd = self.config.price.map_or(0.0, |p| p.cost(&turn_usage));
+        report.session_usage = Some(session_usage);
         report.session_id = state.session;
         report.error = match status {
             Err(_) => {
@@ -295,6 +301,34 @@ enum Action {
     /// 顶层 `error` 事件。codex-cli 0.169.0 用它报中途重试（如 `Reconnecting... 2/5`），
     /// 之后常常照样跑完，所以只记下来；这一轮有没有失败看 `turn.failed` 和 `turn.completed`。
     Warning(String),
+}
+
+/// 把 Codex 这次报的用量拆成（这一轮的用量，会话累计用量）。`baseline` 是会话到上一轮为止的累计值。
+///
+/// 报的数每一项都不小于基线时，按累计值处理：这一轮是两者之差。有一项比基线小，说明报的不是累计值
+/// （没续接上，或者以后的版本改成按轮报），就按这一轮的用量全额记，宁可多记也不漏记。
+fn split_usage(baseline: Usage, reported: Usage) -> (Usage, Usage) {
+    let cumulative = reported.prompt_tokens >= baseline.prompt_tokens
+        && reported.cached_tokens >= baseline.cached_tokens
+        && reported.cache_write_tokens >= baseline.cache_write_tokens
+        && reported.completion_tokens >= baseline.completion_tokens;
+    if cumulative {
+        let turn = Usage {
+            prompt_tokens: reported.prompt_tokens - baseline.prompt_tokens,
+            cached_tokens: reported.cached_tokens - baseline.cached_tokens,
+            cache_write_tokens: reported.cache_write_tokens - baseline.cache_write_tokens,
+            completion_tokens: reported.completion_tokens - baseline.completion_tokens,
+        };
+        (turn, reported)
+    } else {
+        let total = Usage {
+            prompt_tokens: baseline.prompt_tokens.saturating_add(reported.prompt_tokens),
+            cached_tokens: baseline.cached_tokens.saturating_add(reported.cached_tokens),
+            cache_write_tokens: baseline.cache_write_tokens.saturating_add(reported.cache_write_tokens),
+            completion_tokens: baseline.completion_tokens.saturating_add(reported.completion_tokens),
+        };
+        (reported, total)
+    }
 }
 
 #[derive(Default)]
@@ -510,6 +544,30 @@ mod tests {
         assert!(serde_json::from_str::<CodexConfig>(r#"{"sandbox": "read-only"}"#).is_ok());
         assert!(serde_json::from_str::<CodexConfig>(r#"{"sandbox": "danger-full-access"}"#).is_err());
         assert!(serde_json::from_str::<CodexConfig>(r#"{"typo": 1}"#).is_err());
+    }
+
+    #[test]
+    fn resumed_sessions_are_charged_only_the_difference() {
+        let usage = |prompt_tokens, cached_tokens, cache_write_tokens, completion_tokens| Usage {
+            prompt_tokens,
+            cached_tokens,
+            cache_write_tokens,
+            completion_tokens,
+        };
+        // 第一轮：没有基线，报多少记多少。
+        let first = usage(12_492, 0, 12_489, 5);
+        assert_eq!(split_usage(Usage::default(), first), (first, first));
+        // 续接的第二轮报的是累计值（2026-11-14 用真实 Codex 核对的数）：只记差值。
+        let second = usage(25_006, 12_489, 12_511, 23);
+        assert_eq!(split_usage(first, second), (usage(12_514, 12_489, 22, 18), second));
+        // 这一轮没报用量（没有 turn.completed）：不记，累计值不变。
+        assert_eq!(split_usage(second, Usage::default()), (Usage::default(), second));
+        // 报的数比基线小，说明不是累计值：全额记，累计值往上加。
+        let per_turn = usage(9_000, 100, 0, 40);
+        assert_eq!(
+            split_usage(second, per_turn),
+            (per_turn, usage(34_006, 12_589, 12_511, 63))
+        );
     }
 
     #[test]

@@ -204,6 +204,17 @@ pub struct EngineSession {
     /// 已交给引擎的最后一条消息；下一轮只交它之后的新消息。
     pub last_message: MessageId,
     pub updated_at_ms: i64,
+    /// 这个会话到上一轮为止累计报告的用量。续接时引擎报的是累计值，记账只记和它的差值。
+    pub used: SessionUsage,
+}
+
+/// 引擎会话累计报告的 token 用量（`docs/ip/m2-spec.md` D-23）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SessionUsage {
+    pub prompt_tokens: u32,
+    pub cached_tokens: u32,
+    pub cache_write_tokens: u32,
+    pub completion_tokens: u32,
 }
 
 /// 存储的句柄，可以克隆后在多个任务间共享。
@@ -642,8 +653,9 @@ impl Store {
         let (agent, thread) = (agent.clone(), thread.clone());
         self.read(move |c| {
             Ok(c.prepare_cached(
-                "SELECT engine, session_id, last_message, updated_at_ms FROM engine_sessions
-                 WHERE agent_id = ?1 AND thread_id = ?2",
+                "SELECT engine, session_id, last_message, updated_at_ms, used_prompt_tokens,
+                        used_cached_tokens, used_cache_write_tokens, used_completion_tokens
+                 FROM engine_sessions WHERE agent_id = ?1 AND thread_id = ?2",
             )?
             .query_row(params![agent.as_str(), thread.as_str()], |row| {
                 Ok(EngineSession {
@@ -653,6 +665,12 @@ impl Store {
                     session_id: row.get(1)?,
                     last_message: MessageId::from(row.get::<_, String>(2)?),
                     updated_at_ms: row.get(3)?,
+                    used: SessionUsage {
+                        prompt_tokens: row.get(4)?,
+                        cached_tokens: row.get(5)?,
+                        cache_write_tokens: row.get(6)?,
+                        completion_tokens: row.get(7)?,
+                    },
                 })
             })
             .optional()?)

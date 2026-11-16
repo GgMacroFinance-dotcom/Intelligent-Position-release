@@ -457,11 +457,17 @@ fn put_delivery(connection: &Connection, d: &Delivery) -> Result<()> {
 fn put_engine_session(connection: &Connection, s: &EngineSession) -> Result<()> {
     connection
         .prepare_cached(
-            "INSERT INTO engine_sessions (agent_id, thread_id, engine, session_id, last_message, updated_at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO engine_sessions
+                 (agent_id, thread_id, engine, session_id, last_message, updated_at_ms, used_prompt_tokens,
+                  used_cached_tokens, used_cache_write_tokens, used_completion_tokens)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(agent_id, thread_id) DO UPDATE SET
                  engine = excluded.engine, session_id = excluded.session_id,
-                 last_message = excluded.last_message, updated_at_ms = excluded.updated_at_ms",
+                 last_message = excluded.last_message, updated_at_ms = excluded.updated_at_ms,
+                 used_prompt_tokens = excluded.used_prompt_tokens,
+                 used_cached_tokens = excluded.used_cached_tokens,
+                 used_cache_write_tokens = excluded.used_cache_write_tokens,
+                 used_completion_tokens = excluded.used_completion_tokens",
         )?
         .execute(params![
             s.agent_id.as_str(),
@@ -469,7 +475,11 @@ fn put_engine_session(connection: &Connection, s: &EngineSession) -> Result<()> 
             s.engine,
             s.session_id,
             s.last_message.as_str(),
-            s.updated_at_ms
+            s.updated_at_ms,
+            s.used.prompt_tokens,
+            s.used.cached_tokens,
+            s.used.cache_write_tokens,
+            s.used.completion_tokens
         ])?;
     Ok(())
 }

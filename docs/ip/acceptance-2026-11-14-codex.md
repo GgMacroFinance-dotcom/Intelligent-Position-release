@@ -32,7 +32,9 @@ Codex 引擎的命令行参数和输出解析原来是按资料写的，这次�
 3. **MCP 调用成功也被记成失败。** Codex 成功时也带 `"error": null`，harness 原来见到 `error` 字段就算出错，输出成了 `null`。现在空的 `error` 不算出错。
 4. **缓存写入没有记账。** Codex 的用量里有 `cache_write_input_tokens`（#54 时我按资料写了“Codex 没有”，不对）。现在读进来，按 `cache_write` 价格计费。
 
-## 还没修的：续接会话时用量重复记账（backlog E-10）
+## 当时没修的：续接会话时用量重复记账（backlog E-10）
+
+> 2026-11-16 已修：引擎会话表存会话的累计用量，每轮只记差值（`docs/ip/m2-spec.md` D-23）。只用假 codex 测过，没有用真实 Codex 重跑。下面是当时的记录。
 
 续接会话（`codex exec resume`）时，`turn.completed` 报的是整个会话的累计用量，不是这一轮的。用 `gpt-6-luna` 先跑一轮、再续接一轮核对过：
 

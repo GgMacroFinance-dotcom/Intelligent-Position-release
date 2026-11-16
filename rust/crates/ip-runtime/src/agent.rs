@@ -495,6 +495,12 @@ impl Worker {
                 thread,
                 workspace: self.toolbox.as_ref().map(Toolbox::workspace),
                 session: session.as_ref().map(|s| s.session_id.as_str()),
+                session_usage: session.as_ref().map_or_else(Usage::default, |s| Usage {
+                    prompt_tokens: s.used.prompt_tokens,
+                    cached_tokens: s.used.cached_tokens,
+                    cache_write_tokens: s.used.cache_write_tokens,
+                    completion_tokens: s.used.completion_tokens,
+                }),
                 system_prompt: &system,
                 input: &input,
                 mcp: mcp.clone(),
@@ -507,7 +513,28 @@ impl Worker {
         add_usage(usage, Some(report.usage));
         *cost += report.cost_usd;
         self.shared.ledger.charge(store, &self.role.id, report.cost_usd).await?;
+        // 会话的累计用量：引擎这一轮没报就沿用已存的。
+        let used = report.session_usage.map_or_else(
+            || session.as_ref().map(|s| s.used).unwrap_or_default(),
+            |u| ip_store::SessionUsage {
+                prompt_tokens: u.prompt_tokens,
+                cached_tokens: u.cached_tokens,
+                cache_write_tokens: u.cache_write_tokens,
+                completion_tokens: u.completion_tokens,
+            },
+        );
         if let Some(error) = report.error {
+            // 失败的一轮不前移 `last_message`（下次重新交一遍），但已经记过账的用量要存下来：
+            // 续接时引擎报的是累计值，不存的话下一轮会把这一轮的用量再记一次。
+            if let Some(s) = session.filter(|s| s.used != used) {
+                store
+                    .put_engine_session(ip_store::EngineSession {
+                        used,
+                        updated_at_ms: now_ms(),
+                        ..s
+                    })
+                    .await?;
+            }
             return Err(TurnError::Engine(error));
         }
         if let Some(session_id) = report.session_id.or(session.map(|s| s.session_id)) {
@@ -519,6 +546,7 @@ impl Worker {
                     session_id,
                     last_message: last_seen,
                     updated_at_ms: now_ms(),
+                    used,
                 })
                 .await?;
         }
