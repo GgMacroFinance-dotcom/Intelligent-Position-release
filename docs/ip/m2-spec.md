@@ -36,7 +36,7 @@
 | M2-2 | Slack 渠道，用 Socket Mode（第 4 节） | Claude | M2-1 | 已实现（#25），用假 Slack 服务器验证 |
 | M2-3 | MCP 服务端：把组织工具开放给外部引擎（第 5 节） | Claude | — | 已实现（#21） |
 | M2-4 | 引擎接口和 Codex 引擎，只给运维测试岗位用（第 6 节） | Claude | M2-3 | 已实现（#22），先用假 codex 验证；2026-11-14 用真实 Codex 跑通过一次示例项目（M2-6） |
-| M2-5 | 真实验收：在 Slack 线程里提需求，经协调员派给宏观研究员，交回报告，结论回到 Slack 线程（同时完成 M0、M1 的真实验收） | Claude | M2-2、维护者提供 Slack 工作区（按 `examples/slack/manifest.yaml` 建好应用）、两个 Slack 令牌和模型 API key | 验收手册和 `ip check` 已就绪（#26），等维护者提供账号和 key 后按 `docs/ip/m2-acceptance.md` 第 4 节做 |
+| M2-5 | 真实验收：在 Slack 线程里提需求，经协调员派给宏观研究员，交回报告，结论回到 Slack 线程（同时完成 M0、M1 的真实验收） | Claude | M2-2、维护者提供 Slack 工作区（按 `examples/slack/manifest.yaml` 建好应用）、两个 Slack 令牌和模型 API key | 完成（2026-11-16，[记录](acceptance-2026-11-16-slack.md)）：真实工作区里手册第 4 节的 Slack 链路都符合。经本机转发器连接（Socket Mode 不走代理），回复里没有真实数据，私有频道和私信没验 |
 | M2-6 | 真实验收：用真实 Codex 跑 `examples/ops-demo`，经历跑测试失败 → 修复 → 复跑通过 → 写报告 → 交回 | Claude | M2-4、维护者提供 Codex API key | 完成（2026-11-14，`codex-cli 0.169.0`，见 `docs/ip/acceptance-2026-11-14-codex.md`）。消息从控制台发，没经 Slack；还没在真实项目上跑过；续接会话时用量重复记账没修（backlog E-10） |
 
 M2-1 和 M2-3 改的文件基本不重叠，可以同时做。
@@ -482,7 +482,7 @@ channels:
 - `ip-server/src/slack_tests.rs`：
   - 端到端：从 `ip.yaml` 的配置建出渠道，在频道里 @机器人 → 宏观研究员回复到同一线程 → 规则不命中时发卡片 → 别人点不生效、只告诉他本人 → 提需求的人点了以后，原卡片更新、员工接手回复 → 名单外的频道不理会。
   - `channels` 配置的解析和各项校验。
-- 真实验收（M2-5）：在真实工作区里人工走一遍 T1–T5，再完成真实模型的端到端流程。Slack 的接口和字段名都是按资料写的，没有对照真实工作区核对过；验收时要过一遍，有出入就改 `slack.rs` 和这一节。
+- 真实验收（M2-5）：在真实工作区里人工走一遍 T1–T5，再完成真实模型的端到端流程。Slack 的接口和字段名原来是按资料写的；2026-11-16 在真实工作区的公开频道里走了一遍（[记录](acceptance-2026-11-16-slack.md)），用到的接口（`auth.test`、`apps.connections.open`、`users.info`、`chat.postMessage`、`chat.postEphemeral`、`chat.update`）和事件字段都对得上，没有改 `slack.rs`。私有频道和私信没验。
 
 ---
 
