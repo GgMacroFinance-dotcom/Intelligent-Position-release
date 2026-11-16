@@ -38,7 +38,7 @@
 | C-1 | 根目录 README：这是什么、五分钟跑起来、架构图、路线图；`LICENSE` 放到根目录 | 完成：根目录 `README.md` 和 `LICENSE`（从 `rust/` 移上来）。跑起来的步骤实测到服务启动、控制台和路由可用为止，没有用真实模型对话；第一次编译约 5 分钟。仓库地址和密钥说明在 C-2、C-4 之后要再改一次 |
 | C-2 | 把 Finance Macro Data API（which-api 仓库的 `packages/macro-mcp`）拆出来开源：定许可证；核对各上游数据源的使用条款；示例配置默认改成本机 stdio 启动，不依赖拿不到密钥的测试部署 | 本仓库这边完成：按维护者 2026-11-13 的决定，9 个宏观工具放进 `macro-mcp/`（MIT），不带 API 目录，FRED 经 WhichAPI 托管服务取（要 `WHICHAPI_API_KEY`），ICE BofA 序列去掉；示例配置改成本机启动。见[开源前的核对](macro-mcp-open-source.md)第 6 节。托管服务取 FRED 改走官方 API 也完成了（2026-11-14，which-api PR #13，key 配在 Render 上；开源包随后转发 `units`，算同比用 `pc1`）。当天在 Render 上实测通过：`CPIAUCSL` 带 `units=pc1` 返回 2026 年 9 月同比 3.72%。还差一件 which-api 那边的事（等人）：给用户发 WhichAPI key 的办法。2026-11-15 读了上游条款原文（[条款核对](upstream-terms-2026-11-15.md)）：FRED 经托管服务用共用 key 转发、缓存和 FRED 条款冲突，维护者 2026-11-16 定：保留转发，写信请圣路易斯联储书面同意 |
 | C-3 | 两位工程师各把代码通读一遍，问题开 issue。敏感路径优先 | 等人 |
-| C-4 | 新建干净的公开仓库，只推 `main` 的代码；现有仓库留作私有存档。原因：已关闭的 PR #1 里有 nightly-lab 的非商用代码，删分支也去不掉 | 等人（A、C 其余各条完成后） |
+| C-4 | 新建干净的公开仓库，只推 `main` 的代码；现有仓库留作私有存档。原因：已关闭的 PR #1 里有 nightly-lab 的非商用代码，删分支也去不掉 | 迁移完成（2026-11-16）：新仓库 `GgMacroFinance-dotcom/Intelligent-Position-release`，一个不带历史的初始提交，文件树和旧仓库 `main` 的 `fc7912d` 一致。还是私有的，改成公开等人（先定哪些内部文档留下，见[发布前清单](release-checklist.md) R-6） |
 | C-5 | CI 恢复：把本地检查换回 CI | 完成（2026-11-13）：账户计费恢复后 Actions 能跑了，`main` 上 `rust` 工作流 check 和 bench 都通过。仓库还是私有的，分钟数有限；公开后免费 |
 | C-6 | A-1 通过后，把主页和文案里的“验收中”改回“已上线” | 等人（维护者决定） |
 

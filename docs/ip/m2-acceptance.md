@@ -24,11 +24,11 @@ sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 ```
 
 ```bash
-git clone https://github.com/GgMacroFinance-dotcom/intelligent-position.git
+git clone https://github.com/GgMacroFinance-dotcom/Intelligent-Position-release.git
 ```
 
 ```bash
-cd intelligent-position/rust && cargo build --release --locked
+cd Intelligent-Position-release/rust && cargo build --release --locked
 ```
 
 **账号和密钥**（只放环境变量，不写进 `ip.yaml`）：

@@ -2,7 +2,7 @@
 // 带 demo: true 或 "示意" 的数字是占位值，上线前换成实测数据。
 window.IP_DATA = {
   links: {
-    github: "https://github.com/ggmacrofinance-dotcom/intelligent-position",
+    github: "https://github.com/GgMacroFinance-dotcom/Intelligent-Position-release",
     apiDocs: "#api",
     contact: "#contact",
   },

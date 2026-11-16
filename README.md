@@ -72,11 +72,11 @@ flowchart TB
 需要 Linux、Rust 1.85 以上和 Node.js 18.17 以上（宏观研究员的取数工具 `macro-mcp/` 用 Node 跑）。第一次编译在 4 核主机上约 5 分钟，之后服务启动只要几毫秒。
 
 ```bash
-git clone https://github.com/GgMacroFinance-dotcom/intelligent-position.git
+git clone https://github.com/GgMacroFinance-dotcom/Intelligent-Position-release.git
 ```
 
 ```bash
-cd intelligent-position/rust && cargo build --release --locked
+cd Intelligent-Position-release/rust && cargo build --release --locked
 ```
 
 ```bash
