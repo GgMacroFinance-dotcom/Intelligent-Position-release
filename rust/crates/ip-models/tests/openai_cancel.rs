@@ -1,4 +1,4 @@
-//! 取消和结束时释放连接与并发名额（#68）。
+//! 模型 HTTP 连接的取消、结束和超时。
 //!
 //! 用裸 TCP 写的假服务端，按连接顺序决定怎么回：可以只回一半正文后挂着、一直不回响应头、
 //! 发完结束事件后不关连接。每条连接的“到达”“被客户端断开”都报给测试，
@@ -6,7 +6,9 @@
 
 use std::time::Duration;
 
-use ip_models::{ChatMessage, ChatRequest, ModelClient, OpenAiCompatible, OpenAiConfig, StreamEvent, WireApi};
+use ip_models::{
+    ChatMessage, ChatRequest, ModelClient, ModelError, OpenAiCompatible, OpenAiConfig, StreamEvent, WireApi,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -33,6 +35,10 @@ enum Script {
     Hang(&'static str),
     /// 一直不回响应头。
     Silent,
+    /// 回 401 和正文，但不关闭连接。
+    ErrorHang(&'static str, usize),
+    /// 先发文本，再等待超过响应头时限的时间后结束。
+    SlowStream,
     /// 回 503，要求 30 秒后重试。
     Busy,
 }
@@ -78,6 +84,20 @@ async fn connection(n: usize, mut socket: TcpStream, script: Script, tx: mpsc::U
             true
         }
         Script::Silent => true,
+        Script::ErrorHang(piece, count) => {
+            let _ = socket
+                .write_all(format!("{}{}", head("401 Unauthorized"), piece.repeat(count)).as_bytes())
+                .await;
+            true
+        }
+        Script::SlowStream => {
+            let _ = socket
+                .write_all(format!("{}{CHAT_PARTIAL}", head("200 OK")).as_bytes())
+                .await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let _ = socket.write_all(b"data: [DONE]\n\n").await;
+            false
+        }
         Script::Busy => {
             let body = "busy";
             let response = format!(
@@ -246,4 +266,69 @@ async fn done_closes_stream_without_waiting_for_http_eof() {
         assert_eq!(next_seen(&mut rx).await, Seen::Closed(0), "{api:?}");
         next_request_gets_through(&model, &mut rx, 1).await;
     }
+}
+
+fn timeout_client(base: String, connect_timeout: Duration) -> OpenAiCompatible {
+    let mut config = OpenAiConfig::new(base);
+    config.connect_timeout = connect_timeout;
+    config.max_retries = 0;
+    OpenAiCompatible::new(config).unwrap()
+}
+
+#[tokio::test]
+async fn times_out_when_server_never_sends_headers() {
+    let (base, mut rx) = serve(vec![Script::Silent]).await;
+    let model = timeout_client(base, Duration::from_millis(250));
+    let mut stream = model.stream(request());
+    assert_eq!(next_seen(&mut rx).await, Seen::Arrived(0));
+    let event = timeout(Duration::from_secs(3), stream.recv())
+        .await
+        .expect("等待响应头没有超时");
+    assert!(matches!(event, Some(Err(ModelError::Http(reason))) if reason.contains("响应头超时")));
+    assert_eq!(next_seen(&mut rx).await, Seen::Closed(0));
+}
+
+#[tokio::test]
+async fn stalled_error_body_preserves_http_status_and_partial_text() {
+    let (base, mut rx) = serve(vec![Script::ErrorHang("denied", 1)]).await;
+    let model = timeout_client(base, Duration::from_millis(250));
+    let mut stream = model.stream(request());
+    assert_eq!(next_seen(&mut rx).await, Seen::Arrived(0));
+    let event = timeout(Duration::from_secs(3), stream.recv())
+        .await
+        .expect("读取错误正文没有超时");
+    assert!(matches!(event, Some(Err(ModelError::Status { status: 401, body })) if body == "denied"));
+    assert_eq!(next_seen(&mut rx).await, Seen::Closed(0));
+}
+
+#[tokio::test]
+async fn large_error_body_is_returned_without_waiting_for_eof() {
+    let (base, mut rx) = serve(vec![Script::ErrorHang("错", 5_000)]).await;
+    let model = timeout_client(base, Duration::from_secs(10));
+    let mut stream = model.stream(request());
+    assert_eq!(next_seen(&mut rx).await, Seen::Arrived(0));
+    let event = timeout(Duration::from_secs(3), stream.recv())
+        .await
+        .expect("错误正文超过读取上限后仍在等待 EOF");
+    assert!(matches!(event, Some(Err(ModelError::Status { status: 401, body })) if body == "错".repeat(2_000)));
+    assert_eq!(next_seen(&mut rx).await, Seen::Closed(0));
+}
+
+#[tokio::test]
+async fn header_timeout_does_not_limit_normal_stream_duration() {
+    let (base, _rx) = serve(vec![Script::SlowStream]).await;
+    let model = timeout_client(base, Duration::from_millis(250));
+    let mut stream = model.stream(request());
+    assert_eq!(
+        timeout(Duration::from_secs(3), stream.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        StreamEvent::TextDelta("你好".into())
+    );
+    assert!(matches!(
+        timeout(Duration::from_secs(3), stream.recv()).await.unwrap(),
+        Some(Ok(StreamEvent::Done { .. }))
+    ));
 }

@@ -82,17 +82,25 @@ struct PromptDetails {
 impl Decoder {
     /// 喂入一块字节，返回其中已完整的事件。
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<StreamEvent>, ModelError> {
+        if self.done {
+            return Ok(Vec::new());
+        }
         self.buffer.extend_from_slice(bytes);
         let mut events = Vec::new();
         while let Some(end) = self.buffer.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = self.buffer.drain(..=end).collect();
             let line = std::str::from_utf8(&line).map_err(|error| ModelError::Decode(error.to_string()))?;
             self.line(line.trim_end_matches(['\r', '\n']), &mut events)?;
+            if self.done {
+                self.buffer.clear();
+                break;
+            }
         }
         Ok(events)
     }
 
-    /// 连接关闭时调用：冲掉缓冲里没有换行结尾的最后一行，并补出结束事件。
+    /// 连接关闭时处理最后一行。只有收到结束标记或 finish_reason 才补结束事件；
+    /// 没有完成信号的断流必须报错，不能把未完成的工具调用交给执行方。
     pub fn finish(&mut self) -> Result<Vec<StreamEvent>, ModelError> {
         let mut events = Vec::new();
         if !self.buffer.is_empty() {
@@ -101,6 +109,9 @@ impl Decoder {
             self.line(line.trim_end(), &mut events)?;
         }
         if !self.done {
+            if self.finish.is_none() {
+                return Err(ModelError::Http("响应流在 finish_reason 或 [DONE] 之前断开".into()));
+            }
             self.complete(&mut events);
         }
         Ok(events)
@@ -284,5 +295,38 @@ mod tests {
     fn reports_bad_json() {
         let mut decoder = Decoder::default();
         assert!(matches!(decoder.push(b"data: {oops\n"), Err(ModelError::Decode(_))));
+    }
+
+    #[test]
+    fn truncated_stream_does_not_emit_success_or_partial_tool_calls() {
+        for body in [
+            "",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"unfinished\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"shell\",\"arguments\":\"{}\"}}]}}]}\n\n",
+        ] {
+            let mut decoder = Decoder::default();
+            let events = decoder.push(body.as_bytes()).unwrap();
+            assert!(events.iter().all(|e| matches!(e, StreamEvent::TextDelta(_))));
+            assert!(matches!(decoder.finish(), Err(ModelError::Http(_))));
+        }
+    }
+
+    #[test]
+    fn done_is_terminal_even_when_more_data_arrives() {
+        let body = concat!(
+            "data: [DONE]\n\n",
+            "data: [DONE]\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"late\"}}]}\n\n",
+            "data: invalid\n\n",
+        );
+        for piece in [1, 5, body.len()] {
+            assert_eq!(
+                decode_in_pieces(body, piece),
+                vec![StreamEvent::Done {
+                    finish: FinishReason::Stop,
+                    usage: None,
+                }]
+            );
+        }
     }
 }
