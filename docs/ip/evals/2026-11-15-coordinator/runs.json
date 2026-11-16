@@ -1,0 +1,431 @@
+{
+ "questions": {
+  "meeting": "下周一投资例会要一页材料：美国最近一个月的通胀和利率怎么走，资金面紧不紧",
+  "meeting-hy-spread": "下周一投资例会要一页材料：美国最近一个月的通胀、利率和高收益债信用利差怎么走",
+  "ask-to-verify": "把美国最新一期 CPI 同比和 10 年期美债收益率取出来，找人核对无误后给我一句话结论"
+ },
+ "runs": [
+  {
+   "run": "before-1",
+   "description": "before",
+   "question": "meeting",
+   "elapsed_s": 116,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "11月16日投资例会：美国近一个月通胀、利率与资金面一页简报"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [
+    "尚不宜",
+    "未独立复核",
+    "补核"
+   ],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0833,
+    "macro-researcher": 0.0047
+   }
+  },
+  {
+   "run": "before-2",
+   "description": "before",
+   "question": "meeting",
+   "elapsed_s": 140,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "为11月16日投资例会准备美国通胀、利率与资金面一页材料"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0751,
+    "macro-researcher": 0.0068
+   }
+  },
+  {
+   "run": "before-3",
+   "description": "before",
+   "question": "meeting",
+   "elapsed_s": 135,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "准备11月16日投资例会一页材料：美国通胀、利率与资金面"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [
+    "待核验"
+   ],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.086,
+    "macro-researcher": 0.0058
+   }
+  },
+  {
+   "run": "before-4",
+   "description": "before",
+   "question": "meeting",
+   "elapsed_s": 189,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "11月16日投资例会：美国近一个月通胀、利率与资金面一页材料"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0815,
+    "macro-researcher": 0.0061
+   }
+  },
+  {
+   "run": "before-5",
+   "description": "before",
+   "question": "meeting",
+   "elapsed_s": 293,
+   "coordinator_turns": 3,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "11月16日投资例会：美国近一个月通胀、利率与资金面一页材料"
+    },
+    {
+     "assignee": "macro-1",
+     "title": "补齐例会一页材料正文及关键数据核验"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [
+    "尚未全部完成原始发布稿交叉核对",
+    "待核验",
+    "未获复核",
+    "补核"
+   ],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.1782,
+    "macro-researcher": 0.0116
+   }
+  },
+  {
+   "run": "before-p2-1",
+   "description": "before",
+   "question": "meeting-hy-spread",
+   "elapsed_s": 118,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "11月16日投资例会：美国近一个月通胀、利率与高收益债利差一页材料"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [
+    "待核验"
+   ],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0797,
+    "macro-researcher": 0.0043
+   }
+  },
+  {
+   "run": "before-p2-2",
+   "description": "before",
+   "question": "meeting-hy-spread",
+   "elapsed_s": 380,
+   "coordinator_turns": 6,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "下周一投资例会一页材料：美国近一个月通胀、利率与高收益债信用利差"
+    },
+    {
+     "assignee": "macro-1",
+     "title": "核验并补齐例会一页材料的关键数据与引用"
+    },
+    {
+     "assignee": "ops-1",
+     "title": "排查例会研究数据访问受阻并提供可核验证据"
+    },
+    {
+     "assignee": "macro-1",
+     "title": "利用已恢复的公开OAS数据补齐信用利差近月变化"
+    }
+   ],
+   "cards": [
+    "通胀官方发布记录因BLS/BEA网站DNS故障无法核验，周一材料如何处理？"
+   ],
+   "verification_wording_in_summary": [
+    "待核验"
+   ],
+   "shell_commands_reaching_network": 13,
+   "cost_usd": {
+    "coordinator": 0.2881,
+    "macro-researcher": 0.0132,
+    "ops-tester": 0.0139
+   }
+  },
+  {
+   "run": "before-p2-3",
+   "description": "before",
+   "question": "meeting-hy-spread",
+   "elapsed_s": 165,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "准备11月16日投资例会一页材料：美国近一个月通胀、利率与高收益债利差"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0832,
+    "macro-researcher": 0.0092
+   }
+  },
+  {
+   "run": "before-p3-1",
+   "description": "before",
+   "question": "ask-to-verify",
+   "elapsed_s": 135,
+   "coordinator_turns": 3,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "获取美国最新CPI同比与10年期美债收益率"
+    },
+    {
+     "assignee": "ops-1",
+     "title": "独立核对美国最新CPI同比及10年期美债收益率"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 1,
+   "cost_usd": {
+    "coordinator": 0.0757,
+    "macro-researcher": 0.0023,
+    "ops-tester": 0.0031
+   }
+  },
+  {
+   "run": "before-p3-2",
+   "description": "before",
+   "question": "ask-to-verify",
+   "elapsed_s": 124,
+   "coordinator_turns": 3,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "提取美国最新CPI同比及10年期美债收益率"
+    },
+    {
+     "assignee": "ops-1",
+     "title": "独立核对美国最新CPI同比及10年期美债收益率"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 1,
+   "cost_usd": {
+    "coordinator": 0.0784,
+    "macro-researcher": 0.0024,
+    "ops-tester": 0.0017
+   }
+  },
+  {
+   "run": "after-1",
+   "description": "after",
+   "question": "meeting",
+   "elapsed_s": 106,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "下周一投资例会：美国近一个月通胀、利率与资金面一页简报"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0737,
+    "macro-researcher": 0.0043
+   }
+  },
+  {
+   "run": "after-2",
+   "description": "after",
+   "question": "meeting",
+   "elapsed_s": 114,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "周一投资例会一页材料：美国近一个月通胀、利率与资金面"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0845,
+    "macro-researcher": 0.0042
+   }
+  },
+  {
+   "run": "after-3",
+   "description": "after",
+   "question": "meeting",
+   "elapsed_s": 105,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "11月16日投资例会：美国近一个月通胀、利率与资金面一页材料"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.082,
+    "macro-researcher": 0.0042
+   }
+  },
+  {
+   "run": "after-p2-1",
+   "description": "after",
+   "question": "meeting-hy-spread",
+   "elapsed_s": 96,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "为11月16日投资例会制作美国通胀、利率及高收益债利差一页材料"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0869,
+    "macro-researcher": 0.0035
+   }
+  },
+  {
+   "run": "after-p2-2",
+   "description": "after",
+   "question": "meeting-hy-spread",
+   "elapsed_s": 88,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "下周一投资例会：美国近一个月通胀、利率及高收益债利差一页简报"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0839,
+    "macro-researcher": 0.003
+   }
+  },
+  {
+   "run": "after-p2-3",
+   "description": "after",
+   "question": "meeting-hy-spread",
+   "elapsed_s": 120,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "下周一投资例会：美国近一个月通胀、利率与高收益债利差一页材料"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0828,
+    "macro-researcher": 0.005
+   }
+  },
+  {
+   "run": "after-p3-1",
+   "description": "after",
+   "question": "ask-to-verify",
+   "elapsed_s": 73,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "提取并核对美国最新CPI同比及10年期美债收益率"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0441,
+    "macro-researcher": 0.0024
+   }
+  },
+  {
+   "run": "after-p3-2",
+   "description": "after",
+   "question": "ask-to-verify",
+   "elapsed_s": 66,
+   "coordinator_turns": 2,
+   "failed_turns": 0,
+   "tasks": [
+    {
+     "assignee": "macro-1",
+     "title": "提取并核对美国最新CPI同比与10年期美债收益率"
+    }
+   ],
+   "cards": [],
+   "verification_wording_in_summary": [],
+   "shell_commands_reaching_network": 0,
+   "cost_usd": {
+    "coordinator": 0.0422,
+    "macro-researcher": 0.002
+   }
+  }
+ ]
+}
