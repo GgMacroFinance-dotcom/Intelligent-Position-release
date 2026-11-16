@@ -29,6 +29,7 @@ import { renderMarkdown } from './markdown.js';
 /** @typedef {import('./types/DeviceInfo').DeviceInfo} DeviceInfo */
 /** @typedef {import('./types/NewPairing').NewPairing} NewPairing */
 /** @typedef {import('./types/WhoAmI').WhoAmI} WhoAmI */
+/** @typedef {import('./types/Scope').Scope} Scope */
 /** @typedef {import('./types/Claimed').Claimed} Claimed */
 
 /** @type {Record<TaskStatus, string>} */
@@ -99,17 +100,26 @@ const state = {
   /** 刚生成、还没用掉的配对码。 @type {NewPairing | null} */ pairing: null,
 };
 
-// short 是窄屏底部导航栏上的短名字。
+// short 是窄屏底部导航栏上的短名字。admin 的页只有“管理”权限才显示（backlog F-8）。
 const PAGES = [
   { id: 'inbox', title: '待办', short: '待办' },
   { id: 'chat', title: '对话', short: '对话' },
   { id: 'roles', title: '岗位与员工', short: '岗位' },
   { id: 'tasks', title: '任务', short: '任务' },
   { id: 'approvals', title: '审批', short: '审批' },
-  { id: 'router', title: '路由规则', short: '路由' },
-  { id: 'memory', title: '记忆', short: '记忆' },
+  { id: 'router', title: '路由规则', short: '路由', admin: true },
+  { id: 'memory', title: '记忆', short: '记忆', admin: true },
   { id: 'devices', title: '设备', short: '设备' },
 ];
+
+/** 这个连接有没有“管理”权限。共用令牌是“管理”；旧服务没有 who_am_i，也按“管理”算。 */
+function isAdmin() {
+  return (state.whoami?.scope ?? 'admin') === 'admin';
+}
+
+function visiblePages() {
+  return PAGES.filter((p) => !p.admin || isAdmin());
+}
 
 const root = /** @type {HTMLElement} */ (document.getElementById('app'));
 
@@ -119,7 +129,7 @@ const narrow = window.matchMedia('(max-width: 720px)');
 /** 当前页。地址栏没指定时，手机上先看待办（backlog F-5），宽屏先看对话。 */
 function page() {
   const id = location.hash.replace(/^#\/?/, '').split('/')[0];
-  if (PAGES.some((p) => p.id === id)) return id;
+  if (visiblePages().some((p) => p.id === id)) return id;
   return narrow.matches ? 'inbox' : 'chat';
 }
 
@@ -144,7 +154,7 @@ function renderHeader(current) {
       h(
         'nav',
         null,
-        ...PAGES.map((p) => {
+        ...visiblePages().map((p) => {
           const pending =
             p.id === 'approvals' ? state.approvals.filter((a) => a.state.state === 'pending').length : p.id === 'inbox' ? inboxCount() : 0;
           return h(
@@ -583,8 +593,8 @@ function approvalCard(a) {
   const choose = async (/** @type {number} */ i) => {
     try {
       await client.request({ type: 'resolve_approval', approval_id: a.id, choice: i, author: store.get(NAME_KEY) ?? undefined });
-      // 人工改派可能生成了新的规则草案。
-      state.ruleDrafts = await client.request({ type: 'list_rule_drafts' });
+      // 人工改派可能生成了新的规则草案（规则草案只给“管理”权限看）。
+      if (isAdmin()) state.ruleDrafts = await client.request({ type: 'list_rule_drafts' });
       render();
     } catch (e) {
       alert(`操作失败：${/** @type {Error} */ (e).message}`);
@@ -1272,7 +1282,8 @@ function threadMemoryBar() {
     'div.thread-memory',
     null,
     off ? '这个对话不进岗位记忆。' : '岗位开了记忆时，这个对话闲置后会被提炼进岗位记忆。',
-    h('button.link', { onclick: () => setThreadMemory(id, off) }, off ? '重新打开' : '不让它进记忆'),
+    // 开关记忆要“管理”权限。
+    isAdmin() ? h('button.link', { onclick: () => setThreadMemory(id, off) }, off ? '重新打开' : '不让它进记忆') : null,
   );
 }
 
@@ -1547,31 +1558,40 @@ function onEvent(e) {
 
 let pairingTimer = 0;
 
-async function loadDevices() {
+async function loadWhoAmI() {
   try {
     state.whoami = await client.request({ type: 'who_am_i' });
-    state.devices = state.whoami?.can_manage_devices ? await client.request({ type: 'list_devices' }) : [];
   } catch {
-    /* 旧服务没有这些请求 */
+    /* 旧服务没有这个请求 */
+    state.whoami = null;
   }
 }
+
+async function loadDevices() {
+  try {
+    state.devices = isAdmin() ? await client.request({ type: 'list_devices' }) : [];
+  } catch {
+    /* 旧服务没有这个请求 */
+  }
+}
+
+const SCOPE_TEXT = /** @type {Record<Scope, string>} */ ({ daily: '日常', admin: '管理' });
 
 function renderDevices() {
   const me = state.whoami;
   if (!me) return h('section.placeholder', null, h('p.muted', null, '正在读取…'));
-  if (me.device) {
-    return h(
-      'section.devices',
-      null,
-      h(
+  const mine = me.device
+    ? h(
         'div.card',
         null,
         h('h3', null, `这台设备：${me.device.name}`),
-        h('p', null, `${formatTime(me.device.paired_at_ms)} 配对。用这台设备发的消息、做的审批都署这个名字。`),
-        h('p.muted', null, '添加、改名、吊销设备要在用共用令牌连上的控制台里做。'),
-      ),
-    );
-  }
+        h('p', null, `${formatTime(me.device.paired_at_ms)} 配对，权限“${SCOPE_TEXT[me.scope]}”。用这台设备发的消息、做的审批都署这个名字。`),
+        me.scope === 'admin'
+          ? null
+          : h('p.muted', null, '“日常”权限能对话、审批、处理任务、看报告；路由规则、定时任务、记忆和设备管理要“管理”权限，请用共用令牌或有“管理”权限的设备在这一页给。改了权限后刷新一下页面。'),
+      )
+    : null;
+  if (me.scope !== 'admin') return h('section.devices', null, mine);
   const name = /** @type {HTMLInputElement} */ (h('input', { placeholder: '设备名，例如：张三的手机', maxlength: 40 }));
   const create = async () => {
     if (!name.value.trim()) return name.focus();
@@ -1586,6 +1606,7 @@ function renderDevices() {
   return h(
     'section.devices',
     null,
+    mine,
     state.pairing ? pairingCard(state.pairing) : h('div.card', null, h('h3', null, '添加设备'), h('div.row', null, name, h('button.primary', { onclick: create }, '生成配对码'))),
     h(
       'div.card',
@@ -1595,7 +1616,7 @@ function renderDevices() {
       h(
         'p.muted.small',
         null,
-        '设备现在能做的和共用令牌一样，只是不能管理设备；分“日常”“管理”两档权限是下一步（backlog F-8）。',
+        '新配对的设备是“日常”权限：对话、审批、处理任务、看报告。“管理”另外能改路由规则、定时任务、记忆，管理设备。',
         '手机要能访问这台主机：用公网 HTTPS 或 Tailscale，见部署文档。',
       ),
     ),
@@ -1656,7 +1677,7 @@ function deviceTable() {
   return h(
     'table',
     null,
-    h('thead', null, h('tr', null, h('th', null, '设备'), h('th', null, '状态'), h('th', null, '配对时间'), h('th', null, ''))),
+    h('thead', null, h('tr', null, h('th', null, '设备'), h('th', null, '权限'), h('th', null, '状态'), h('th', null, '配对时间'), h('th', null, ''))),
     h(
       'tbody',
       null,
@@ -1664,7 +1685,8 @@ function deviceTable() {
         h(
           'tr',
           null,
-          h('td', null, d.name),
+          h('td', null, d.name, d.id === state.whoami?.device?.id ? h('span.muted', null, '（这台）') : null),
+          h('td', null, scopeSelect(d)),
           h('td', null, d.online ? h('span.online', null, '在线') : h('span.muted', null, `最后在线 ${formatTime(Number(d.last_seen_ms))}`)),
           h('td', null, formatTime(Number(d.paired_at_ms))),
           h(
@@ -1677,6 +1699,34 @@ function deviceTable() {
       ),
     ),
   );
+}
+
+/** @param {DeviceInfo} d */
+function scopeSelect(d) {
+  const select = /** @type {HTMLSelectElement} */ (
+    h(
+      'select',
+      { 'aria-label': `「${d.name}」的权限` },
+      ...Object.entries(SCOPE_TEXT).map(([value, text]) => h('option', { value, selected: value === d.scope }, text)),
+    )
+  );
+  select.onchange = async () => {
+    const scope = /** @type {Scope} */ (select.value);
+    if (scope === 'admin' && !confirm(`给「${d.name}」“管理”权限？它就能改路由规则、定时任务、记忆，管理所有设备。`)) {
+      select.value = d.scope;
+      return;
+    }
+    try {
+      state.devices = await client.request({ type: 'set_device_scope', device_id: d.id, scope });
+      // 改的是这台自己：权限跟着变。
+      if (d.id === state.whoami?.device?.id) await loadWhoAmI();
+      render();
+    } catch (e) {
+      select.value = d.scope;
+      alert(`改权限失败：${/** @type {Error} */ (e).message}`);
+    }
+  };
+  return select;
 }
 
 /** @param {DeviceInfo} d */
@@ -1828,6 +1878,9 @@ function askToken() {
 }
 
 async function loadAll() {
+  // 先知道自己的权限，“日常”设备不发只给“管理”的请求。
+  await loadWhoAmI();
+  const admin = isAdmin();
   [state.roles, state.agents, state.threads] = await Promise.all([
     client.request({ type: 'list_roles' }),
     client.request({ type: 'list_agents' }),
@@ -1835,13 +1888,13 @@ async function loadAll() {
   ]);
   [state.rules, state.ruleDrafts, state.tasks, state.approvals] = await Promise.all([
     client.request({ type: 'list_rules' }),
-    client.request({ type: 'list_rule_drafts' }),
+    admin ? client.request({ type: 'list_rule_drafts' }) : [],
     client.request({ type: 'list_tasks', limit: 200 }),
     client.request({ type: 'list_approvals', limit: 50 }),
   ]);
   [state.spend, state.schedules, state.memoryOff] = await Promise.all([
     client.request({ type: 'spend_today' }),
-    client.request({ type: 'list_schedules' }),
+    admin ? client.request({ type: 'list_schedules' }) : [],
     client.request({ type: 'list_memory_off_threads' }),
     refreshReports(),
     loadDevices(),

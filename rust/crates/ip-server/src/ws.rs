@@ -15,7 +15,7 @@ use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::App;
-use crate::devices::Device;
+use crate::devices::{Device, Scope};
 use crate::events::{EventLog, Stamped};
 use crate::memory_admin;
 use crate::protocol::{Envelope, Request, ServerFrame};
@@ -83,22 +83,34 @@ pub(crate) struct Caller {
     device: Option<Device>,
 }
 
-impl Caller {
-    /// 请求里自填的署名。设备连上的一律用设备名（`docs/ip/apps-plan.md` 4.4），连着时改了名用新名字。
-    fn author(&self, app: &App, given: Option<String>) -> Option<String> {
-        match &self.device {
-            Some(d) => Some(app.devices.name(&d.id).unwrap_or_else(|| d.name.clone())),
-            None => given,
-        }
-    }
-
-    /// 管理设备只给共用令牌（F-8 之后改成看设备权限）。
-    fn manage_devices(&self) -> Result<(), String> {
-        match &self.device {
-            Some(_) => Err("只有用共用令牌连上的控制台能管理设备".into()),
-            None => Ok(()),
-        }
-    }
+/// “日常”权限能用的请求（`docs/ip/apps-plan.md` 4.3，backlog F-8）。没列在这里的只给“管理”，
+/// 以后新加的请求类型也一样：要给日常设备用，得在这里明确加上。
+fn daily_allows(request: &Request) -> bool {
+    matches!(
+        request,
+        // 对话
+        Request::ListRoles
+            | Request::ListAgents
+            | Request::SpendToday
+            | Request::ListThreads { .. }
+            | Request::History { .. }
+            | Request::Search { .. }
+            | Request::Route { .. }
+            | Request::Send { .. }
+            // 只读：新对话默认要不要自动分派，看有没有路由规则
+            | Request::ListRules
+            // 只读：对话页顶上显示这个对话进不进岗位记忆
+            | Request::ListMemoryOffThreads
+            // 任务、审批和员工提问、报告
+            | Request::ListTasks { .. }
+            | Request::CreateTask { .. }
+            | Request::UpdateTask { .. }
+            | Request::ListApprovals { .. }
+            | Request::ResolveApproval { .. }
+            | Request::ListReports { .. }
+            | Request::ReadReport { .. }
+            | Request::WhoAmI
+    )
 }
 
 async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>, caller: Caller) {
@@ -195,14 +207,15 @@ async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>, caller
     }
 }
 
-/// 设备连上的请求，署名换成设备名，忽略自填的 `author`。
-fn sign(mut request: Request, app: &App, caller: &Caller) -> Request {
+/// 设备连上的请求，署名换成设备名，忽略自填的 `author`（`docs/ip/apps-plan.md` 4.4）。
+fn sign(mut request: Request, device: Option<&Device>) -> Request {
+    let Some(device) = device else { return request };
     match &mut request {
         Request::Route { author, .. }
         | Request::Send { author, .. }
         | Request::CreateTask { author, .. }
         | Request::UpdateTask { author, .. }
-        | Request::ResolveApproval { author, .. } => *author = caller.author(app, author.take()),
+        | Request::ResolveApproval { author, .. } => *author = Some(device.name.clone()),
         _ => {}
     }
     request
@@ -271,13 +284,16 @@ async fn handle(app: &App, caller: &Caller, text: &str) -> ServerFrame {
 }
 
 async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value, String> {
-    // 吊销和断开之间还没处理完的请求，一律拒绝。
-    if let Some(d) = &caller.device
-        && app.devices.name(&d.id).is_none()
-    {
-        return Err("这台设备已吊销".into());
+    // 设备的名字和权限按现在的算，连着时改过的下一个请求就生效。吊销和断开之间的请求一律拒绝。
+    let device = match &caller.device {
+        Some(d) => Some(app.devices.current(&d.id).ok_or("这台设备已吊销")?),
+        None => None,
+    };
+    let scope = device.as_ref().map_or(Scope::Admin, |d| d.scope);
+    if scope != Scope::Admin && !daily_allows(&request) {
+        return Err("这台设备是“日常”权限，做不了这件事；要在“设备”页给它“管理”权限".into());
     }
-    let request = sign(request, app, caller);
+    let request = sign(request, device.as_ref());
     let rt = &app.runtime;
     let limit = |l: Option<usize>, default: usize| l.unwrap_or(default).clamp(1, MAX_LIMIT);
     let to_json = |v: serde_json::Result<Value>| v.map_err(|e| e.to_string());
@@ -429,21 +445,11 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
             crate::reports::list(app, agent_id.as_ref(), limit(l, 100)).await?,
         )),
         Request::WhoAmI => {
-            let device = caller
-                .device
-                .as_ref()
-                .and_then(|d| app.devices.list().into_iter().find(|i| i.id == d.id));
-            to_json(serde_json::to_value(crate::protocol::WhoAmI {
-                device,
-                can_manage_devices: caller.manage_devices().is_ok(),
-            }))
+            let device = device.and_then(|d| app.devices.list().into_iter().find(|i| i.id == d.id));
+            to_json(serde_json::to_value(crate::protocol::WhoAmI { device, scope }))
         }
-        Request::ListDevices => {
-            caller.manage_devices()?;
-            to_json(serde_json::to_value(app.devices.list()))
-        }
+        Request::ListDevices => to_json(serde_json::to_value(app.devices.list())),
         Request::CreatePairing { name, link_base } => {
-            caller.manage_devices()?;
             let pairing = app
                 .devices
                 .create_pairing(&name, link_base.as_deref(), ip_core::now_ms())
@@ -451,13 +457,12 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
             to_json(serde_json::to_value(pairing))
         }
         Request::RenameDevice { device_id, name } => {
-            caller.manage_devices()?;
             to_json(serde_json::to_value(app.devices.rename(&device_id, &name).await?))
         }
-        Request::RevokeDevice { device_id } => {
-            caller.manage_devices()?;
-            to_json(serde_json::to_value(app.devices.revoke(&device_id).await?))
+        Request::SetDeviceScope { device_id, scope } => {
+            to_json(serde_json::to_value(app.devices.set_scope(&device_id, scope).await?))
         }
+        Request::RevokeDevice { device_id } => to_json(serde_json::to_value(app.devices.revoke(&device_id).await?)),
         Request::ReadReport { agent_id, path } => {
             to_json(serde_json::to_value(crate::reports::read(app, &agent_id, &path).await?))
         }

@@ -347,7 +347,7 @@ async fn devices_pair_sign_with_their_name_and_can_be_revoked() {
     let s = start(Some("s3cret")).await;
     let mut admin = connect(s.addr, "?token=s3cret").await.unwrap();
     let (me, _) = request(&mut admin, 1, json!({"type": "who_am_i"})).await;
-    assert_eq!(me["data"], json!({"device": null, "can_manage_devices": true}));
+    assert_eq!(me["data"], json!({"device": null, "scope": "admin"}));
     let (p, _) = request(
         &mut admin,
         2,
@@ -387,9 +387,9 @@ async fn devices_pair_sign_with_their_name_and_can_be_revoked() {
     let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
     let (me, _) = request(&mut phone, 1, json!({"type": "who_am_i"})).await;
     assert_eq!(me["data"]["device"]["name"], "张三的手机");
-    assert_eq!(me["data"]["can_manage_devices"], false);
+    assert_eq!(me["data"]["scope"], "daily", "新配对的设备是“日常”权限");
     let (r, _) = request(&mut phone, 2, json!({"type": "list_devices"})).await;
-    assert_eq!(r["ok"], false, "设备不能管理设备");
+    assert_eq!(r["ok"], false, "日常设备不能管理设备");
     // 自填的署名不算数
     let (sent, _) = request(
         &mut phone,
@@ -434,6 +434,90 @@ async fn devices_pair_sign_with_their_name_and_can_be_revoked() {
     .unwrap();
     assert!(closed);
     assert!(connect(s.addr, &format!("?token={token}")).await.is_err());
+}
+
+/// 管理端生成配对码，换到一台设备的令牌和 id。
+async fn pair_device(s: &Server, admin: &mut Ws, name: &str) -> (String, String) {
+    let (p, _) = request(admin, 900, json!({"type": "create_pairing", "name": name})).await;
+    let code = p["data"]["code"].as_str().unwrap();
+    let claimed: Value = reqwest::Client::new()
+        .post(format!("http://{}/pair", s.addr))
+        .json(&json!({"code": code}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    (
+        claimed["token"].as_str().unwrap().to_string(),
+        claimed["device"]["id"].as_str().unwrap().to_string(),
+    )
+}
+
+#[tokio::test]
+async fn daily_devices_only_get_daily_requests() {
+    let s = start(Some("s3cret")).await;
+    let mut admin = connect(s.addr, "?token=s3cret").await.unwrap();
+    let (token, id) = pair_device(&s, &mut admin, "李四的手机").await;
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+
+    // 日常：对话、任务、审批、报告，以及两样只读的（路由规则、关了记忆的对话）
+    for (n, body) in [
+        json!({"type": "list_threads"}),
+        json!({"type": "list_tasks"}),
+        json!({"type": "list_approvals"}),
+        json!({"type": "list_reports"}),
+        json!({"type": "list_rules"}),
+        json!({"type": "list_memory_off_threads"}),
+        json!({"type": "spend_today"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (r, _) = request(&mut phone, n as u64 + 1, body.clone()).await;
+        assert_eq!(r["ok"], true, "{body}");
+    }
+    // 管理：改路由、规则草案、定时任务、记忆、设备
+    for (n, body) in [
+        json!({"type": "list_rule_drafts"}),
+        json!({"type": "list_schedules"}),
+        json!({"type": "run_schedule", "schedule_id": "x"}),
+        json!({"type": "get_memory", "role_id": "macro"}),
+        json!({"type": "clear_memory", "role_id": "macro"}),
+        json!({"type": "set_thread_memory", "thread_id": "t", "enabled": false}),
+        json!({"type": "list_devices"}),
+        json!({"type": "set_device_scope", "device_id": id, "scope": "admin"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (r, _) = request(&mut phone, n as u64 + 100, body.clone()).await;
+        assert_eq!(r["ok"], false, "{body}");
+        assert!(r["error"].as_str().unwrap().contains("日常"), "{body}: {r}");
+    }
+
+    // 给了“管理”，连着的连接下一个请求就能用；收回后又不能用
+    let (list, _) = request(
+        &mut admin,
+        1,
+        json!({"type": "set_device_scope", "device_id": id, "scope": "admin"}),
+    )
+    .await;
+    assert_eq!(list["data"][0]["scope"], "admin");
+    let (me, _) = request(&mut phone, 200, json!({"type": "who_am_i"})).await;
+    assert_eq!(me["data"]["scope"], "admin");
+    let (r, _) = request(&mut phone, 201, json!({"type": "list_rule_drafts"})).await;
+    assert_eq!(r["ok"], true);
+    let (r, _) = request(
+        &mut phone,
+        202,
+        json!({"type": "set_device_scope", "device_id": id, "scope": "daily"}),
+    )
+    .await;
+    assert_eq!(r["data"][0]["scope"], "daily", "管理设备也能管理设备，包括自己");
+    let (r, _) = request(&mut phone, 203, json!({"type": "list_rule_drafts"})).await;
+    assert_eq!(r["ok"], false);
 }
 
 #[tokio::test]
