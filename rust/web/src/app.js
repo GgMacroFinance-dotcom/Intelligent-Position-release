@@ -94,6 +94,7 @@ const state = {
 
 // short 是窄屏底部导航栏上的短名字。
 const PAGES = [
+  { id: 'inbox', title: '待办', short: '待办' },
   { id: 'chat', title: '对话', short: '对话' },
   { id: 'roles', title: '岗位与员工', short: '岗位' },
   { id: 'tasks', title: '任务', short: '任务' },
@@ -104,9 +105,14 @@ const PAGES = [
 
 const root = /** @type {HTMLElement} */ (document.getElementById('app'));
 
+/** 窄屏（手机）。和 style.css 里的断点一致。 */
+const narrow = window.matchMedia('(max-width: 720px)');
+
+/** 当前页。地址栏没指定时，手机上先看待办（backlog F-5），宽屏先看对话。 */
 function page() {
   const id = location.hash.replace(/^#\/?/, '').split('/')[0];
-  return PAGES.some((p) => p.id === id) ? id : 'chat';
+  if (PAGES.some((p) => p.id === id)) return id;
+  return narrow.matches ? 'inbox' : 'chat';
 }
 
 /** @param {string} id */
@@ -131,7 +137,8 @@ function renderHeader(current) {
         'nav',
         null,
         ...PAGES.map((p) => {
-          const pending = p.id === 'approvals' ? state.approvals.filter((a) => a.state.state === 'pending').length : 0;
+          const pending =
+            p.id === 'approvals' ? state.approvals.filter((a) => a.state.state === 'pending').length : p.id === 'inbox' ? inboxCount() : 0;
           return h(
             'a' + (p.id === current ? '.active' : ''),
             { href: `#/${p.id}` },
@@ -150,6 +157,8 @@ function renderHeader(current) {
 /** @param {string} id */
 function renderPage(id) {
   switch (id) {
+    case 'inbox':
+      return renderInbox();
     case 'roles':
       return renderRoles();
     case 'tasks':
@@ -255,13 +264,7 @@ function roleReports(agents) {
   if (!list.length) return null;
   const many = agents.length > 1;
   /** @param {ReportInfo} r */
-  const item = (r) =>
-    h(
-      'li',
-      null,
-      h('button.link.report-link', { type: 'button', onclick: () => openReport(r.path, r.agent_id) }, r.path.replace(/^reports\//, '')),
-      h('span.muted.small', null, ` ${many ? `${agentName(r.agent_id)} · ` : ''}${formatTime(r.modified_ms)}`),
-    );
+  const item = (r) => reportItem(r, many);
   const rest = list.slice(5);
   return h(
     'div.reports',
@@ -269,6 +272,16 @@ function roleReports(agents) {
     h('div.muted.small', null, '最近的报告'),
     h('ul.report-list', null, ...list.slice(0, 5).map(item)),
     rest.length ? h('details', null, h('summary.muted.small', null, `还有 ${rest.length} 份`), h('ul.report-list', null, ...rest.map(item))) : null,
+  );
+}
+
+/** 报告列表里的一行：文件名（点开看）、谁写的、什么时候改的。 @param {ReportInfo} r @param {boolean} showAgent */
+function reportItem(r, showAgent) {
+  return h(
+    'li',
+    null,
+    h('button.link.report-link', { type: 'button', onclick: () => openReport(r.path, r.agent_id) }, r.path.replace(/^reports\//, '')),
+    h('span.muted.small', null, ` ${showAgent ? `${agentName(r.agent_id)} · ` : ''}${formatTime(r.modified_ms)}`),
   );
 }
 
@@ -305,6 +318,65 @@ function renderHeaderOnly() {
   const header = root.querySelector('header.top');
   if (header) header.replaceWith(renderHeader(page()));
   else render();
+}
+
+// ---------- 待办（backlog F-5） ----------
+
+/** “最近完成”看多久以内的。 */
+const RECENT_MS = 7 * 24 * 3600 * 1000;
+/** “最近完成”的任务和报告各列几条。 */
+const RECENT_MAX = 10;
+
+/** 等人处理的事：待决定的审批卡片（含员工提问）和受阻的任务。导航栏上的角标用它。 */
+function inboxCount() {
+  return state.approvals.filter((a) => a.state.state === 'pending').length + state.tasks.filter((t) => t.status === 'blocked').length;
+}
+
+function renderInbox() {
+  const pending = state.approvals.filter((a) => a.state.state === 'pending');
+  const questions = pending.filter((a) => a.subject.kind === 'agent_question');
+  const decisions = pending.filter((a) => a.subject.kind !== 'agent_question');
+  const blocked = state.tasks.filter((t) => t.status === 'blocked');
+  const since = Date.now() - RECENT_MS;
+  const done = state.tasks.filter((t) => t.status === 'done' && t.updated_at_ms >= since).slice(0, RECENT_MAX);
+  const reports = state.reports.filter((r) => r.modified_ms >= since).slice(0, RECENT_MAX);
+  return h(
+    'section.inbox',
+    null,
+    pending.length || blocked.length ? null : h('p.inbox-empty', null, '没有等你处理的事。'),
+    questions.length ? h('h2', null, `员工在问你（${questions.length}）`) : null,
+    ...questions.map(approvalCard),
+    decisions.length ? h('h2', null, `等你决定（${decisions.length}）`) : null,
+    ...decisions.map(approvalCard),
+    blocked.length ? h('h2', null, `受阻的任务（${blocked.length}）`) : null,
+    blocked.length ? h('div.card', null, taskTable(blocked)) : null,
+    h('h2', null, '最近 7 天'),
+    h('div.card', null, h('h3', null, '完成的任务'), done.length ? h('ul.done-list', null, ...done.map(doneItem)) : h('p.muted', null, '没有。')),
+    h(
+      'div.card',
+      null,
+      h('h3', null, '新报告'),
+      reports.length ? h('ul.report-list', null, ...reports.map((r) => reportItem(r, true))) : h('p.muted', null, '没有。'),
+    ),
+  );
+}
+
+/** 最近完成的一项任务：标题、谁做的、什么时候，结果收起来。 @param {Task} t */
+function doneItem(t) {
+  return h(
+    'li',
+    null,
+    h('div', null, t.title),
+    h('div.muted.small', null, `${t.assignee ? agentName(t.assignee) : (t.role ?? '—')} · ${formatTime(t.updated_at_ms)}`, ...threadLinks(t)),
+    t.result
+      ? h(
+          'details.task-result',
+          null,
+          h('summary.muted.small', null, '结果'),
+          renderMarkdown(t.result, { onReport: (p) => openReport(p, t.assignee) }),
+        )
+      : null,
+  );
 }
 
 // ---------- 任务 ----------
@@ -1446,8 +1518,9 @@ function onEvent(e) {
     case 'task_changed':
       upsert(state.tasks, e.task);
       state.tasks.sort((a, b) => b.updated_at_ms - a.updated_at_ms);
+      // 待办的角标在顶栏，对话页也要更新。
       if (page() !== 'chat') return render();
-      return;
+      return renderHeaderOnly();
     case 'approval_changed':
       upsert(state.approvals, e.approval);
       state.approvals.sort((a, b) => b.created_at_ms - a.created_at_ms);
@@ -1479,7 +1552,7 @@ function refreshReportsSoon() {
   clearTimeout(reportsTimer);
   reportsTimer = window.setTimeout(async () => {
     await refreshReports();
-    if (page() === 'roles') render();
+    if (page() === 'roles' || page() === 'inbox') render();
   }, 800);
 }
 
@@ -1599,6 +1672,11 @@ client.onLagged(() => {
   refreshThreadsSoon();
 });
 window.addEventListener('hashchange', render);
+// 地址栏没指定页面时，窗口跨过窄屏断点要换默认页。
+narrow.addEventListener('change', () => {
+  const id = location.hash.replace(/^#\/?/, '').split('/')[0];
+  if (!PAGES.some((p) => p.id === id)) render();
+});
 client.connect();
 
 // 注册 Service Worker，浏览器才会提供“安装应用”（backlog F-2）。只在 HTTPS 或本机地址上可用，失败不影响控制台。
