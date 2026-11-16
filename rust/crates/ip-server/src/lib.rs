@@ -13,6 +13,7 @@ mod mcp;
 mod memory_admin;
 mod origin;
 pub mod protocol;
+mod reports;
 mod routing;
 mod rules;
 pub mod schedule;

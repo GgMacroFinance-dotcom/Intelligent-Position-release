@@ -1167,6 +1167,7 @@ dependencies = [
  "ip-runtime",
  "ip-store",
  "ip-tools",
+ "nix 0.30.1",
  "reqwest",
  "rmcp",
  "serde",

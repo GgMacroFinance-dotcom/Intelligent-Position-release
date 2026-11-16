@@ -201,7 +201,6 @@ nav a .short, .thread-head { display: none; }
   table:not(.md-table) tr { display: block; border-bottom: 1px solid var(--line); padding: 6px 0; }
   table:not(.md-table) td { display: block; border: 0; padding: 2px 0; }
 }
-}
 
 .task-result { margin-top: 4px; font-size: 13px; }
 
@@ -256,3 +255,36 @@ button.danger { color: var(--danger); }
 .memory td.actions { white-space: nowrap; text-align: right; }
 .memory td.actions > * { margin-left: 8px; }
 .thread-memory { padding: 4px 16px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); background: var(--panel); }
+
+/* 员工写的报告（backlog F-4）。 */
+button.report-link { padding: 0; font: inherit; text-align: left; overflow-wrap: anywhere; }
+button.report-link:hover { text-decoration: underline; }
+.reports { margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+.report-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.reports details summary { cursor: pointer; margin-top: 4px; }
+body.report-open { overflow: hidden; }
+.overlay {
+  position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.report-view {
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius);
+  width: 100%; max-width: 880px; max-height: 100%; display: flex; flex-direction: column; min-height: 0;
+}
+.report-view header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line);
+}
+.report-title { min-width: 0; overflow-wrap: anywhere; }
+.report-view header button { flex-shrink: 0; }
+.report-body { overflow: auto; padding: 16px; min-height: 0; flex: 1; }
+.report-body .notice { margin: 0 0 12px; padding: 8px 12px; border-radius: var(--radius); background: var(--system); border: 1px solid var(--line); }
+
+/* 报告在手机上占满整屏。要放在上面几条后面才盖得住。 */
+@media (max-width: 720px) {
+  .overlay { padding: 0; }
+  .report-view { max-width: none; height: 100%; border-radius: 0; border: 0; }
+  .report-view header { padding-top: calc(10px + env(safe-area-inset-top)); }
+  .report-body { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
+  .report-list li { padding: 4px 0; }
+}

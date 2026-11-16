@@ -168,6 +168,17 @@ pub enum Request {
     ListMemoryOffThreads,
     /// 关掉或重新打开一个对话的记忆。回复 `ThreadId[]`：改完后关掉了记忆的对话。
     SetThreadMemory { thread_id: ThreadId, enabled: bool },
+    /// 回复 `ReportInfo[]`：员工工作目录 `reports/` 下的报告，新改的在前。省略 `agent_id` 时列所有员工的。
+    ListReports {
+        #[serde(default)]
+        #[ts(optional)]
+        agent_id: Option<AgentId>,
+        #[serde(default)]
+        #[ts(optional)]
+        limit: Option<usize>,
+    },
+    /// 回复 `ReportText`：读一份报告，`path` 是 `list_reports` 给出的 `reports/<文件名>.md`。
+    ReadReport { agent_id: AgentId, path: String },
     /// 回复 `SendResult`；员工的回复随后以事件推送。
     Send {
         /// 省略时由路由规则决定。
@@ -248,6 +259,32 @@ pub struct CorrectionView {
     /// 哪次合并用上了它；还没用上是空。
     #[ts(type = "number | null")]
     pub applied_ms: Option<i64>,
+}
+
+/// `list_reports` 的一项。
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ReportInfo {
+    pub agent_id: AgentId,
+    /// 相对员工工作目录的路径，形如 `reports/2026-11-16-cpi.md`。
+    pub path: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    #[ts(type = "number")]
+    pub modified_ms: i64,
+}
+
+/// `read_report` 的回复。
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ReportText {
+    pub agent_id: AgentId,
+    pub path: String,
+    pub text: String,
+    #[ts(type = "number")]
+    pub modified_ms: i64,
+    /// 文件超过 1 MB 时只给前 1 MB。
+    pub truncated: bool,
 }
 
 /// `list_rules` 的回复。

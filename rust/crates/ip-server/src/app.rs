@@ -33,6 +33,8 @@ pub struct App {
     /// 接上的外部渠道；关闭时先停掉它们。
     channels: Arc<tokio::sync::Mutex<Vec<crate::channels::ChannelHandle>>>,
     pub(crate) schedules: Arc<crate::schedule::Schedules>,
+    /// 有工作目录的员工和他们的工作目录，控制台从这里读报告（backlog F-4）。
+    pub(crate) workspaces: Arc<std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>>,
 }
 
 impl App {
@@ -53,6 +55,7 @@ impl App {
             closing: Arc::new(closing),
             channels: Arc::default(),
             schedules: Arc::default(),
+            workspaces: Arc::default(),
         }
     }
 
@@ -60,6 +63,16 @@ impl App {
     #[must_use]
     pub fn with_allowed_origins(mut self, origins: Vec<crate::origin::Origin>) -> Self {
         self.allowed_origins = origins.into();
+        self
+    }
+
+    /// 告诉服务各员工的工作目录，控制台才能读他们写的报告。
+    #[must_use]
+    pub fn with_workspaces(
+        mut self,
+        workspaces: std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>,
+    ) -> Self {
+        self.workspaces = Arc::new(workspaces);
         self
     }
 
@@ -249,6 +262,7 @@ impl App {
         for role in &org.roles {
             runtime.add_role(role.clone());
         }
+        let mut workspaces = std::collections::HashMap::new();
         for a in &config.agents {
             let Some(role) = org.role(&RoleId::from(a.role.as_str())) else {
                 bail!("数字员工 {} 的岗位 {} 不存在", a.id, a.role);
@@ -267,7 +281,9 @@ impl App {
                         ws
                     }
                 };
-                Some(Toolbox::new(&ws, sandbox.clone(), Limits::default())?)
+                let toolbox = Toolbox::new(&ws, sandbox.clone(), Limits::default())?;
+                workspaces.insert(ip_core::AgentId::from(a.id.as_str()), ws);
+                Some(toolbox)
             } else {
                 None
             };
@@ -285,7 +301,8 @@ impl App {
         let mut app = Self::new(runtime, org, token)
             .with_allowed_origins(allowed_origins)
             .with_router(router)
-            .with_schedules(config.schedules()?);
+            .with_schedules(config.schedules()?)
+            .with_workspaces(workspaces);
         app.mcp = mcp;
         crate::rules::load_saved(&app).await;
         for (name, channel) in &config.channels {
