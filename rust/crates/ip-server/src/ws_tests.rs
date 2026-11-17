@@ -520,6 +520,79 @@ async fn daily_devices_only_get_daily_requests() {
     assert_eq!(r["ok"], false);
 }
 
+/// 一直读到满足条件的那一帧（含），返回读到的所有帧。
+async fn frames_until(ws: &mut Ws, mut frames: Vec<Value>, done: impl Fn(&Value) -> bool) -> Vec<Value> {
+    while !frames.iter().any(&done) {
+        frames.push(next_json(ws).await);
+    }
+    frames
+}
+
+fn alerts(frames: &[Value]) -> Vec<&Value> {
+    frames
+        .iter()
+        .filter(|f| f["type"] == "alert")
+        .map(|f| &f["alert"])
+        .collect()
+}
+
+/// 通知规则（`docs/ip/m2-spec.md` D-32）：每个连接按自己的设置收通知。
+#[tokio::test]
+async fn alerts_follow_each_connections_settings() {
+    let rules = "rules: [{ id: 数据点评, when: { any: [CPI, PPI] }, to: { role: macro } }]";
+    let s = start_with(None, Some(rules)).await;
+    let mut admin = connect(s.addr, "").await.unwrap();
+    let (token, _) = pair_device(&s, &mut admin, "手机").await;
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+    // 日常设备能改自己的通知设置：全部都要
+    let (saved, _) = request(
+        &mut phone,
+        1,
+        json!({"type": "set_notify_settings", "settings": {"level": "all", "muted_roles": [], "mute_until_ms": null, "preview": true}}),
+    )
+    .await;
+    assert_eq!(saved["data"]["level"], "all", "{saved}");
+    let (mine, _) = request(&mut admin, 1, json!({"type": "get_notify_settings"})).await;
+    assert_eq!(
+        mine["data"]["level"], "needs_me",
+        "共用令牌的设置是另一份，默认只推需要我的"
+    );
+
+    // 员工回复了（“全部”一档），然后来了一张审批卡（“需要我”）
+    let (sent, frames) = request(&mut admin, 2, json!({"type": "send", "text": "点评 PPI"})).await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    let frames = until_turn_finished(&mut admin, frames).await;
+    let (r, more) = request(&mut admin, 3, json!({"type": "send", "text": "今天吃什么"})).await;
+    let card = r["data"]["approval_id"].as_str().unwrap().to_string();
+    let is_card = |f: &Value| f["type"] == "alert" && f["alert"]["tag"] == format!("approval:{card}");
+    let frames = frames_until(&mut admin, [frames, more].concat(), is_card).await;
+    let got = alerts(&frames);
+    assert_eq!(got.len(), 1, "只推需要我的：没有回复的通知 {got:?}");
+    assert_eq!(got[0]["kind"], "approval");
+    assert_eq!(got[0]["title"], "这条消息该交给谁？");
+    assert_eq!(got[0]["body"], "今天吃什么");
+
+    let frames = frames_until(&mut phone, Vec::new(), is_card).await;
+    let got = alerts(&frames);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0]["kind"], "reply");
+    assert_eq!(got[0]["title"], "小宏 回复了");
+    assert_eq!(got[0]["body"], "CPI 同比上涨 0.3%");
+    assert_eq!(got[0]["role_id"], "macro");
+
+    // 在一处处理过，各处都收到撤掉的通知
+    let (resolved, frames) = request(
+        &mut admin,
+        4,
+        json!({"type": "resolve_approval", "approval_id": card, "choice": 0}),
+    )
+    .await;
+    assert_eq!(resolved["ok"], true);
+    let dismissed = |f: &Value| f["type"] == "dismiss" && f["tag"] == format!("approval:{card}");
+    frames_until(&mut admin, frames, dismissed).await;
+    frames_until(&mut phone, Vec::new(), dismissed).await;
+}
+
 #[tokio::test]
 async fn untrusted_origins_are_rejected_before_upgrade() {
     let s = start(None).await;

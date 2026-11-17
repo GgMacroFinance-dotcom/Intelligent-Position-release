@@ -200,6 +200,10 @@ pub enum Request {
     },
     /// 回复 `DeviceInfo[]`：吊销一台设备，它的连接立即断开。
     RevokeDevice { device_id: String },
+    /// 回复 `NotifySettings`：这台设备的通知设置（共用令牌连上的控制台共用一份）。
+    GetNotifySettings,
+    /// 改这台设备的通知设置，回复保存后的 `NotifySettings`。
+    SetNotifySettings { settings: crate::notify::NotifySettings },
     /// 回复 `SendResult`；员工的回复随后以事件推送。
     Send {
         /// 省略时由路由规则决定。
@@ -380,6 +384,10 @@ pub enum ServerFrame {
         #[ts(type = "number")]
         skipped: u64,
     },
+    /// 要告诉人的一件事，已按这台设备的通知设置筛过（`docs/ip/m2-spec.md` D-32）。不编号，断开期间的不补发。
+    Alert { alert: crate::notify::Alert },
+    /// 撤掉这个标签的通知：审批卡在别处处理过了，或者受阻的任务又动起来了。
+    Dismiss { tag: String },
 }
 
 impl ServerFrame {

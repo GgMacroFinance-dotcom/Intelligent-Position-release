@@ -39,6 +39,8 @@ pub struct App {
     pub(crate) events: Arc<crate::events::EventLog>,
     /// 配对过的设备和设备令牌（backlog F-7）。
     pub(crate) devices: Arc<crate::devices::Devices>,
+    /// 通知规则和各设备的通知设置（backlog F-9）。规则任务在第一个 `/ws` 连接进来时启动。
+    pub(crate) notifier: Arc<crate::notify::Notifier>,
 }
 
 impl App {
@@ -62,7 +64,8 @@ impl App {
             schedules: Arc::default(),
             workspaces: Arc::default(),
             events: Arc::default(),
-            devices: Arc::new(crate::devices::Devices::new(store)),
+            devices: Arc::new(crate::devices::Devices::new(store.clone())),
+            notifier: Arc::new(crate::notify::Notifier::new(store)),
         }
     }
 
@@ -316,6 +319,11 @@ impl App {
             .await
             .map_err(anyhow::Error::msg)
             .context("读设备列表")?;
+        app.notifier
+            .load()
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("读通知设置")?;
         crate::rules::load_saved(&app).await;
         for (name, channel) in &config.channels {
             let crate::config::ChannelConfig::Slack(slack) = channel;

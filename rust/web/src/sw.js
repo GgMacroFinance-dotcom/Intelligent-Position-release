@@ -44,6 +44,24 @@ sw.addEventListener('activate', (/** @type {ExtendableEvent} */ event) => {
   );
 });
 
+/** @typedef {ExtendableEvent & { notification: Notification }} NotificationEvent */
+
+// 点了控制台弹的通知（backlog F-9）：有开着的控制台就切过去并告诉它打开哪个对话，没有就开一个新窗口。
+sw.addEventListener('notificationclick', (/** @type {NotificationEvent} */ event) => {
+  event.notification.close();
+  const threadId = event.notification.data?.thread_id ?? null;
+  event.waitUntil(
+    sw.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((/** @type {any[]} */ list) => {
+      const open = list[0];
+      if (open) {
+        open.postMessage({ type: 'open-alert', thread_id: threadId });
+        return open.focus();
+      }
+      return sw.clients.openWindow(threadId ? `/#/chat/${encodeURIComponent(threadId)}` : '/#/inbox');
+    }),
+  );
+});
+
 sw.addEventListener('fetch', (/** @type {FetchEvent} */ event) => {
   const req = event.request;
   const url = new URL(req.url);
