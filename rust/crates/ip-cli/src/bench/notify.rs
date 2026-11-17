@@ -1,5 +1,6 @@
 //! 通知规则基准（`docs/ip/m2-spec.md` D-32，backlog F-9）：运行时的每个事件都要过一遍通知规则，
-//! 流式输出时每来一段文字就是一个事件，所以它在热路径上。另外量一次预览（脱敏、去掉 Markdown、取头两句）的耗时。
+//! 流式输出时每来一段文字就是一个事件，所以它在热路径上。另外量一次预览（脱敏、去掉 Markdown、取头两句）的耗时，
+//! 和加密、签名一条 Web Push（F-10）的耗时。
 
 use std::time::Instant;
 
@@ -21,6 +22,8 @@ const PREVIEW_ROUNDS: usize = 200;
 const TARGET_EVENTS_PER_SEC: f64 = 100_000.0;
 /// 一次预览（约 4 KB 的 Markdown 报告）中位数的上限。
 const TARGET_PREVIEW_MS: f64 = 1.0;
+/// 加密并签名一条推送中位数的上限。一条通知要推给每个订阅各一次。
+const TARGET_PUSH_MS: f64 = 5.0;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,13 +36,16 @@ struct Report {
     preview_bytes: usize,
     preview_p50_ms: f64,
     preview_max_ms: f64,
+    push_p50_ms: f64,
+    push_max_ms: f64,
     target_events_per_sec: f64,
     target_preview_ms: f64,
+    target_push_ms: f64,
     pass: bool,
 }
 
 pub fn run(check: bool) -> anyhow::Result<()> {
-    let report = measure();
+    let report = measure()?;
     println!("{}", serde_json::to_string(&report)?);
     if check && !report.pass {
         anyhow::bail!("notify benchmark missed its targets");
@@ -47,7 +53,7 @@ pub fn run(check: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn measure() -> Report {
+fn measure() -> anyhow::Result<Report> {
     let reply = report_text();
     let agent = |id: &AgentId| {
         Some(Agent {
@@ -74,12 +80,20 @@ fn measure() -> Report {
         preview_ms.push(started.elapsed().as_secs_f64() * 1000.0);
     }
 
+    let payload = br#"{"title":"\u5b8f\u89c2\u7814\u7a76\u5458 \u56de\u590d\u4e86","body":"10 \u6708 CPI \u540c\u6bd4 2.9%","tag":"thread:01JD8Z6Q4M3K2N1P0R9S8T7V6W","thread_id":"01JD8Z6Q4M3K2N1P0R9S8T7V6W"}"#;
+    let push_ms = ip_server::webpush::time_pushes(payload, PREVIEW_ROUNDS).map_err(anyhow::Error::msg)?;
+
     let events_per_sec = (f64::from(EVENTS) / (observe_ms / 1000.0)).round();
     let preview_p50_ms = round3(median(&preview_ms));
     let preview_max_ms = round3(preview_ms.iter().copied().fold(0.0, f64::max));
     let turns = EVENTS / (DELTAS_PER_TURN + 3);
-    let pass = events_per_sec >= TARGET_EVENTS_PER_SEC && preview_p50_ms <= TARGET_PREVIEW_MS && alerts >= turns;
-    Report {
+    let push_p50_ms = round3(median(&push_ms));
+    let push_max_ms = round3(push_ms.iter().copied().fold(0.0, f64::max));
+    let pass = events_per_sec >= TARGET_EVENTS_PER_SEC
+        && preview_p50_ms <= TARGET_PREVIEW_MS
+        && alerts >= turns
+        && push_p50_ms <= TARGET_PUSH_MS;
+    Ok(Report {
         benchmark: "notify",
         events: EVENTS,
         alerts,
@@ -88,10 +102,13 @@ fn measure() -> Report {
         preview_bytes: reply.len(),
         preview_p50_ms,
         preview_max_ms,
+        push_p50_ms,
+        push_max_ms,
         target_events_per_sec: TARGET_EVENTS_PER_SEC,
         target_preview_ms: TARGET_PREVIEW_MS,
+        target_push_ms: TARGET_PUSH_MS,
         pass,
-    }
+    })
 }
 
 /// 一轮：开始、`DELTAS_PER_TURN` 段文字、整条回复、结束。事件本身在计时里构造，和真实转发时一样要克隆文字。

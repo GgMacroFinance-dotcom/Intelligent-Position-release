@@ -110,9 +110,13 @@ fn daily_allows(request: &Request) -> bool {
             | Request::ListReports { .. }
             | Request::ReadReport { .. }
             | Request::WhoAmI
-            // 自己的通知设置
+            // 自己的通知设置和推送订阅
             | Request::GetNotifySettings
             | Request::SetNotifySettings { .. }
+            | Request::PushKey
+            | Request::SubscribePush { .. }
+            | Request::UnsubscribePush { .. }
+            | Request::Presence { .. }
     )
 }
 
@@ -123,7 +127,7 @@ async fn session(app: App, mut socket: WebSocket, resume: Option<Resume>, caller
         None => None,
     };
     let mut revoked = app.devices.subscribe_revoked();
-    app.notifier.start(app.runtime.clone());
+    app.start_notifications();
     let mut alerts = app.notifier.subscribe();
     let log = app.events.clone();
     log.start_pump(app.runtime.subscribe());
@@ -492,6 +496,9 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
             if let Err(e) = app.notifier.forget(&device_id).await {
                 tracing::warn!(device = %device_id, "删掉吊销设备的通知设置失败：{e}");
             }
+            if let Err(e) = app.push.forget(&device_id).await {
+                tracing::warn!(device = %device_id, "删掉吊销设备的推送订阅失败：{e}");
+            }
             to_json(serde_json::to_value(list))
         }
         Request::GetNotifySettings => {
@@ -501,6 +508,24 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
         Request::SetNotifySettings { settings } => {
             let who = device.as_ref().map_or(crate::notify::SHARED, |d| d.id.as_str());
             to_json(serde_json::to_value(app.notifier.save(who, settings).await?))
+        }
+        Request::PushKey => to_json(serde_json::to_value(app.push.public_key().await?)),
+        Request::SubscribePush { endpoint, p256dh, auth } => {
+            let who = device.as_ref().map_or(crate::notify::SHARED, |d| d.id.as_str());
+            app.push
+                .subscribe(who, &endpoint, &p256dh, &auth, ip_core::now_ms())
+                .await?;
+            Ok(Value::Null)
+        }
+        Request::UnsubscribePush { endpoint } => {
+            let who = device.as_ref().map_or(crate::notify::SHARED, |d| d.id.as_str());
+            app.push.unsubscribe(who, &endpoint).await?;
+            Ok(Value::Null)
+        }
+        Request::Presence { active } => {
+            let who = device.as_ref().map_or(crate::notify::SHARED, |d| d.id.as_str());
+            app.push.presence(who, active, ip_core::now_ms());
+            Ok(Value::Null)
         }
         Request::ReadReport { agent_id, path } => {
             to_json(serde_json::to_value(crate::reports::read(app, &agent_id, &path).await?))

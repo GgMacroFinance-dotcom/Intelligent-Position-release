@@ -100,6 +100,7 @@ const state = {
   /** 员工写的报告，新改的在前。 @type {ReportInfo[]} */ reports: [],
   /** 这个连接是哪台设备。 @type {WhoAmI | null} */ whoami: null,
   /** 这台设备的通知设置；旧服务没有时为空。 @type {NotifySettings | null} */ notify: null,
+  /** 这个浏览器的推送：null 是主机不支持（旧服务）。 @type {'unsupported' | 'off' | 'on' | null} */ push: null,
   /** 配对过的设备（只有共用令牌看得到）。 @type {DeviceInfo[]} */ devices: [],
   /** 刚生成、还没用掉的配对码。 @type {NewPairing | null} */ pairing: null,
 };
@@ -1780,7 +1781,8 @@ function pageInFront() {
 
 /** 服务端已按这台设备的设置筛过；这里只管弹不弹、怎么弹。 @param {Alert} alert */
 async function showAlert(alert) {
-  if (pageInFront() || !('Notification' in window) || Notification.permission !== 'granted') return;
+  // 开了推送时由主机推送、Service Worker 弹，这里再弹就重复了。
+  if (state.push === 'on' || pageInFront() || !('Notification' in window) || Notification.permission !== 'granted') return;
   /** @type {NotificationOptions} */
   const options = { body: alert.body, tag: alert.tag, icon: '/assets/icon-192.png', data: { thread_id: alert.thread_id ?? null } };
   try {
@@ -1848,6 +1850,127 @@ function permissionLine() {
   return h('p', null, h('button', { onclick: () => Notification.requestPermission().then(() => render()) }, '允许浏览器通知'));
 }
 
+// ---------- 推送（backlog F-10） ----------
+
+/** 要 Service Worker、PushManager 和安全来源（HTTPS 或本机地址）。iPhone 要先添加到主屏幕才有 PushManager。 */
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && window.isSecureContext;
+}
+
+/** @param {string} text */
+function fromBase64Url(text) {
+  const bin = atob(text.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (text.length % 4)) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+/** @param {ArrayBuffer | null} a @param {Uint8Array} b */
+function sameBytes(a, b) {
+  if (!a || a.byteLength !== b.length) return false;
+  const x = new Uint8Array(a);
+  return x.every((v, i) => v === b[i]);
+}
+
+/** 把浏览器的订阅登记到主机。 @param {PushSubscription} sub */
+function registerPush(sub) {
+  const keys = sub.toJSON().keys ?? {};
+  return client.request({ type: 'subscribe_push', endpoint: sub.endpoint, p256dh: keys.p256dh ?? '', auth: keys.auth ?? '' });
+}
+
+/** 打开控制台时看这个浏览器订阅过没有。订阅过就再登记一次：主机换了密钥时换个新订阅，主机删了订阅时补上。 */
+async function checkPush() {
+  /** @type {import('./types/VapidKey').VapidKey} */
+  let key;
+  try {
+    key = await client.request({ type: 'push_key' });
+  } catch {
+    state.push = null; // 旧服务
+    return;
+  }
+  if (!pushSupported()) {
+    state.push = 'unsupported';
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    let sub = await reg?.pushManager.getSubscription();
+    if (!reg || !sub || Notification.permission !== 'granted') {
+      state.push = 'off';
+      return;
+    }
+    const serverKey = fromBase64Url(key.public_key);
+    if (!sameBytes(sub.options.applicationServerKey, serverKey)) {
+      await sub.unsubscribe();
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: serverKey });
+    }
+    await registerPush(sub);
+    state.push = 'on';
+  } catch (e) {
+    console.warn('恢复推送订阅失败', e);
+    state.push = 'off';
+  }
+}
+
+async function enablePush() {
+  try {
+    if ((await Notification.requestPermission()) !== 'granted') {
+      render();
+      return;
+    }
+    /** @type {import('./types/VapidKey').VapidKey} */
+    const key = await client.request({ type: 'push_key' });
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromBase64Url(key.public_key) });
+    try {
+      await registerPush(sub);
+    } catch (e) {
+      // 主机不收（比如推送服务不在白名单里）：浏览器这边也退掉，免得两边对不上。
+      await sub.unsubscribe();
+      throw e;
+    }
+    state.push = 'on';
+    reportPresence();
+  } catch (e) {
+    alert(`开启推送失败：${/** @type {Error} */ (e).message}`);
+  }
+  render();
+}
+
+async function disablePush() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = await reg?.pushManager.getSubscription();
+    if (sub) {
+      await client.request({ type: 'unsubscribe_push', endpoint: sub.endpoint });
+      await sub.unsubscribe();
+    }
+    state.push = 'off';
+  } catch (e) {
+    alert(`关闭推送失败：${/** @type {Error} */ (e).message}`);
+  }
+  render();
+}
+
+/** 告诉主机页面在不在前台：在前台时主机不给这台设备推送，界面自己会更新（apps-plan.md 5.2）。 */
+function reportPresence() {
+  if (state.push === null || client.status !== 'open') return;
+  client.request({ type: 'presence', active: pageInFront() }).catch(() => {
+    /* 报不上就算了，主机 30 秒后当作不在前台 */
+  });
+}
+
+function pushLine() {
+  switch (state.push) {
+    case null:
+      return null;
+    case 'unsupported':
+      return h('p.muted', null, '这个浏览器收不到推送：控制台要用 HTTPS 打开；iPhone 要 iOS 16.4 以上，先“添加到主屏幕”，再从主屏幕打开。');
+    case 'on':
+      return h('div.row', null, h('span', null, '推送：已开启，页面关着也能收到。'), h('button.link', { onclick: disablePush }, '关闭推送'));
+    default:
+      return h('div.row', null, h('span', null, '推送：没开。'), h('button', { onclick: enablePush }, '开启推送'));
+  }
+}
+
 function notifyCard() {
   const s = state.notify;
   if (!s) return null;
@@ -1885,6 +2008,7 @@ function notifyCard() {
     null,
     h('h3', null, state.whoami?.device ? '这台设备的通知' : '通知'),
     permissionLine(),
+    pushLine(),
     h('div.row', null, h('span', null, '通知哪些事'), level),
     h('label.check', null, preview, ' 通知里显示内容预览（密钥会打码）'),
     h('div.row', null, ...mute),
@@ -1892,7 +2016,7 @@ function notifyCard() {
     h(
       'p.muted.small',
       null,
-      '要我处理的：审批卡、员工提问、一轮失败、任务受阻。“全部”另外包括员工回复和任务完成。页面开着但不在前台时弹系统通知，在前台时不弹；关掉页面后也能收到的推送（Web Push）是下一步。',
+      '要我处理的：审批卡、员工提问、一轮失败、任务受阻。“全部”另外包括员工回复和任务完成。页面在前台时不弹；开了推送，页面关着也能收到，不开推送时只有页面开着才弹。',
       state.whoami?.device ? '' : '用共用令牌打开的控制台共用这一份设置。',
     ),
   );
@@ -2045,7 +2169,9 @@ async function loadAll() {
     refreshReports(),
     loadDevices(),
     loadNotify(),
+    checkPush(),
   ]);
+  reportPresence();
   state.memory = null;
   memoryEl = null;
   memoryFailed = null;
@@ -2064,6 +2190,13 @@ client.onStatus((s) => {
 });
 client.onEvent(onEvent);
 client.onAlert((a) => void showAlert(a));
+// 前台状态一变就报；在前台时每 20 秒再报一次，主机那边 30 秒没收到就当作不在前台（backlog F-10）。
+document.addEventListener('visibilitychange', reportPresence);
+window.addEventListener('focus', reportPresence);
+window.addEventListener('blur', () => setTimeout(reportPresence, 0));
+setInterval(() => {
+  if (pageInFront()) reportPresence();
+}, 20_000);
 client.onDismiss((tag) => void dismissAlert(tag));
 // 补不上断开期间或跟不上时漏掉的事件：整个重新拉。
 client.onLagged(() => {

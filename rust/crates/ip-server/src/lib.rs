@@ -20,6 +20,7 @@ mod reports;
 mod routing;
 mod rules;
 pub mod schedule;
+pub mod webpush;
 mod work;
 mod ws;
 
@@ -92,6 +93,7 @@ pub async fn serve(addr: SocketAddr, app: Option<App>) -> anyhow::Result<()> {
     if let Some(app) = &app {
         app.start_schedules();
         app.start_memory();
+        app.start_notifications();
     }
     axum::serve(listener, router(app))
         .with_graceful_shutdown(async move {

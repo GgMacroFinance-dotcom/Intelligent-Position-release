@@ -45,6 +45,28 @@ sw.addEventListener('activate', (/** @type {ExtendableEvent} */ event) => {
 });
 
 /** @typedef {ExtendableEvent & { notification: Notification }} NotificationEvent */
+/** @typedef {ExtendableEvent & { data: { json(): any } | null }} PushEvent */
+
+// 主机推来的通知（backlog F-10）：页面关着也能收到。内容已在主机上按这台设备的设置筛过、脱过敏，
+// 这里照着弹。同一个标签的通知会被新的一条替换，“已在别处处理”就是这样把旧的盖掉的。
+sw.addEventListener('push', (/** @type {PushEvent} */ event) => {
+  /** @type {{ title?: string, body?: string, tag?: string, thread_id?: string, silent?: boolean }} */
+  let data = {};
+  try {
+    data = event.data?.json() ?? {};
+  } catch {
+    /* 不是 JSON 也照样弹一条，浏览器要求每次推送都显示通知 */
+  }
+  event.waitUntil(
+    sw.registration.showNotification(data.title ?? 'intelligent-position', {
+      body: data.body ?? '',
+      tag: data.tag,
+      icon: '/assets/icon-192.png',
+      data: { thread_id: data.thread_id ?? null },
+      silent: !!data.silent,
+    }),
+  );
+});
 
 // 点了控制台弹的通知（backlog F-9）：有开着的控制台就切过去并告诉它打开哪个对话，没有就开一个新窗口。
 sw.addEventListener('notificationclick', (/** @type {NotificationEvent} */ event) => {
