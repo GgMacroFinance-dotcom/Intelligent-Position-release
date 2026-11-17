@@ -26,6 +26,10 @@ import { renderMarkdown } from './markdown.js';
 /** @typedef {import('./types/MemoryLayer').MemoryLayer} MemoryLayer */
 /** @typedef {import('./types/ReportInfo').ReportInfo} ReportInfo */
 /** @typedef {import('./types/ReportText').ReportText} ReportText */
+/** @typedef {import('./types/DeviceInfo').DeviceInfo} DeviceInfo */
+/** @typedef {import('./types/NewPairing').NewPairing} NewPairing */
+/** @typedef {import('./types/WhoAmI').WhoAmI} WhoAmI */
+/** @typedef {import('./types/Claimed').Claimed} Claimed */
 
 /** @type {Record<TaskStatus, string>} */
 const STATUS_TEXT = { open: '待开始', in_progress: '进行中', blocked: '受阻', done: '已完成', cancelled: '已取消' };
@@ -90,6 +94,9 @@ const state = {
   /** @type {MemoryView | null} */ memory: null,
   /** 关掉了记忆的对话。 @type {string[]} */ memoryOff: [],
   /** 员工写的报告，新改的在前。 @type {ReportInfo[]} */ reports: [],
+  /** 这个连接是哪台设备。 @type {WhoAmI | null} */ whoami: null,
+  /** 配对过的设备（只有共用令牌看得到）。 @type {DeviceInfo[]} */ devices: [],
+  /** 刚生成、还没用掉的配对码。 @type {NewPairing | null} */ pairing: null,
 };
 
 // short 是窄屏底部导航栏上的短名字。
@@ -101,6 +108,7 @@ const PAGES = [
   { id: 'approvals', title: '审批', short: '审批' },
   { id: 'router', title: '路由规则', short: '路由' },
   { id: 'memory', title: '记忆', short: '记忆' },
+  { id: 'devices', title: '设备', short: '设备' },
 ];
 
 const root = /** @type {HTMLElement} */ (document.getElementById('app'));
@@ -171,6 +179,8 @@ function renderPage(id) {
       return renderRouter();
     case 'memory':
       return renderMemory();
+    case 'devices':
+      return renderDevices();
     default:
       return renderChat();
   }
@@ -1533,6 +1543,186 @@ function onEvent(e) {
   if (page() === 'chat') updateChat();
 }
 
+// ---------- 设备（backlog F-7） ----------
+
+let pairingTimer = 0;
+
+async function loadDevices() {
+  try {
+    state.whoami = await client.request({ type: 'who_am_i' });
+    state.devices = state.whoami?.can_manage_devices ? await client.request({ type: 'list_devices' }) : [];
+  } catch {
+    /* 旧服务没有这些请求 */
+  }
+}
+
+function renderDevices() {
+  const me = state.whoami;
+  if (!me) return h('section.placeholder', null, h('p.muted', null, '正在读取…'));
+  if (me.device) {
+    return h(
+      'section.devices',
+      null,
+      h(
+        'div.card',
+        null,
+        h('h3', null, `这台设备：${me.device.name}`),
+        h('p', null, `${formatTime(me.device.paired_at_ms)} 配对。用这台设备发的消息、做的审批都署这个名字。`),
+        h('p.muted', null, '添加、改名、吊销设备要在用共用令牌连上的控制台里做。'),
+      ),
+    );
+  }
+  const name = /** @type {HTMLInputElement} */ (h('input', { placeholder: '设备名，例如：张三的手机', maxlength: 40 }));
+  const create = async () => {
+    if (!name.value.trim()) return name.focus();
+    try {
+      state.pairing = await client.request({ type: 'create_pairing', name: name.value, link_base: location.origin });
+      watchPairing();
+      render();
+    } catch (e) {
+      alert(`生成配对码失败：${/** @type {Error} */ (e).message}`);
+    }
+  };
+  return h(
+    'section.devices',
+    null,
+    state.pairing ? pairingCard(state.pairing) : h('div.card', null, h('h3', null, '添加设备'), h('div.row', null, name, h('button.primary', { onclick: create }, '生成配对码'))),
+    h(
+      'div.card',
+      null,
+      h('h3', null, `配对过的设备（${state.devices.length}）`),
+      state.devices.length ? deviceTable() : h('p.muted', null, '还没有。'),
+      h(
+        'p.muted.small',
+        null,
+        '设备现在能做的和共用令牌一样，只是不能管理设备；分“日常”“管理”两档权限是下一步（backlog F-8）。',
+        '手机要能访问这台主机：用公网 HTTPS 或 Tailscale，见部署文档。',
+      ),
+    ),
+  );
+}
+
+/** @param {NewPairing} p */
+function pairingCard(p) {
+  return h(
+    'div.card.pairing',
+    null,
+    h('h3', null, `给「${p.name}」配对`),
+    h('div.pair-code', null, p.code),
+    h('p.muted', null, `${new Date(Number(p.expires_ms)).toLocaleTimeString('zh-CN')} 前有效，只能用一次。在那台设备上打开控制台，点“令牌”输入这 6 位数字；或者用相机扫下面的二维码。`),
+    p.qr ? qrCanvas(p.qr) : null,
+    p.link ? h('p.mono.muted', null, p.link) : null,
+    h('button', { onclick: () => endPairing() }, '完成'),
+  );
+}
+
+/** 把二维码画到画布上：黑块白底，四周留 4 格白边，深色主题下也能扫。 @param {string[]} rows */
+function qrCanvas(rows) {
+  const cell = 6;
+  const quiet = 4;
+  const n = rows.length + quiet * 2;
+  const canvas = /** @type {HTMLCanvasElement} */ (h('canvas.qr', { width: n * cell, height: n * cell, 'aria-label': '配对二维码' }));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, n * cell, n * cell);
+  ctx.fillStyle = '#000000';
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) if (row[x] === '1') ctx.fillRect((x + quiet) * cell, (y + quiet) * cell, cell, cell);
+  });
+  return canvas;
+}
+
+/** 配对码有效期间每 3 秒看一次设备列表，那台设备配上了就收起配对码。 */
+function watchPairing() {
+  clearInterval(pairingTimer);
+  const before = new Set(state.devices.map((d) => d.id));
+  pairingTimer = window.setInterval(async () => {
+    const p = state.pairing;
+    if (!p || Date.now() > Number(p.expires_ms)) return endPairing();
+    await loadDevices();
+    if (state.devices.some((d) => !before.has(d.id))) return endPairing();
+    if (page() === 'devices') render();
+  }, 3000);
+}
+
+function endPairing() {
+  clearInterval(pairingTimer);
+  state.pairing = null;
+  loadDevices().then(() => page() === 'devices' && render());
+}
+
+function deviceTable() {
+  return h(
+    'table',
+    null,
+    h('thead', null, h('tr', null, h('th', null, '设备'), h('th', null, '状态'), h('th', null, '配对时间'), h('th', null, ''))),
+    h(
+      'tbody',
+      null,
+      ...state.devices.map((d) =>
+        h(
+          'tr',
+          null,
+          h('td', null, d.name),
+          h('td', null, d.online ? h('span.online', null, '在线') : h('span.muted', null, `最后在线 ${formatTime(Number(d.last_seen_ms))}`)),
+          h('td', null, formatTime(Number(d.paired_at_ms))),
+          h(
+            'td.actions',
+            null,
+            h('button.link', { onclick: () => renameDevice(d) }, '改名'),
+            h('button.link.danger', { onclick: () => revokeDevice(d) }, '吊销'),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/** @param {DeviceInfo} d */
+async function renameDevice(d) {
+  const name = prompt('新的设备名', d.name);
+  if (!name || name.trim() === d.name) return;
+  try {
+    state.devices = await client.request({ type: 'rename_device', device_id: d.id, name });
+    render();
+  } catch (e) {
+    alert(`改名失败：${/** @type {Error} */ (e).message}`);
+  }
+}
+
+/** @param {DeviceInfo} d */
+async function revokeDevice(d) {
+  if (!confirm(`吊销「${d.name}」？它的连接会立即断开，要再用得重新配对。`)) return;
+  try {
+    state.devices = await client.request({ type: 'revoke_device', device_id: d.id });
+    render();
+  } catch (e) {
+    alert(`吊销失败：${/** @type {Error} */ (e).message}`);
+  }
+}
+
+/** 用 6 位配对码换这台设备的令牌，存好后重新打开控制台。 @param {string} code */
+async function pairDevice(code) {
+  const status = h('p.muted', null, '正在用配对码换这台设备的令牌…');
+  root.replaceChildren(h('section.placeholder', null, h('h2', null, '配对这台设备'), status));
+  try {
+    const res = await fetch('/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error ?? `配对失败（${res.status}）`);
+    const claimed = /** @type {Claimed} */ (body);
+    store.set(TOKEN_KEY, claimed.token);
+    store.set(NAME_KEY, claimed.device.name);
+    history.replaceState(null, '', `${location.pathname}#/inbox`);
+    location.reload();
+  } catch (e) {
+    status.replaceWith(
+      h('p.error', null, e instanceof Error ? e.message : String(e)),
+      h('p', null, h('a', { href: '#/inbox', onclick: () => setTimeout(() => location.reload()) }, '回到控制台')),
+    );
+  }
+}
+
 // ---------- 报告（backlog F-4） ----------
 
 /** 正在看的报告的遮罩层。 @type {HTMLElement | null} */
@@ -1628,8 +1818,9 @@ window.addEventListener('popstate', () => {
 });
 
 function askToken() {
-  const t = prompt('访问令牌（服务配置了 auth_token_env 时需要）', store.get(TOKEN_KEY) ?? '');
+  const t = prompt('访问令牌（服务配置了 auth_token_env 时需要），或者 6 位配对码', store.get(TOKEN_KEY) ?? '');
   if (t === null) return;
+  if (/^\d{6}$/.test(t.trim())) return pairDevice(t.trim());
   store.set(TOKEN_KEY, t.trim());
   const n = prompt('你的名字（显示在消息上）', store.get(NAME_KEY) ?? '');
   if (n !== null && n.trim()) store.set(NAME_KEY, n.trim());
@@ -1653,6 +1844,7 @@ async function loadAll() {
     client.request({ type: 'list_schedules' }),
     client.request({ type: 'list_memory_off_threads' }),
     refreshReports(),
+    loadDevices(),
   ]);
   state.memory = null;
   memoryEl = null;
@@ -1680,7 +1872,10 @@ narrow.addEventListener('change', () => {
   const id = location.hash.replace(/^#\/?/, '').split('/')[0];
   if (!PAGES.some((p) => p.id === id)) render();
 });
-client.connect();
+// 扫配对二维码打开的地址是 #/pair/<6 位配对码>：先换令牌，不连 /ws。
+const pairCode = /^#\/pair\/(\d{6})$/.exec(location.hash)?.[1];
+if (pairCode) pairDevice(pairCode);
+else client.connect();
 
 // 注册 Service Worker，浏览器才会提供“安装应用”（backlog F-2）。只在 HTTPS 或本机地址上可用，失败不影响控制台。
 if ('serviceWorker' in navigator) {
@@ -1688,4 +1883,4 @@ if ('serviceWorker' in navigator) {
     /* 忽略：比如用 http:// 连非本机地址 */
   });
 }
-render();
+if (!pairCode) render();

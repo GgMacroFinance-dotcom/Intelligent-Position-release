@@ -341,6 +341,101 @@ async fn token_is_required_when_configured() {
     assert_eq!(r["ok"], true);
 }
 
+/// 设备配对（backlog F-7）：共用令牌生成配对码，设备换到自己的令牌，署名用设备名，吊销后立即断开。
+#[tokio::test]
+async fn devices_pair_sign_with_their_name_and_can_be_revoked() {
+    let s = start(Some("s3cret")).await;
+    let mut admin = connect(s.addr, "?token=s3cret").await.unwrap();
+    let (me, _) = request(&mut admin, 1, json!({"type": "who_am_i"})).await;
+    assert_eq!(me["data"], json!({"device": null, "can_manage_devices": true}));
+    let (p, _) = request(
+        &mut admin,
+        2,
+        json!({"type": "create_pairing", "name": "张三的手机", "link_base": "https://ip.example.com"}),
+    )
+    .await;
+    let code = p["data"]["code"].as_str().unwrap().to_string();
+    assert_eq!(p["data"]["link"], format!("https://ip.example.com/#/pair/{code}"));
+
+    let http = reqwest::Client::new();
+    let pair = |body: Value, origin: Option<&'static str>| {
+        let mut req = http.post(format!("http://{}/pair", s.addr)).json(&body);
+        if let Some(o) = origin {
+            req = req.header("Origin", o);
+        }
+        req.send()
+    };
+    // 别的网页借浏览器来换令牌：挡在来源检查
+    assert_eq!(
+        pair(json!({"code": code}), Some("https://evil.example"))
+            .await
+            .unwrap()
+            .status(),
+        403
+    );
+    let wrong = if code == "000000" { "000001" } else { "000000" };
+    assert_eq!(pair(json!({"code": wrong}), None).await.unwrap().status(), 400);
+    let claimed: Value = pair(json!({"code": code}), None).await.unwrap().json().await.unwrap();
+    let token = claimed["token"].as_str().unwrap().to_string();
+    let device_id = claimed["device"]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        pair(json!({"code": code}), None).await.unwrap().status(),
+        400,
+        "配对码只能用一次"
+    );
+
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+    let (me, _) = request(&mut phone, 1, json!({"type": "who_am_i"})).await;
+    assert_eq!(me["data"]["device"]["name"], "张三的手机");
+    assert_eq!(me["data"]["can_manage_devices"], false);
+    let (r, _) = request(&mut phone, 2, json!({"type": "list_devices"})).await;
+    assert_eq!(r["ok"], false, "设备不能管理设备");
+    // 自填的署名不算数
+    let (sent, _) = request(
+        &mut phone,
+        3,
+        json!({"type": "send", "agent_id": "macro-1", "text": "看看 CPI", "author": "冒充的名字"}),
+    )
+    .await;
+    assert_eq!(
+        sent["data"]["message"]["author"],
+        json!({"kind": "human", "name": "张三的手机"})
+    );
+
+    let (list, _) = request(&mut admin, 3, json!({"type": "list_devices"})).await;
+    assert_eq!(list["data"][0]["online"], true);
+    let (list, _) = request(
+        &mut admin,
+        4,
+        json!({"type": "rename_device", "device_id": device_id, "name": "张三的新手机"}),
+    )
+    .await;
+    assert_eq!(list["data"][0]["name"], "张三的新手机");
+    // 连着的时候改名，之后的署名就用新名字
+    let (sent, _) = request(
+        &mut phone,
+        4,
+        json!({"type": "send", "agent_id": "macro-1", "text": "再看看 PPI"}),
+    )
+    .await;
+    assert_eq!(sent["data"]["message"]["author"]["name"], "张三的新手机");
+    let (list, _) = request(&mut admin, 5, json!({"type": "revoke_device", "device_id": device_id})).await;
+    assert_eq!(list["data"], json!([]));
+    // 吊销后连接立即断开，令牌也不能再用
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(msg)) = phone.next().await {
+            if matches!(msg, Message::Close(_)) {
+                return true;
+            }
+        }
+        true
+    })
+    .await
+    .unwrap();
+    assert!(closed);
+    assert!(connect(s.addr, &format!("?token={token}")).await.is_err());
+}
+
 #[tokio::test]
 async fn untrusted_origins_are_rejected_before_upgrade() {
     let s = start(None).await;

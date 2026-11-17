@@ -293,3 +293,15 @@ body.report-open { overflow: hidden; }
   .report-body { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); }
   .report-list li { padding: 4px 0; }
 }
+
+/* 设备（backlog F-7）。 */
+.devices { padding: 16px; display: flex; flex-direction: column; gap: 16px; max-width: 900px; margin: 0 auto; width: 100%; overflow: auto; }
+.devices .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.devices .row input { flex: 1; min-width: 180px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
+.devices td.actions { white-space: nowrap; text-align: right; }
+.devices .online { color: var(--ok); }
+.pair-code { font: 600 36px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 6px; margin: 8px 0; }
+canvas.qr { display: block; width: 216px; max-width: 100%; height: auto; image-rendering: pixelated; margin: 8px 0; }
+@media (max-width: 720px) {
+  .devices { padding: 12px; }
+}
