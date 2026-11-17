@@ -28,6 +28,12 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 ts-rs.workspace = true
+uuid.workspace = true
+# Web Push 的加密和签名（F-10）。和 rustls 用的是同一个 aws-lc-rs，同样的特性，不多编译东西。
+aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+base64 = "0.22"
+qrcode = { version = "0.14", default-features = false }
+sha2 = "0.11"
 
 [dev-dependencies]
 ip-connectors = { workspace = true, features = ["fake"] }

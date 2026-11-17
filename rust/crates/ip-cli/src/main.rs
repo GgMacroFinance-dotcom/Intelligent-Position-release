@@ -42,6 +42,9 @@ enum Command {
     /// 岗位的决策者笔记和记忆摘要：查看、写入、清空。服务在运行时也能用，下一轮对话生效。
     #[command(subcommand)]
     Context(ContextCommand),
+    /// 配对手机、电脑（backlog F-7）。改名和吊销在控制台“设备”页做。
+    #[command(subcommand)]
+    Device(DeviceCommand),
     /// 跑性能基准，结果以一行 JSON 打印。
     Bench(bench::BenchArgs),
     /// 用真实模型跑评测集，按程序判定的检查项打分，输出通过率和花费。全部通过时退出码为 0。
@@ -58,6 +61,21 @@ enum DataCommand {
         /// 只拉这个数据源（名字）或这个序列（<数据源>/<序列>）。
         #[arg(long)]
         only: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeviceCommand {
+    /// 生成一个 2 分钟内有效、只能用一次的 6 位配对码。服务在运行时也能用。
+    Pair {
+        #[arg(long)]
+        config: PathBuf,
+        /// 配对后这台设备叫什么，比如“张三的手机”。用它连上后发的消息署这个名字。
+        #[arg(long)]
+        name: String,
+        /// 控制台对外的地址，比如 https://ip.example.com。给了就在终端里画出二维码，手机扫码即可。
+        #[arg(long)]
+        url: Option<String>,
     },
 }
 
@@ -152,6 +170,10 @@ fn main() -> anyhow::Result<()> {
             .enable_all()
             .build()?
             .block_on(context(command)),
+        Command::Device(command) => tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(device(command)),
         Command::Bench(args) => bench::run(args),
         Command::Eval(args) => {
             tracing_subscriber::fmt()
@@ -206,6 +228,28 @@ async fn pull(config: PathBuf, only: Option<String>) -> anyhow::Result<()> {
     if failed > 0 {
         anyhow::bail!("{failed} 个序列拉取失败");
     }
+    Ok(())
+}
+
+/// `ip device pair`：直接把配对码写进数据库，运行中的服务换令牌时读得到。
+async fn device(command: DeviceCommand) -> anyhow::Result<()> {
+    let DeviceCommand::Pair { config, name, url } = command;
+    let config = ip_server::Config::load(&config)?;
+    std::fs::create_dir_all(&config.data_dir)?;
+    let store = ip_store::Store::open(config.data_dir.join("ip.db"))?;
+    let pairing = ip_server::devices::create_pairing(&store, &name, url.as_deref(), ip_core::now_ms())
+        .await
+        .map_err(anyhow::Error::msg)?;
+    if let Some(link) = &pairing.link {
+        if let Some(qr) = ip_server::devices::qr_terminal(link) {
+            println!("{qr}");
+        }
+        println!("用手机相机扫上面的二维码，或者打开 {link}");
+    } else if url.is_some() {
+        anyhow::bail!("--url 要以 https:// 或 http:// 开头");
+    }
+    println!("配对码：{}（{}，2 分钟内有效，只能用一次）", pairing.code, pairing.name);
+    println!("在控制台点“令牌”，输入这 6 位数字也可以。");
     Ok(())
 }
 

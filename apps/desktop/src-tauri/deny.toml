@@ -1,0 +1,27 @@
+# 桌面 App 的依赖许可证检查（cargo-deny），CI 的 desktop 工作流会跑：cargo deny --locked --all-features check licenses
+# 允许清单和 rust/deny.toml 一样，改那边时这里一起改。多出来的例外都是 Tauri 带进来的，只对点名的包放行：
+#
+# - MPL-2.0：按文件的弱 copyleft，原样使用、不改它的源码时，可以和 Apache-2.0 的代码一起分发。
+#   cssparser、cssparser-macros、dtoa-short、selectors 是 Tauri 处理 HTML 用的（kuchikiki），
+#   option-ext 是 dirs 找系统目录用的。
+# - Apache-2.0 WITH LLVM-exception：比 Apache-2.0 多一条例外，更宽松。target-lexicon 只在编译时用。
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+exceptions = [
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
+    { allow = ["MPL-2.0"], crate = "cssparser" },
+    { allow = ["MPL-2.0"], crate = "cssparser-macros" },
+    { allow = ["MPL-2.0"], crate = "dtoa-short" },
+    { allow = ["MPL-2.0"], crate = "selectors" },
+    { allow = ["MPL-2.0"], crate = "option-ext" },
+    { allow = ["Apache-2.0 WITH LLVM-exception"], crate = "target-lexicon" },
+]
