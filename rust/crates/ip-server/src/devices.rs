@@ -3,6 +3,7 @@
 //! - 配对码：6 位数字，2 分钟内有效，只能用一次。`ip device pair` 或控制台“设备”页生成。
 //! - 换到的设备令牌只给这一台设备，服务端只存它的 SHA-256。
 //! - 用设备令牌连上的请求，署名一律用设备名。吊销后这台设备的连接立即断开。
+//! - 每台设备一档权限（[`Scope`]，backlog F-8）：新配对的是“日常”，“管理”要在“设备”页单独给。
 //!
 //! 设备和待用的配对码都存在设置表里（`devices`、`device_pairings` 两个键），数量很少，整份读写。
 //! 设备列表只有服务进程写（串行）；配对码 `ip device pair` 也会写，所以“只能用一次”不靠删掉配对码保证，
@@ -29,12 +30,25 @@ const MAX_NAME_CHARS: usize = 40;
 const DEVICES_KEY: &str = "devices";
 const PAIRINGS_KEY: &str = "device_pairings";
 
+/// 设备权限（`docs/ip/apps-plan.md` 4.3）。哪些请求算“日常”见 `ws.rs` 的 `daily_allows`。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Scope {
+    /// 对话、审批和员工提问、任务、看报告、看岗位和花费。新配对的设备都是这一档。
+    #[default]
+    Daily,
+    /// 另外能改路由规则、定时任务、记忆、管理设备。共用令牌等同这一档。
+    Admin,
+}
+
 /// 控制台“设备”页看到的一台设备。
 #[derive(Clone, Debug, Serialize, TS, PartialEq, Eq)]
 #[ts(export)]
 pub struct DeviceInfo {
     pub id: String,
     pub name: String,
+    pub scope: Scope,
     #[ts(type = "number")]
     pub paired_at_ms: i64,
     #[ts(type = "number")]
@@ -75,6 +89,7 @@ pub struct Claimed {
 pub struct Device {
     pub id: String,
     pub name: String,
+    pub scope: Scope,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -82,6 +97,9 @@ struct DeviceRecord {
     id: String,
     name: String,
     token_sha256: String,
+    /// F-8 之前配对的设备没有这一项，按“日常”算。
+    #[serde(default)]
+    scope: Scope,
     paired_at_ms: i64,
     last_seen_ms: i64,
     /// 用的是哪个配对码（的 id）。同一个配对码只能换一次。
@@ -157,15 +175,12 @@ impl Devices {
             return None;
         }
         let hash = sha256_hex(token.as_bytes());
-        self.read_cache().get(&hash).map(|r| Device {
-            id: r.id.clone(),
-            name: r.name.clone(),
-        })
+        self.read_cache().get(&hash).map(device)
     }
 
-    /// 设备现在的名字；已吊销时没有。
-    pub fn name(&self, id: &str) -> Option<String> {
-        self.read_cache().values().find(|r| r.id == id).map(|r| r.name.clone())
+    /// 设备现在的名字和权限（连着时可能改过）；已吊销时没有。
+    pub fn current(&self, id: &str) -> Option<Device> {
+        self.read_cache().values().find(|r| r.id == id).map(device)
     }
 
     pub fn list(&self) -> Vec<DeviceInfo> {
@@ -216,6 +231,7 @@ impl Devices {
             id: format!("dev_{}", uuid::Uuid::now_v7().simple()),
             name: pairing.name.clone(),
             token_sha256: sha256_hex(token.as_bytes()),
+            scope: Scope::Daily,
             paired_at_ms: now_ms,
             last_seen_ms: now_ms,
             pairing_id: pairing.id.clone(),
@@ -237,6 +253,13 @@ impl Devices {
     pub async fn rename(&self, id: &str, name: &str) -> Result<Vec<DeviceInfo>, String> {
         let name = clean_name(name)?;
         self.update(id, |r| r.name = name.clone()).await?;
+        Ok(self.list())
+    }
+
+    /// 改权限，连着的连接下一个请求就按新权限算。
+    pub async fn set_scope(&self, id: &str, scope: Scope) -> Result<Vec<DeviceInfo>, String> {
+        self.update(id, |r| r.scope = scope).await?;
+        tracing::info!(device = %id, ?scope, "设备权限已改");
         Ok(self.list())
     }
 
@@ -449,10 +472,19 @@ fn clean_name(name: &str) -> Result<String, String> {
     Ok(name.to_string())
 }
 
+fn device(r: &DeviceRecord) -> Device {
+    Device {
+        id: r.id.clone(),
+        name: r.name.clone(),
+        scope: r.scope,
+    }
+}
+
 fn info(r: &DeviceRecord, online: bool) -> DeviceInfo {
     DeviceInfo {
         id: r.id.clone(),
         name: r.name.clone(),
+        scope: r.scope,
         paired_at_ms: r.paired_at_ms,
         last_seen_ms: r.last_seen_ms,
         online,
@@ -583,5 +615,25 @@ mod tests {
         assert_eq!(revoked.recv().await.unwrap(), device.id);
         assert!(d.authenticate(&c.token).is_none());
         assert!(d.revoke(&device.id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn new_devices_are_daily_until_promoted() {
+        let (_dir, d) = devices();
+        let p = d.create_pairing("手机", None, 0).await.unwrap();
+        let c = d.claim(&p.code, 1).await.unwrap();
+        assert_eq!(c.device.scope, Scope::Daily);
+        let id = c.device.id;
+        assert_eq!(d.set_scope(&id, Scope::Admin).await.unwrap()[0].scope, Scope::Admin);
+        assert_eq!(d.current(&id).unwrap().scope, Scope::Admin);
+        assert_eq!(d.authenticate(&c.token).unwrap().scope, Scope::Admin);
+        assert!(d.set_scope("dev_none", Scope::Admin).await.is_err());
+
+        // F-8 之前存下的设备没有 scope，读出来是“日常”
+        let mut raw = d.store.setting(DEVICES_KEY).await.unwrap().unwrap();
+        raw[0].as_object_mut().unwrap().remove("scope");
+        d.store.put_setting(DEVICES_KEY, raw).await.unwrap();
+        d.load().await.unwrap();
+        assert_eq!(d.current(&id).unwrap().scope, Scope::Daily);
     }
 }
