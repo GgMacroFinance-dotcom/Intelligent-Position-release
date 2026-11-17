@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗口只能调壳自己的几条命令（连主机、配对、通知、托盘待办数、打开外部链接），不开放文件、命令行等别的原生接口。",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

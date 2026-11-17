@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.17（2026-11-16）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.18（2026-11-16）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -791,6 +791,17 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 - 基准：`ip bench notify` 加了一项，加密并签名一条推送的耗时。
 - 测试：RFC 8291 例子逐字节、VAPID 签名能用公钥验过、只认已知推送服务、在前台的设备过期、`Topic` 长度；`/ws` 集成测试用假推送服务走一遍订阅、审批推送（解密后核对内容和请求头）、410 删订阅、在前台不推、处理后推“已在别处处理”。没有在真的 FCM、苹果、Mozilla 推送服务上跑过。
 
+### D-34 桌面 App 连主机 · 提议（backlog F-11）
+
+背景：桌面 App（`apps/desktop`，Tauri 2）自带一份控制台，不加载主机上的网页（`apps-plan.md` Q-4）。它的网页来源是 App 自己的，和主机地址不同源，原来的来源检查会把它挡在 `/ws` 外面。
+
+- 来源检查（`origin.rs`）：主机配了访问令牌时，额外接受桌面 App 的三个来源 `tauri://localhost`（macOS、Linux）、`http://tauri.localhost`、`https://tauri.localhost`（Windows），连接照样要令牌。没配令牌时不接受：`tauri.localhost` 这种名字万一被解析到别处，别的网页也能带上这个来源，不能拿它当免令牌的凭据。`allowed_origins` 的写法不变，也不用写这几个。
+- 配对：App 在壳里（Rust）发 `POST /pair`，不带 `Origin`，按非浏览器客户端处理，主机不用开跨域。配对码只能用一次，App 先确认系统钥匙串存得进去再发。
+- 令牌：存在系统钥匙串，服务名 `intelligent-position`、账户名是主机地址；主机地址记在 App 配置目录的 `host.json`。换主机时删掉旧主机的令牌。网页每次打开时向壳要一次，用法和浏览器里一样（`/ws?token=`）。
+- 壳只给网页 7 条命令（`get_host`、`pair`、`save_token`、`forget_host`、`notify`、`open_url`、`set_pending`），Tauri 的权限声明只有 `core:default`。`open_url` 只认 http、https、mailto。
+- 通知：桌面 App 不订 Web Push（D-33），关窗口后常驻托盘、连接不断，照 D-32 的 `alert` 弹系统通知，窗口在前台时不弹。点通知现在只能把窗口叫出来。
+- 测试：来源检查加了一条（配了令牌时接受这三个来源，没配时不接受，相近的写法不接受）；壳的主机地址规整有单元测试。真的 App 在 Linux（Xvfb、GNOME 钥匙串）上跑过配对、存令牌、连上、重开读回令牌；其余用 Playwright 加假的壳核对。macOS、Windows 没跑过。
+
 ---
 
 ## 修订记录
@@ -814,3 +825,4 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 | 2026-11-16 | v0.15 | 新增 D-31（提议，backlog F-8）：设备权限“日常”“管理”，按请求类型放行、默认拒绝；`who_am_i` 的 `can_manage_devices` 换成 `scope` |
 | 2026-11-16 | v0.16 | 新增 D-32（提议，backlog F-9）：通知规则、每台设备的通知设置、`alert` 和 `dismiss` 两种服务端帧 |
 | 2026-11-16 | v0.17 | 新增 D-33（提议，backlog F-10）：Web Push、`push_key`、`subscribe_push`、`unsubscribe_push`、`presence` 四个请求，`ip.yaml` 的 `push.contact` |
+| 2026-11-16 | v0.18 | 新增 D-34（提议，backlog F-11）：配了令牌时 `/ws` 和 `/pair` 接受桌面 App 的来源 |

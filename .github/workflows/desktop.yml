@@ -1,0 +1,107 @@
+name: desktop
+
+# 桌面 App（apps/desktop，backlog F-11）。改了它才跑检查，只用 Linux。
+# 三个平台的安装包只在手动触发或打 desktop-v* 标签时打：macOS、Windows 的 Actions 分钟数贵。
+on:
+  pull_request:
+    paths: ["apps/desktop/**", ".github/workflows/desktop.yml"]
+  push:
+    branches: [main]
+    paths: ["apps/desktop/**", ".github/workflows/desktop.yml"]
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+defaults:
+  run:
+    working-directory: apps/desktop
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    env:
+      # 和 licenses 工作流用同一个版本。
+      CARGO_DENY_VERSION: 0.20.2
+      CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: Install system libraries
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - name: Bundle console
+        run: node scripts/bundle.mjs
+      - name: Format
+        working-directory: apps/desktop/src-tauri
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --all-targets --locked
+      - name: Test
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --locked
+      - name: Install cargo-deny
+        run: |
+          name="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
+          curl -sSfL -o /tmp/cargo-deny.tar.gz \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${name}.tar.gz"
+          echo "${CARGO_DENY_SHA256}  /tmp/cargo-deny.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/cargo-deny.tar.gz -C /tmp
+          install "/tmp/${name}/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
+      - name: Dependency licenses
+        working-directory: apps/desktop/src-tauri
+        run: cargo deny --locked --all-features check licenses
+
+  installers:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # AppImage 和 .deb 在老一点的系统上打，新旧发行版都能装。
+          - os: ubuntu-22.04
+            args: ""
+            targets: ""
+          - os: macos-latest
+            args: --target universal-apple-darwin
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - os: windows-latest
+            args: ""
+            targets: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      # 没有签名证书：macOS 第一次打开要右键“打开”，Windows 会弹 SmartScreen 提示。
+      - run: npx tauri build ${{ matrix.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ip-desktop-${{ matrix.os }}
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/
+            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/
+          if-no-files-found: error
