@@ -1155,7 +1155,9 @@ name = "ip-server"
 version = "0.8.0"
 dependencies = [
  "anyhow",
+ "aws-lc-rs",
  "axum",
+ "base64 0.22.1",
  "futures-util",
  "ip-connectors",
  "ip-core",

@@ -7,9 +7,16 @@
 //!   只比较 `Origin` 和 `Host` 挡不住 DNS rebinding，所以要和上一条一起用。
 //! - 不带 `Origin` 的是非浏览器客户端：配了令牌就要令牌；没配令牌时只有本机进程连得上，
 //!   视为和服务同一信任范围。
+//! - 桌面 App（Tauri，backlog F-11）里网页的来源是固定的几个（`DESKTOP_ORIGINS`），和主机地址不同源。
+//!   只在配了令牌时放行，连接照样要令牌。没配令牌时不放行：`http://tauri.localhost` 这种名字
+//!   万一被解析到别处，别的网页也能带上这个来源，不能拿它当作免令牌的凭据。
 
 use axum::http::uri::{Authority, Scheme};
 use axum::http::{HeaderMap, Uri, header};
+
+/// 桌面 App 内嵌网页的来源：macOS、Linux 是 `tauri://localhost`，Windows 是 `http://tauri.localhost`
+/// （开了 `useHttpsScheme` 时是 `https://`）。
+const DESKTOP_ORIGINS: &[&str] = &["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
 
 /// 规范化后的来源：小写的 `scheme://host[:port]`，默认端口省略。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,6 +67,13 @@ pub fn check(headers: &HeaderMap, token_configured: bool, allowed: &[Origin]) ->
     let Some(origin) = headers.get(header::ORIGIN) else {
         return Ok(());
     };
+    if token_configured
+        && origin
+            .to_str()
+            .is_ok_and(|v| DESKTOP_ORIGINS.iter().any(|d| d.eq_ignore_ascii_case(v)))
+    {
+        return Ok(());
+    }
     // `null`、乱码、非 http(s) 一律不认。
     let origin = origin
         .to_str()
@@ -168,5 +182,26 @@ mod tests {
         assert!(check(&kept, true, &[]).is_ok());
         let kept = headers(Some("ip.example.com:443"), Some("https://ip.example.com"));
         assert!(check(&kept, true, &[]).is_ok());
+    }
+
+    #[test]
+    fn desktop_app_needs_a_token_configured() {
+        for origin in ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"] {
+            let remote = headers(Some("ip.example.com"), Some(origin));
+            assert!(check(&remote, true, &[]).is_ok(), "{origin}");
+            // 没配令牌：只能是本机地址，桌面 App 的来源也不放行。
+            let local = headers(Some("127.0.0.1:7878"), Some(origin));
+            assert!(check(&local, false, &[]).is_err(), "{origin}（没配令牌）");
+        }
+        for bad in [
+            "tauri://evil.example",
+            "http://tauri.localhost:8080",
+            "tauri://localhost/x",
+        ] {
+            assert!(
+                check(&headers(Some("ip.example.com"), Some(bad)), true, &[]).is_err(),
+                "{bad}"
+            );
+        }
     }
 }

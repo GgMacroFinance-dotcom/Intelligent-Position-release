@@ -520,6 +520,223 @@ async fn daily_devices_only_get_daily_requests() {
     assert_eq!(r["ok"], false);
 }
 
+/// 一直读到满足条件的那一帧（含），返回读到的所有帧。
+async fn frames_until(ws: &mut Ws, mut frames: Vec<Value>, done: impl Fn(&Value) -> bool) -> Vec<Value> {
+    while !frames.iter().any(&done) {
+        frames.push(next_json(ws).await);
+    }
+    frames
+}
+
+fn alerts(frames: &[Value]) -> Vec<&Value> {
+    frames
+        .iter()
+        .filter(|f| f["type"] == "alert")
+        .map(|f| &f["alert"])
+        .collect()
+}
+
+/// 通知规则（`docs/ip/m2-spec.md` D-32）：每个连接按自己的设置收通知。
+#[tokio::test]
+async fn alerts_follow_each_connections_settings() {
+    let rules = "rules: [{ id: 数据点评, when: { any: [CPI, PPI] }, to: { role: macro } }]";
+    let s = start_with(None, Some(rules)).await;
+    let mut admin = connect(s.addr, "").await.unwrap();
+    let (token, _) = pair_device(&s, &mut admin, "手机").await;
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+    // 日常设备能改自己的通知设置：全部都要
+    let (saved, _) = request(
+        &mut phone,
+        1,
+        json!({"type": "set_notify_settings", "settings": {"level": "all", "muted_roles": [], "mute_until_ms": null, "preview": true}}),
+    )
+    .await;
+    assert_eq!(saved["data"]["level"], "all", "{saved}");
+    let (mine, _) = request(&mut admin, 1, json!({"type": "get_notify_settings"})).await;
+    assert_eq!(
+        mine["data"]["level"], "needs_me",
+        "共用令牌的设置是另一份，默认只推需要我的"
+    );
+
+    // 员工回复了（“全部”一档），然后来了一张审批卡（“需要我”）
+    let (sent, frames) = request(&mut admin, 2, json!({"type": "send", "text": "点评 PPI"})).await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    let frames = until_turn_finished(&mut admin, frames).await;
+    let (r, more) = request(&mut admin, 3, json!({"type": "send", "text": "今天吃什么"})).await;
+    let card = r["data"]["approval_id"].as_str().unwrap().to_string();
+    let is_card = |f: &Value| f["type"] == "alert" && f["alert"]["tag"] == format!("approval:{card}");
+    let frames = frames_until(&mut admin, [frames, more].concat(), is_card).await;
+    let got = alerts(&frames);
+    assert_eq!(got.len(), 1, "只推需要我的：没有回复的通知 {got:?}");
+    assert_eq!(got[0]["kind"], "approval");
+    assert_eq!(got[0]["title"], "这条消息该交给谁？");
+    assert_eq!(got[0]["body"], "今天吃什么");
+
+    let frames = frames_until(&mut phone, Vec::new(), is_card).await;
+    let got = alerts(&frames);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0]["kind"], "reply");
+    assert_eq!(got[0]["title"], "小宏 回复了");
+    assert_eq!(got[0]["body"], "CPI 同比上涨 0.3%");
+    assert_eq!(got[0]["role_id"], "macro");
+
+    // 在一处处理过，各处都收到撤掉的通知
+    let (resolved, frames) = request(
+        &mut admin,
+        4,
+        json!({"type": "resolve_approval", "approval_id": card, "choice": 0}),
+    )
+    .await;
+    assert_eq!(resolved["ok"], true);
+    let dismissed = |f: &Value| f["type"] == "dismiss" && f["tag"] == format!("approval:{card}");
+    frames_until(&mut admin, frames, dismissed).await;
+    frames_until(&mut phone, Vec::new(), dismissed).await;
+}
+
+/// 假的推送服务收到的一次推送：路径、请求头、正文。
+type Pushes = Arc<std::sync::Mutex<Vec<(String, axum::http::HeaderMap, Vec<u8>)>>>;
+
+/// 起一个假的推送服务：`/push/gone` 回 410，其余回 201。
+async fn fake_push_service() -> (std::net::SocketAddr, Pushes) {
+    let got: Pushes = Arc::default();
+    let seen = got.clone();
+    let app = axum::Router::new().route(
+        "/push/{id}",
+        axum::routing::post(
+            move |axum::extract::Path(id): axum::extract::Path<String>,
+                  headers: axum::http::HeaderMap,
+                  body: axum::body::Bytes| {
+                let seen = seen.clone();
+                async move {
+                    seen.lock().unwrap().push((id.clone(), headers, body.to_vec()));
+                    if id == "gone" {
+                        axum::http::StatusCode::GONE
+                    } else {
+                        axum::http::StatusCode::CREATED
+                    }
+                }
+            },
+        ),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (addr, got)
+}
+
+/// 等假推送服务收到满足条件的推送，返回它的请求头和正文。
+async fn wait_push(got: &Pushes, pick: impl Fn(&str, usize) -> bool) -> (axum::http::HeaderMap, Vec<u8>) {
+    for _ in 0..100 {
+        {
+            let list = got.lock().unwrap();
+            if let Some((_, h, b)) = list
+                .iter()
+                .enumerate()
+                .find(|(i, (id, _, _))| pick(id, *i))
+                .map(|(_, x)| x)
+            {
+                return (h.clone(), b.clone());
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("没等到推送");
+}
+
+/// Web Push（`docs/ip/m2-spec.md` D-33）：按设备的设置推、加密、签名，失效订阅删掉，前台时不推，处理过的盖掉。
+#[tokio::test]
+async fn web_push_reaches_subscribed_devices() {
+    use aws_lc_rs::agreement::{ECDH_P256, PrivateKey};
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let rules = "rules: [{ id: 数据点评, when: { any: [CPI, PPI] }, to: { role: macro } }]";
+    let s = start_with(None, Some(rules)).await;
+    s.app.push.allow_loopback_endpoints();
+    let (push_addr, got) = fake_push_service().await;
+    let mut admin = connect(s.addr, "").await.unwrap();
+    let (token, phone_id) = pair_device(&s, &mut admin, "手机").await;
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+
+    let (key, _) = request(&mut phone, 1, json!({"type": "push_key"})).await;
+    let server_key = key["data"]["public_key"].as_str().unwrap().to_string();
+    assert_eq!(b64.decode(&server_key).unwrap().len(), 65);
+    let ua = PrivateKey::generate(&ECDH_P256).unwrap();
+    let p256dh = b64.encode(ua.compute_public_key().unwrap().as_ref());
+    let auth = [3u8; 16];
+    for (n, path) in ["phone", "gone"].into_iter().enumerate() {
+        let (r, _) = request(
+            &mut phone,
+            2 + n as u64,
+            json!({"type": "subscribe_push", "endpoint": format!("http://{push_addr}/push/{path}"), "p256dh": p256dh, "auth": b64.encode(auth)}),
+        )
+        .await;
+        assert_eq!(r["ok"], true, "{r}");
+    }
+    let (r, _) = request(
+        &mut phone,
+        9,
+        json!({"type": "subscribe_push", "endpoint": "http://10.0.0.1/push", "p256dh": p256dh, "auth": b64.encode(auth)}),
+    )
+    .await;
+    assert_eq!(r["ok"], false, "内网地址登记不上");
+    assert_eq!(s.app.push.count(&phone_id), 2);
+
+    // 来了一张审批卡：推给手机（默认只推需要我的）
+    let (r, _) = request(&mut admin, 2, json!({"type": "send", "text": "今天吃什么"})).await;
+    let card = r["data"]["approval_id"].as_str().unwrap().to_string();
+    let (headers, body) = wait_push(&got, |id, _| id == "phone").await;
+    assert_eq!(headers["content-encoding"], "aes128gcm");
+    assert_eq!(headers["urgency"], "high");
+    assert_eq!(headers["ttl"], "86400");
+    assert_eq!(headers["topic"].len(), 32);
+    let vapid = headers["authorization"].to_str().unwrap();
+    assert!(
+        vapid.starts_with("vapid t=") && vapid.ends_with(&format!(", k={server_key}")),
+        "{vapid}"
+    );
+    let payload: Value = serde_json::from_slice(&crate::webpush::tests::decrypt(&body, &ua, &auth)).unwrap();
+    assert_eq!(payload["title"], "这条消息该交给谁？");
+    assert_eq!(payload["body"], "今天吃什么");
+    assert_eq!(payload["tag"], format!("approval:{card}"));
+    // 回 410 的订阅被删掉
+    for _ in 0..100 {
+        if s.app.push.count(&phone_id) == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(s.app.push.count(&phone_id), 1);
+
+    // 手机页面在前台：不推
+    let (r, _) = request(&mut phone, 10, json!({"type": "presence", "active": true})).await;
+    assert_eq!(r["ok"], true);
+    let before = got.lock().unwrap().len();
+    let (r, frames) = request(&mut admin, 3, json!({"type": "send", "text": "明天吃什么"})).await;
+    let second = r["data"]["approval_id"].as_str().unwrap().to_string();
+    frames_until(&mut admin, frames, |f| {
+        f["type"] == "alert" && f["alert"]["tag"] == format!("approval:{second}")
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(got.lock().unwrap().len(), before, "前台时不推");
+    request(&mut phone, 11, json!({"type": "presence", "active": false})).await;
+
+    // 第一张卡在控制台处理了：手机上那条被“已在别处处理”盖掉，不响铃
+    request(
+        &mut admin,
+        4,
+        json!({"type": "resolve_approval", "approval_id": card, "choice": 0}),
+    )
+    .await;
+    let (_, body) = wait_push(&got, |id, i| id == "phone" && i >= before).await;
+    let payload: Value = serde_json::from_slice(&crate::webpush::tests::decrypt(&body, &ua, &auth)).unwrap();
+    assert_eq!(payload["title"], "已在别处处理");
+    assert_eq!(payload["body"], "这条消息该交给谁？");
+    assert_eq!(payload["tag"], format!("approval:{card}"));
+    assert_eq!(payload["silent"], true);
+}
+
 #[tokio::test]
 async fn untrusted_origins_are_rejected_before_upgrade() {
     let s = start(None).await;

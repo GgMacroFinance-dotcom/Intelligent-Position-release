@@ -2,6 +2,7 @@
 import type { AgentId } from "./AgentId";
 import type { ApprovalId } from "./ApprovalId";
 import type { MemoryLayer } from "./MemoryLayer";
+import type { NotifySettings } from "./NotifySettings";
 import type { RoleId } from "./RoleId";
 import type { RouterSpec } from "./RouterSpec";
 import type { Scope } from "./Scope";
@@ -17,7 +18,7 @@ open_only?: boolean, limit?: number, } | { "type": "create_task", title: string,
 /**
  * 交回的结论或受阻原因。
  */
-result?: string, author?: string, } | { "type": "list_approvals", pending_only?: boolean, limit?: number, } | { "type": "resolve_approval", approval_id: ApprovalId, choice: number, author?: string, } | { "type": "get_memory", role_id: RoleId, } | { "type": "save_memory_text", role_id: RoleId, layer: MemoryLayer, text: string, } | { "type": "forget_thread_memory", role_id: RoleId, thread_id: ThreadId, } | { "type": "delete_memory_note", role_id: RoleId, note_id: number, } | { "type": "clear_memory", role_id: RoleId, } | { "type": "list_memory_off_threads" } | { "type": "set_thread_memory", thread_id: ThreadId, enabled: boolean, } | { "type": "list_reports", agent_id?: AgentId, limit?: number, } | { "type": "read_report", agent_id: AgentId, path: string, } | { "type": "who_am_i" } | { "type": "list_devices" } | { "type": "create_pairing", name: string, link_base?: string, } | { "type": "rename_device", device_id: string, name: string, } | { "type": "set_device_scope", device_id: string, scope: Scope, } | { "type": "revoke_device", device_id: string, } | { "type": "send", 
+result?: string, author?: string, } | { "type": "list_approvals", pending_only?: boolean, limit?: number, } | { "type": "resolve_approval", approval_id: ApprovalId, choice: number, author?: string, } | { "type": "get_memory", role_id: RoleId, } | { "type": "save_memory_text", role_id: RoleId, layer: MemoryLayer, text: string, } | { "type": "forget_thread_memory", role_id: RoleId, thread_id: ThreadId, } | { "type": "delete_memory_note", role_id: RoleId, note_id: number, } | { "type": "clear_memory", role_id: RoleId, } | { "type": "list_memory_off_threads" } | { "type": "set_thread_memory", thread_id: ThreadId, enabled: boolean, } | { "type": "list_reports", agent_id?: AgentId, limit?: number, } | { "type": "read_report", agent_id: AgentId, path: string, } | { "type": "who_am_i" } | { "type": "list_devices" } | { "type": "create_pairing", name: string, link_base?: string, } | { "type": "rename_device", device_id: string, name: string, } | { "type": "set_device_scope", device_id: string, scope: Scope, } | { "type": "revoke_device", device_id: string, } | { "type": "get_notify_settings" } | { "type": "set_notify_settings", settings: NotifySettings, } | { "type": "push_key" } | { "type": "subscribe_push", endpoint: string, p256dh: string, auth: string, } | { "type": "unsubscribe_push", endpoint: string, } | { "type": "presence", active: boolean, } | { "type": "send", 
 /**
  * 省略时由路由规则决定。
  */

@@ -39,6 +39,10 @@ pub struct App {
     pub(crate) events: Arc<crate::events::EventLog>,
     /// 配对过的设备和设备令牌（backlog F-7）。
     pub(crate) devices: Arc<crate::devices::Devices>,
+    /// 通知规则和各设备的通知设置（backlog F-9）。服务启动时（或第一个 `/ws` 连接进来时）启动规则任务。
+    pub(crate) notifier: Arc<crate::notify::Notifier>,
+    /// Web Push 的密钥和订阅（backlog F-10）。
+    pub(crate) push: Arc<crate::webpush::WebPush>,
 }
 
 impl App {
@@ -62,7 +66,9 @@ impl App {
             schedules: Arc::default(),
             workspaces: Arc::default(),
             events: Arc::default(),
-            devices: Arc::new(crate::devices::Devices::new(store)),
+            devices: Arc::new(crate::devices::Devices::new(store.clone())),
+            notifier: Arc::new(crate::notify::Notifier::new(store.clone())),
+            push: Arc::new(crate::webpush::WebPush::new(store, None)),
         }
     }
 
@@ -88,6 +94,12 @@ impl App {
     pub fn with_schedules(mut self, schedules: crate::schedule::Schedules) -> Self {
         self.schedules = Arc::new(schedules);
         self
+    }
+
+    /// 启动通知规则和 Web Push：页面都关着时也要推（backlog F-10）。
+    pub fn start_notifications(&self) {
+        self.notifier.start(self.runtime.clone());
+        self.push.start(&self.notifier);
     }
 
     /// 启动定时任务的后台调度，服务关闭时停止。
@@ -316,6 +328,20 @@ impl App {
             .await
             .map_err(anyhow::Error::msg)
             .context("读设备列表")?;
+        app.notifier
+            .load()
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("读通知设置")?;
+        app.push = Arc::new(crate::webpush::WebPush::new(
+            app.runtime.store().clone(),
+            config.push.contact.clone(),
+        ));
+        app.push
+            .load()
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("读推送订阅和 VAPID 密钥")?;
         crate::rules::load_saved(&app).await;
         for (name, channel) in &config.channels {
             let crate::config::ChannelConfig::Slack(slack) = channel;

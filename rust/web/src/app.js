@@ -30,6 +30,9 @@ import { renderMarkdown } from './markdown.js';
 /** @typedef {import('./types/NewPairing').NewPairing} NewPairing */
 /** @typedef {import('./types/WhoAmI').WhoAmI} WhoAmI */
 /** @typedef {import('./types/Scope').Scope} Scope */
+/** @typedef {import('./types/Alert').Alert} Alert */
+/** @typedef {import('./types/NotifySettings').NotifySettings} NotifySettings */
+/** @typedef {import('./types/NotifyLevel').NotifyLevel} NotifyLevel */
 /** @typedef {import('./types/Claimed').Claimed} Claimed */
 
 /** @type {Record<TaskStatus, string>} */
@@ -67,8 +70,20 @@ if (params.get('token')) {
   store.set(TOKEN_KEY, params.get('token') ?? '');
   history.replaceState(null, '', location.pathname + location.hash);
 }
-const token = store.get(TOKEN_KEY);
-const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+
+/**
+ * 在桌面 App（Tauri，backlog F-11）里运行时有它，浏览器里是 null。只用来调壳的几条命令（`apps/desktop/src-tauri/src/lib.rs`）。
+ * @type {{ core: { invoke(cmd: string, args?: Record<string, unknown>): Promise<any> } } | null}
+ */
+const desktop = /** @type {any} */ (window).__TAURI__ ?? null;
+/** 桌面 App 连的主机和这台设备的令牌（令牌存在系统钥匙串里）；还没连过时为 null。 @type {{ url: string, token: string | null } | null} */
+const desktopHost = desktop ? await desktop.core.invoke('get_host').catch((/** @type {unknown} */ e) => (console.error(e), null)) : null;
+/** 主机地址：浏览器里就是打开控制台的这个地址；桌面 App 还没连主机时为 null。 */
+const hostUrl = desktop ? (desktopHost?.url ?? null) : location.origin;
+const token = desktop ? (desktopHost?.token ?? null) : store.get(TOKEN_KEY);
+const wsUrl = hostUrl
+  ? `${hostUrl.startsWith('https:') ? 'wss' : 'ws'}://${new URL(hostUrl).host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`
+  : '';
 const client = new Client(wsUrl);
 
 const state = {
@@ -96,6 +111,8 @@ const state = {
   /** 关掉了记忆的对话。 @type {string[]} */ memoryOff: [],
   /** 员工写的报告，新改的在前。 @type {ReportInfo[]} */ reports: [],
   /** 这个连接是哪台设备。 @type {WhoAmI | null} */ whoami: null,
+  /** 这台设备的通知设置；旧服务没有时为空。 @type {NotifySettings | null} */ notify: null,
+  /** 这个浏览器的推送：null 是主机不支持（旧服务）。 @type {'unsupported' | 'off' | 'on' | null} */ push: null,
   /** 配对过的设备（只有共用令牌看得到）。 @type {DeviceInfo[]} */ devices: [],
   /** 刚生成、还没用掉的配对码。 @type {NewPairing | null} */ pairing: null,
 };
@@ -109,7 +126,7 @@ const PAGES = [
   { id: 'approvals', title: '审批', short: '审批' },
   { id: 'router', title: '路由规则', short: '路由', admin: true },
   { id: 'memory', title: '记忆', short: '记忆', admin: true },
-  { id: 'devices', title: '设备', short: '设备' },
+  { id: 'devices', title: '设备与通知', short: '设备' },
 ];
 
 /** 这个连接有没有“管理”权限。共用令牌是“管理”；旧服务没有 who_am_i，也按“管理”算。 */
@@ -139,6 +156,8 @@ function agentName(id) {
 }
 
 function render() {
+  if (connectShown) return;
+  syncTray();
   const current = page();
   root.replaceChildren(renderHeader(current), h('main', null, renderPage(current)));
   if (current === 'chat') scrollMessages();
@@ -1591,12 +1610,12 @@ function renderDevices() {
           : h('p.muted', null, '“日常”权限能对话、审批、处理任务、看报告；路由规则、定时任务、记忆和设备管理要“管理”权限，请用共用令牌或有“管理”权限的设备在这一页给。改了权限后刷新一下页面。'),
       )
     : null;
-  if (me.scope !== 'admin') return h('section.devices', null, mine);
+  if (me.scope !== 'admin') return h('section.devices', null, mine, notifyCard());
   const name = /** @type {HTMLInputElement} */ (h('input', { placeholder: '设备名，例如：张三的手机', maxlength: 40 }));
   const create = async () => {
     if (!name.value.trim()) return name.focus();
     try {
-      state.pairing = await client.request({ type: 'create_pairing', name: name.value, link_base: location.origin });
+      state.pairing = await client.request({ type: 'create_pairing', name: name.value, link_base: hostUrl ?? location.origin });
       watchPairing();
       render();
     } catch (e) {
@@ -1607,6 +1626,7 @@ function renderDevices() {
     'section.devices',
     null,
     mine,
+    notifyCard(),
     state.pairing ? pairingCard(state.pairing) : h('div.card', null, h('h3', null, '添加设备'), h('div.row', null, name, h('button.primary', { onclick: create }, '生成配对码'))),
     h(
       'div.card',
@@ -1752,6 +1772,361 @@ async function revokeDevice(d) {
   }
 }
 
+// ---------- 通知（backlog F-9） ----------
+
+/** 没有 Service Worker 时用 new Notification 弹的通知，按标签记着，撤的时候关掉。 @type {Map<string, Notification>} */
+const shownAlerts = new Map();
+
+const LEVEL_TEXT = /** @type {Record<NotifyLevel, string>} */ ({ needs_me: '只通知要我处理的', all: '全部', off: '不通知' });
+
+async function loadNotify() {
+  try {
+    state.notify = await client.request({ type: 'get_notify_settings' });
+  } catch {
+    /* 旧服务没有这个请求 */
+    state.notify = null;
+  }
+}
+
+/** 页面在前台时界面自己会更新，不弹通知（apps-plan.md 5.2）。 */
+function pageInFront() {
+  return document.visibilityState === 'visible' && document.hasFocus();
+}
+
+/** 服务端已按这台设备的设置筛过；这里只管弹不弹、怎么弹。 @param {Alert} alert */
+async function showAlert(alert) {
+  // 桌面 App 用系统通知，关掉窗口后它还在托盘里连着（backlog F-11）。点通知目前只能把窗口叫出来，去不了那个对话。
+  if (desktop) {
+    if (!pageInFront()) desktop.core.invoke('notify', { title: alert.title, body: alert.body }).catch((e) => console.warn(e));
+    return;
+  }
+  // 开了推送时由主机推送、Service Worker 弹，这里再弹就重复了。
+  if (state.push === 'on' || pageInFront() || !('Notification' in window) || Notification.permission !== 'granted') return;
+  /** @type {NotificationOptions} */
+  const options = { body: alert.body, tag: alert.tag, icon: '/assets/icon-192.png', data: { thread_id: alert.thread_id ?? null } };
+  try {
+    // 手机上的浏览器只认 Service Worker 弹的通知。
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) {
+      await reg.showNotification(alert.title, options);
+      return;
+    }
+    const n = new Notification(alert.title, options);
+    n.onclick = () => {
+      window.focus();
+      openAlert(alert.thread_id ?? null);
+      n.close();
+    };
+    shownAlerts.get(alert.tag)?.close();
+    shownAlerts.set(alert.tag, n);
+  } catch (e) {
+    console.warn('弹通知失败', e);
+  }
+}
+
+/** 审批在别处处理过了：撤掉这台设备上同一标签的通知。 @param {string} tag */
+async function dismissAlert(tag) {
+  shownAlerts.get(tag)?.close();
+  shownAlerts.delete(tag);
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    for (const n of (await reg?.getNotifications({ tag })) ?? []) n.close();
+  } catch {
+    /* 不支持就算了 */
+  }
+}
+
+/** 点开通知：有对话去那个对话，没有去待办。 @param {string | null} threadId */
+function openAlert(threadId) {
+  if (!threadId) {
+    location.hash = '#/inbox';
+    return;
+  }
+  history.replaceState(null, '', `${location.pathname}#/chat`);
+  openThread(threadId);
+}
+
+/** 地址是 #/chat/<对话 id>（通知点开的新窗口）时打开那个对话，地址改回 #/chat。 */
+function openLinkedThread() {
+  const id = /^#\/chat\/([^/]+)$/.exec(location.hash)?.[1];
+  if (!id) return false;
+  history.replaceState(null, '', `${location.pathname}#/chat`);
+  openThread(decodeURIComponent(id));
+  return true;
+}
+
+function nextMorning() {
+  const d = new Date();
+  d.setHours(8, 0, 0, 0);
+  if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+function permissionLine() {
+  if (desktop) return h('p', null, '桌面 App 用系统通知。关掉窗口后 App 留在托盘里，照样能收到；从托盘菜单“退出”才不再收。');
+  if (!('Notification' in window)) return h('p.muted', null, '这个浏览器不支持系统通知。iPhone 要先“添加到主屏幕”，再从主屏幕打开。');
+  if (Notification.permission === 'granted') return h('p', null, '浏览器通知：已允许。');
+  if (Notification.permission === 'denied') return h('p.muted', null, '浏览器通知被拒绝了，要在浏览器的网站设置里重新允许。');
+  return h('p', null, h('button', { onclick: () => Notification.requestPermission().then(() => render()) }, '允许浏览器通知'));
+}
+
+// ---------- 推送（backlog F-10） ----------
+
+/** 要 Service Worker、PushManager 和安全来源（HTTPS 或本机地址）。iPhone 要先添加到主屏幕才有 PushManager。 */
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && window.isSecureContext;
+}
+
+/** @param {string} text */
+function fromBase64Url(text) {
+  const bin = atob(text.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (text.length % 4)) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+/** @param {ArrayBuffer | null} a @param {Uint8Array} b */
+function sameBytes(a, b) {
+  if (!a || a.byteLength !== b.length) return false;
+  const x = new Uint8Array(a);
+  return x.every((v, i) => v === b[i]);
+}
+
+/** 把浏览器的订阅登记到主机。 @param {PushSubscription} sub */
+function registerPush(sub) {
+  const keys = sub.toJSON().keys ?? {};
+  return client.request({ type: 'subscribe_push', endpoint: sub.endpoint, p256dh: keys.p256dh ?? '', auth: keys.auth ?? '' });
+}
+
+/** 打开控制台时看这个浏览器订阅过没有。订阅过就再登记一次：主机换了密钥时换个新订阅，主机删了订阅时补上。 */
+async function checkPush() {
+  // 桌面 App 常驻托盘、连接不断，用不着推送。
+  if (desktop) {
+    state.push = null;
+    return;
+  }
+  /** @type {import('./types/VapidKey').VapidKey} */
+  let key;
+  try {
+    key = await client.request({ type: 'push_key' });
+  } catch {
+    state.push = null; // 旧服务
+    return;
+  }
+  if (!pushSupported()) {
+    state.push = 'unsupported';
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    let sub = await reg?.pushManager.getSubscription();
+    if (!reg || !sub || Notification.permission !== 'granted') {
+      state.push = 'off';
+      return;
+    }
+    const serverKey = fromBase64Url(key.public_key);
+    if (!sameBytes(sub.options.applicationServerKey, serverKey)) {
+      await sub.unsubscribe();
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: serverKey });
+    }
+    await registerPush(sub);
+    state.push = 'on';
+  } catch (e) {
+    console.warn('恢复推送订阅失败', e);
+    state.push = 'off';
+  }
+}
+
+async function enablePush() {
+  try {
+    if ((await Notification.requestPermission()) !== 'granted') {
+      render();
+      return;
+    }
+    /** @type {import('./types/VapidKey').VapidKey} */
+    const key = await client.request({ type: 'push_key' });
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromBase64Url(key.public_key) });
+    try {
+      await registerPush(sub);
+    } catch (e) {
+      // 主机不收（比如推送服务不在白名单里）：浏览器这边也退掉，免得两边对不上。
+      await sub.unsubscribe();
+      throw e;
+    }
+    state.push = 'on';
+    reportPresence();
+  } catch (e) {
+    alert(`开启推送失败：${/** @type {Error} */ (e).message}`);
+  }
+  render();
+}
+
+async function disablePush() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = await reg?.pushManager.getSubscription();
+    if (sub) {
+      await client.request({ type: 'unsubscribe_push', endpoint: sub.endpoint });
+      await sub.unsubscribe();
+    }
+    state.push = 'off';
+  } catch (e) {
+    alert(`关闭推送失败：${/** @type {Error} */ (e).message}`);
+  }
+  render();
+}
+
+/** 告诉主机页面在不在前台：在前台时主机不给这台设备推送，界面自己会更新（apps-plan.md 5.2）。 */
+function reportPresence() {
+  if (state.push === null || client.status !== 'open') return;
+  client.request({ type: 'presence', active: pageInFront() }).catch(() => {
+    /* 报不上就算了，主机 30 秒后当作不在前台 */
+  });
+}
+
+function pushLine() {
+  switch (state.push) {
+    case null:
+      return null;
+    case 'unsupported':
+      return h('p.muted', null, '这个浏览器收不到推送：控制台要用 HTTPS 打开；iPhone 要 iOS 16.4 以上，先“添加到主屏幕”，再从主屏幕打开。');
+    case 'on':
+      return h('div.row', null, h('span', null, '推送：已开启，页面关着也能收到。'), h('button.link', { onclick: disablePush }, '关闭推送'));
+    default:
+      return h('div.row', null, h('span', null, '推送：没开。'), h('button', { onclick: enablePush }, '开启推送'));
+  }
+}
+
+function notifyCard() {
+  const s = state.notify;
+  if (!s) return null;
+  /** @param {Partial<NotifySettings>} change */
+  const save = async (change) => {
+    try {
+      state.notify = await client.request({ type: 'set_notify_settings', settings: { ...s, ...change } });
+    } catch (e) {
+      alert(`保存通知设置失败：${/** @type {Error} */ (e).message}`);
+    }
+    render();
+  };
+  const level = /** @type {HTMLSelectElement} */ (
+    h('select', { 'aria-label': '通知哪些事' }, ...Object.entries(LEVEL_TEXT).map(([value, text]) => h('option', { value, selected: value === s.level }, text)))
+  );
+  level.onchange = () => save({ level: /** @type {NotifyLevel} */ (level.value) });
+  const preview = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', checked: s.preview }));
+  preview.onchange = () => save({ preview: preview.checked });
+  const now = Date.now();
+  const until = s.mute_until_ms;
+  const mute =
+    until !== null && until > now
+      ? [h('span', null, `静音到 ${formatTime(until)}`), h('button.link', { onclick: () => save({ mute_until_ms: null }) }, '取消静音')]
+      : [
+          h('button.link', { onclick: () => save({ mute_until_ms: now + 60 * 60 * 1000 }) }, '静音 1 小时'),
+          h('button.link', { onclick: () => save({ mute_until_ms: nextMorning() }) }, '静音到明早 8 点'),
+        ];
+  const roles = state.roles.map((r) => {
+    const box = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', checked: !s.muted_roles.includes(r.id) }));
+    box.onchange = () => save({ muted_roles: box.checked ? s.muted_roles.filter((id) => id !== r.id) : [...s.muted_roles, r.id] });
+    return h('label.check', null, box, ` ${r.name ?? r.id}`);
+  });
+  return h(
+    'div.card.notify',
+    null,
+    h('h3', null, state.whoami?.device ? '这台设备的通知' : '通知'),
+    permissionLine(),
+    pushLine(),
+    h('div.row', null, h('span', null, '通知哪些事'), level),
+    h('label.check', null, preview, ' 通知里显示内容预览（密钥会打码）'),
+    h('div.row', null, ...mute),
+    roles.length ? h('div.row', null, h('span', null, '这些岗位的事要通知：'), ...roles) : null,
+    h(
+      'p.muted.small',
+      null,
+      '要我处理的：审批卡、员工提问、一轮失败、任务受阻。“全部”另外包括员工回复和任务完成。',
+      desktop ? '窗口在前台时不弹。' : '页面在前台时不弹；开了推送，页面关着也能收到，不开推送时只有页面开着才弹。',
+      state.whoami?.device ? '' : '用共用令牌打开的控制台共用这一份设置。',
+    ),
+  );
+}
+
+// ---------- 桌面 App（backlog F-11） ----------
+
+/** 正在显示“连接主机”，这时不画控制台。 */
+let connectShown = false;
+/** 上次告诉托盘的待办数。 */
+let trayCount = -1;
+
+/** 托盘图标上的待办数，和导航上“待办”的角标一样。 */
+function syncTray() {
+  if (!desktop || client.status !== 'open') return;
+  const count = inboxCount();
+  if (count === trayCount) return;
+  trayCount = count;
+  desktop.core.invoke('set_pending', { count }).catch((e) => console.warn(e));
+}
+
+/** 桌面 App 的“连接主机”：填主机地址和 6 位配对码（或访问令牌），令牌由壳存进系统钥匙串。 */
+function showConnect() {
+  if (!desktop) return;
+  const app = desktop;
+  connectShown = true;
+  const url = /** @type {HTMLInputElement} */ (
+    h('input', { type: 'url', placeholder: 'https://ip.example.com', value: hostUrl ?? '', 'aria-label': '主机地址', autocomplete: 'url' })
+  );
+  const code = /** @type {HTMLInputElement} */ (h('input', { placeholder: '6 位配对码，或访问令牌', 'aria-label': '配对码或访问令牌', autocomplete: 'off' }));
+  const name = /** @type {HTMLInputElement} */ (
+    h('input', { placeholder: '你的名字（用访问令牌时显示在消息上，可不填）', value: store.get(NAME_KEY) ?? '', 'aria-label': '你的名字' })
+  );
+  const status = h('p.muted', null, '在主机上运行 ip device pair --name <这台电脑的名字>，或者在已经连上的控制台“设备”页生成配对码。主机要配访问令牌（auth_token_env）。');
+  const button = /** @type {HTMLButtonElement} */ (h('button.primary', { type: 'submit' }, '连接'));
+  const form = h(
+    'form.connect',
+    {
+      onsubmit: async (/** @type {Event} */ e) => {
+        e.preventDefault();
+        button.disabled = true;
+        status.className = 'muted';
+        status.textContent = '正在连接…';
+        const secret = code.value.trim();
+        try {
+          if (/^\d{6}$/.test(secret)) await app.core.invoke('pair', { url: url.value, code: secret });
+          else await app.core.invoke('save_token', { url: url.value, token: secret });
+          if (name.value.trim()) store.set(NAME_KEY, name.value.trim());
+          location.hash = '#/inbox';
+          location.reload();
+        } catch (err) {
+          status.className = 'error';
+          status.textContent = String(err);
+          button.disabled = false;
+        }
+      },
+    },
+    h('label', null, '主机地址', url),
+    h('label', null, '配对码或访问令牌', code),
+    h('label', null, '名字', name),
+    h('div.row', null, button, hostUrl ? h('button.link', { type: 'button', onclick: () => location.reload() }, '取消') : null),
+  );
+  const forget = hostUrl
+    ? h(
+        'p',
+        null,
+        h(
+          'button.link.danger',
+          {
+            type: 'button',
+            onclick: async () => {
+              if (!confirm(`断开 ${hostUrl}？这台电脑上存的令牌会删掉，要再用得重新配对。`)) return;
+              await app.core.invoke('forget_host').catch((/** @type {unknown} */ err) => alert(String(err)));
+              location.reload();
+            },
+          },
+          '断开这台主机',
+        ),
+      )
+    : null;
+  root.replaceChildren(h('section.placeholder.connect', null, h('h2', null, hostUrl ? '换主机或重新配对' : '连接主机'), form, status, forget));
+  url.focus();
+}
+
 /** 用 6 位配对码换这台设备的令牌，存好后重新打开控制台。 @param {string} code */
 async function pairDevice(code) {
   const status = h('p.muted', null, '正在用配对码换这台设备的令牌…');
@@ -1868,6 +2243,10 @@ window.addEventListener('popstate', () => {
 });
 
 function askToken() {
+  if (desktop) {
+    showConnect();
+    return;
+  }
   const t = prompt('访问令牌（服务配置了 auth_token_env 时需要），或者 6 位配对码', store.get(TOKEN_KEY) ?? '');
   if (t === null) return;
   if (/^\d{6}$/.test(t.trim())) return pairDevice(t.trim());
@@ -1898,13 +2277,17 @@ async function loadAll() {
     client.request({ type: 'list_memory_off_threads' }),
     refreshReports(),
     loadDevices(),
+    loadNotify(),
+    checkPush(),
   ]);
+  reportPresence();
   state.memory = null;
   memoryEl = null;
   memoryFailed = null;
   // 配了路由规则时，新对话默认自动分派。
   if (!state.agentForNew) state.agentForNew = state.rules?.spec.rules.length ? AUTO : (state.agents[0]?.id ?? '');
   composerEl = null;
+  if (openLinkedThread()) return;
   await loadThread();
   render();
 }
@@ -1915,25 +2298,53 @@ client.onStatus((s) => {
   render();
 });
 client.onEvent(onEvent);
+client.onAlert((a) => void showAlert(a));
+// 前台状态一变就报；在前台时每 20 秒再报一次，主机那边 30 秒没收到就当作不在前台（backlog F-10）。
+document.addEventListener('visibilitychange', reportPresence);
+window.addEventListener('focus', reportPresence);
+window.addEventListener('blur', () => setTimeout(reportPresence, 0));
+setInterval(() => {
+  if (pageInFront()) reportPresence();
+}, 20_000);
+client.onDismiss((tag) => void dismissAlert(tag));
 // 补不上断开期间或跟不上时漏掉的事件：整个重新拉。
 client.onLagged(() => {
   loadAll().catch((e) => console.error(e));
 });
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => {
+  if (!openLinkedThread()) render();
+});
 // 地址栏没指定页面时，窗口跨过窄屏断点要换默认页。
 narrow.addEventListener('change', () => {
   const id = location.hash.replace(/^#\/?/, '').split('/')[0];
   if (!PAGES.some((p) => p.id === id)) render();
 });
 // 扫配对二维码打开的地址是 #/pair/<6 位配对码>：先换令牌，不连 /ws。
-const pairCode = /^#\/pair\/(\d{6})$/.exec(location.hash)?.[1];
-if (pairCode) pairDevice(pairCode);
+const pairCode = desktop ? undefined : /^#\/pair\/(\d{6})$/.exec(location.hash)?.[1];
+if (desktop && !hostUrl) showConnect();
+else if (pairCode) pairDevice(pairCode);
 else client.connect();
 
+// 桌面 App 里的链接用系统浏览器打开，不在 App 窗口里跳走。
+if (desktop) {
+  document.addEventListener('click', (e) => {
+    const a = /** @type {Element | null} */ (e.target instanceof Element ? e.target.closest('a[href]') : null);
+    const href = a?.getAttribute('href') ?? '';
+    if (!/^(https?:|mailto:)/i.test(href)) return;
+    e.preventDefault();
+    desktop.core.invoke('open_url', { url: href }).catch((err) => console.warn(err));
+  });
+}
+
 // 注册 Service Worker，浏览器才会提供“安装应用”（backlog F-2）。只在 HTTPS 或本机地址上可用，失败不影响控制台。
-if ('serviceWorker' in navigator) {
+// 桌面 App 本身就是装好的应用，不用。
+if (!desktop && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {
     /* 忽略：比如用 http:// 连非本机地址 */
   });
+  // 点了 Service Worker 弹的通知，它把要打开的对话发过来（sw.js 的 notificationclick）。
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'open-alert') openAlert(e.data.thread_id ?? null);
+  });
 }
-if (!pairCode) render();
+if (!pairCode && !connectShown) render();
