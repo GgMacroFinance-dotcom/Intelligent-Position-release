@@ -7,6 +7,7 @@ import '../protocol/client.dart';
 import '../protocol/models.dart';
 import 'admin/devices_page.dart';
 import 'admin/memory_page.dart';
+import 'admin/rules_page.dart';
 import 'admin/schedules_page.dart';
 import 'common.dart';
 
@@ -227,6 +228,13 @@ class AdminSection extends StatelessWidget {
           subtitle: const Text('决策者笔记、岗位记忆摘要、更正、各对话的记忆'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _push(context, '记忆', const MemoryPage()),
+        ),
+        ListTile(
+          leading: const Icon(Icons.alt_route),
+          title: const Text('路由规则'),
+          subtitle: const Text('试一试、规则草案、编辑规则'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _push(context, '路由规则', const RulesPage()),
         ),
       ],
     );
