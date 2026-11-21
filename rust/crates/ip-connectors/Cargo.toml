@@ -13,6 +13,7 @@ fake = ["dep:axum"]
 [dependencies]
 axum = { workspace = true, optional = true }
 futures-util.workspace = true
+hyper-util.workspace = true
 ip-core.workspace = true
 reqwest.workspace = true
 serde.workspace = true
