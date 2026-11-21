@@ -573,6 +573,7 @@ class Alert {
     required this.body,
     required this.tag,
     this.threadId,
+    this.roleId,
     required this.atMs,
   });
 
@@ -583,6 +584,7 @@ class Alert {
     body: _str(j['body']) ?? '',
     tag: j['tag'] as String,
     threadId: _str(j['thread_id']),
+    roleId: _str(j['role_id']),
     atMs: _int(j['at_ms']),
   );
 
@@ -591,8 +593,68 @@ class Alert {
   final String title;
   final String body;
   final String tag;
+
+  /// 点开去哪个对话；没有时去“待办”。
   final String? threadId;
+  final String? roleId;
   final int atMs;
+}
+
+/// 通知哪些事（`NotifyLevel`）。
+enum NotifyLevel {
+  off('off', '不通知'),
+  needsMe('needs_me', '只通知要我处理的'),
+  all('all', '全部');
+
+  const NotifyLevel(this.wire, this.label);
+  final String wire;
+  final String label;
+
+  static NotifyLevel parse(Object? v) => values.firstWhere((l) => l.wire == v, orElse: () => needsMe);
+}
+
+/// 这台设备的通知设置（m2-spec D-32 的 `NotifySettings`），服务端按它筛 `alert`。
+class NotifySettings {
+  const NotifySettings({
+    this.level = NotifyLevel.needsMe,
+    this.mutedRoles = const [],
+    this.muteUntilMs,
+    this.preview = true,
+  });
+
+  factory NotifySettings.fromJson(Json j) => NotifySettings(
+    level: NotifyLevel.parse(j['level']),
+    mutedRoles: [for (final r in (j['muted_roles'] as List? ?? const [])) r as String],
+    muteUntilMs: _intOrNull(j['mute_until_ms']),
+    preview: j['preview'] as bool? ?? true,
+  );
+
+  final NotifyLevel level;
+
+  /// 这些岗位的事不通知。
+  final List<String> mutedRoles;
+
+  /// 这个时间之前都不通知。
+  final int? muteUntilMs;
+
+  /// 通知里带不带预览文字。
+  final bool preview;
+
+  /// `clearMute` 为 true 时取消静音。
+  NotifySettings copyWith({
+    NotifyLevel? level,
+    List<String>? mutedRoles,
+    int? muteUntilMs,
+    bool clearMute = false,
+    bool? preview,
+  }) => NotifySettings(
+    level: level ?? this.level,
+    mutedRoles: mutedRoles ?? this.mutedRoles,
+    muteUntilMs: clearMute ? null : muteUntilMs ?? this.muteUntilMs,
+    preview: preview ?? this.preview,
+  );
+
+  Json toJson() => {'level': level.wire, 'muted_roles': mutedRoles, 'mute_until_ms': muteUntilMs, 'preview': preview};
 }
 
 // ---------- 报告 ----------

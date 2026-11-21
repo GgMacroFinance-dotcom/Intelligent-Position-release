@@ -67,9 +67,28 @@ class _HomePageState extends State<HomePage> {
     ),
   );
 
+  /// 点了系统通知：去那个对话，没有对话的去“待办”（F-16）。推进去的页面（“我”、报告）先关掉。
+  void _handlePendingOpen() {
+    final state = AppScope.read(context);
+    if (state.pendingOpen == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final open = state.takePendingOpen();
+      if (open == null) return;
+      Navigator.of(context).popUntil((r) => r.isFirst);
+      final (threadId,) = open;
+      if (threadId == null) {
+        setState(() => _tab = kTabInbox);
+      } else {
+        _openThread(threadId);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
+    _handlePendingOpen();
     final wide = MediaQuery.sizeOf(context).width >= kWideNav;
     final badge = state.inboxCount;
     Widget inboxIcon(IconData icon) => Badge(isLabelVisible: badge > 0, label: Text('$badge'), child: Icon(icon));

@@ -10,6 +10,11 @@ import 'dart:io';
 /// 允许的许可。
 const allowed = {'Apache-2.0', 'MIT', 'BSD-2-Clause', 'BSD-3-Clause'};
 
+/// 按包放行的例外，和 apps/desktop/src-tauri/deny.toml 的做法一样：
+/// MPL-2.0 是按文件的弱 copyleft，原样使用、不改它的源码时，可以和 Apache-2.0 的代码一起分发。
+/// - dbus：flutter_local_notifications 在 Linux 上连通知服务用（F-16）。
+const exceptions = {'dbus': 'MPL-2.0'};
+
 /// 按 LICENSE 正文认许可。一个文件里有几种许可时（比如主体 BSD、附带的第三方代码 MIT）都要认出来。
 Set<String> classify(String text) {
   final t = text.replaceAll(RegExp(r'\s+'), ' ');
@@ -73,8 +78,12 @@ Future<void> main() async {
       problems.add('$pkg：没有 LICENSE 文件');
       continue;
     }
-    final found = classify(files.first.readAsStringSync());
-    final bad = found.difference(allowed);
+    final text = files.first.readAsStringSync();
+    // MPL-2.0 的正文里提到 GPL、LGPL（作为“次级许可”），认成 MPL-2.0 一种。
+    final found = exceptions[pkg] == 'MPL-2.0' && text.trimLeft().startsWith('Mozilla Public License Version 2.0')
+        ? {'MPL-2.0'}
+        : classify(text);
+    final bad = found.difference({...allowed, ?exceptions[pkg]});
     if (found.isEmpty || bad.isNotEmpty) {
       problems.add('$pkg：${found.isEmpty ? '认不出许可' : '许可不在允许清单里：${bad.join('、')}'}（${files.first.path}）');
       continue;

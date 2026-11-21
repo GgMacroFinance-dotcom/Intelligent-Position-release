@@ -164,6 +164,28 @@ void installDefaults(FakeHost h) {
       },
       'routing_tokens': {'prompt_tokens': 500, 'completion_tokens': 20, 'cached_tokens': 0, 'cache_write_tokens': 0},
     },
+    'get_notify_settings': (_) => {
+      'level': 'needs_me',
+      'muted_roles': <Object>[],
+      'mute_until_ms': null,
+      'preview': true,
+    },
+    'set_notify_settings': (req) => req['settings'],
+    'presence': (_) => null,
     'history': (req) => [message('m1', req['thread_id'] as String, human: '张三的手机', text: '最近 CPI 怎么样')],
   });
 }
+
+Json alertFrame({String tag = 'approval:a1', String? thread = 't1', String level = 'needs_me'}) => {
+  'type': 'alert',
+  'alert': {
+    'kind': 'approval',
+    'level': level,
+    'title': '等你决定',
+    'body': '这条消息该交给谁？',
+    'tag': tag,
+    'thread_id': ?thread,
+    'role_id': 'macro',
+    'at_ms': 1000,
+  },
+};

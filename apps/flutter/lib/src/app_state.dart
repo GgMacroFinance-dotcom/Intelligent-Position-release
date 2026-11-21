@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'host.dart';
+import 'notifications.dart';
 import 'pairing.dart';
 import 'protocol/client.dart';
 import 'protocol/models.dart';
@@ -14,11 +15,22 @@ typedef ClientFactory = IpClient Function(HostAddress host, String token);
 typedef Pairer = Future<Claimed> Function(HostAddress host, String code);
 
 class AppState extends ChangeNotifier {
-  AppState({required this.store, ClientFactory? clientFactory, Pairer? pairer})
-    : _clientFactory = clientFactory ?? ((h, t) => IpClient(wsUri: h.wsUri, token: t)),
-      _pairer = pairer ?? claimPairing;
+  AppState({
+    required this.store,
+    ClientFactory? clientFactory,
+    Pairer? pairer,
+    this.notifier = const SilentNotifier(),
+    this.presenceEvery = const Duration(seconds: 20),
+  }) : _clientFactory = clientFactory ?? ((h, t) => IpClient(wsUri: h.wsUri, token: t)),
+       _pairer = pairer ?? claimPairing;
 
   final HostStore store;
+
+  /// 弹系统通知的那一层（F-16）。
+  final SystemNotifier notifier;
+
+  /// 在前台时多久报一次 `presence`（m2-spec D-33：主机 30 秒内没收到 `true` 就当不在前台）。
+  final Duration presenceEvery;
   final ClientFactory _clientFactory;
   final Pairer _pairer;
 
@@ -77,6 +89,22 @@ class AppState extends ChangeNotifier {
   /// 上一轮失败的员工 → 错误的第一行；之后成功跑完一轮就清掉。
   final agentFailures = <String, String>{};
 
+  // ---------- 通知（F-16） ----------
+
+  /// 这台设备的通知设置；还没拉到、或者主机太旧没有这个请求时为空。
+  NotifySettings? notify;
+
+  /// 系统允不允许这个 App 弹通知；还没问过时为空。
+  bool? notificationsAllowed;
+
+  /// App 在不在前台（窗口有焦点、手机上没切走）。在前台时不弹通知，界面自己会更新。
+  bool foreground = true;
+
+  /// 点了通知、还没被主界面处理的去向：`(threadId,)`，threadId 为空是去“待办”。
+  (String?,)? pendingOpen;
+
+  Timer? _presenceTimer;
+
   /// 新对话发给谁；null 是“自动分派”。
   String? agentForNew;
   bool _agentForNewChosen = false;
@@ -107,6 +135,7 @@ class AppState extends ChangeNotifier {
   // ---------- 主机 ----------
 
   Future<void> init() async {
+    await notifier.init(_alertTapped);
     final hosts = await store.hosts();
     if (hosts.isNotEmpty) {
       final token = await store.token(hosts.first.address);
@@ -148,7 +177,9 @@ class AppState extends ChangeNotifier {
     _subs
       ..add(client.statusChanges.listen(_onStatus))
       ..add(client.events.listen(_onEvent))
-      ..add(client.lagged.listen((_) => unawaited(_loadAll())));
+      ..add(client.lagged.listen((_) => unawaited(_loadAll())))
+      ..add(client.alerts.listen(_onAlert))
+      ..add(client.dismissals.listen((tag) => unawaited(notifier.cancel(tag))));
     status = ConnStatus.connecting;
     client.connect();
   }
@@ -161,6 +192,8 @@ class AppState extends ChangeNotifier {
     _subs.clear();
     final c = _client;
     _client = null;
+    _presenceTimer?.cancel();
+    _presenceTimer = null;
     await c?.dispose();
     status = ConnStatus.closed;
   }
@@ -185,6 +218,7 @@ class AppState extends ChangeNotifier {
     agentForNew = null;
     _agentForNewChosen = false;
     loadError = null;
+    notify = null;
   }
 
   /// App 回到前台：断着的话马上重连。
@@ -199,6 +233,62 @@ class AppState extends ChangeNotifier {
     outdated = c.outdated;
     // 重连时服务端补发了断开期间的事件，界面已经跟上，不用整个重新拉（D-29）。
     if (s == ConnStatus.open && !c.resumed) unawaited(_loadAll());
+    if (s == ConnStatus.open) {
+      _reportPresence();
+      // 第一次连上时向系统要通知权限：配对以前问，人还不知道要通知什么。
+      if (notificationsAllowed == null) unawaited(askNotificationPermission());
+    }
+    notifyListeners();
+  }
+
+  // ---------- 通知（F-16） ----------
+
+  /// 向系统要通知权限。“我”页上被拒绝后可以再点一次。
+  Future<void> askNotificationPermission() async {
+    notificationsAllowed = await notifier.requestPermission();
+    notifyListeners();
+  }
+
+  /// 服务端已按这台设备的设置筛过；这里只管弹不弹：App 在前台时不弹。
+  void _onAlert(Alert a) {
+    if (foreground) return;
+    unawaited(notifier.show(a));
+  }
+
+  void _alertTapped(String? threadId) {
+    pendingOpen = (threadId,);
+    notifyListeners();
+  }
+
+  /// 主界面处理完点通知的去向后调。
+  (String?,)? takePendingOpen() {
+    final p = pendingOpen;
+    pendingOpen = null;
+    return p;
+  }
+
+  /// App 切到前台或后台（窗口得到、失去焦点）。
+  void setForeground(bool value) {
+    if (foreground == value) return;
+    foreground = value;
+    _reportPresence();
+  }
+
+  /// 告诉主机在不在前台；在前台时每 [presenceEvery] 报一次。报不上就算了，主机 30 秒后当作不在前台。
+  void _reportPresence() {
+    _presenceTimer?.cancel();
+    _presenceTimer = null;
+    final c = _client;
+    if (c == null || c.status != ConnStatus.open) return;
+    c.presence(foreground).catchError((Object _) {});
+    if (foreground) _presenceTimer = Timer(presenceEvery, _reportPresence);
+  }
+
+  /// 改这台设备的通知设置。
+  Future<void> saveNotify(NotifySettings s) async {
+    final c = _client;
+    if (c == null) throw const RequestError('尚未连接');
+    notify = await c.setNotifySettings(s);
     notifyListeners();
   }
 
@@ -226,6 +316,13 @@ class AppState extends ChangeNotifier {
       tasks = r[5] as List<Task>;
       reports = r[6] as List<ReportInfo>;
       spend = r[7] as SpendToday;
+      try {
+        notify = await c.getNotifySettings();
+      } on RequestError {
+        // 主机太旧，没有通知设置。
+        notify = null;
+      }
+      if (_client != c) return;
       if (!_agentForNewChosen) agentForNew = hasRules || agents.isEmpty ? null : agents.first.id;
       loadError = null;
       notifyListeners();
@@ -456,6 +553,7 @@ class AppState extends ChangeNotifier {
     _threadsTimer?.cancel();
     _reportsTimer?.cancel();
     _spendTimer?.cancel();
+    _presenceTimer?.cancel();
     unawaited(_disconnect());
     super.dispose();
   }

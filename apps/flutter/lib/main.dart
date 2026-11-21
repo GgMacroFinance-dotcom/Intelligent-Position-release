@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'src/app_state.dart';
+import 'src/notifications.dart';
 import 'src/storage.dart';
 import 'src/ui/common.dart';
 import 'src/ui/connect_page.dart';
@@ -11,7 +12,7 @@ import 'src/ui/home_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  final state = AppState(store: HostStore(SystemSecretStore()));
+  final state = AppState(store: HostStore(SystemSecretStore()), notifier: LocalNotifier());
   runApp(IpApp(state: state));
   state.init();
 }
@@ -35,7 +36,11 @@ class _IpAppState extends State<IpApp> {
   void initState() {
     super.initState();
     // 手机从后台回来时连接多半已经断了，不等退避马上重连。
-    _lifecycle = AppLifecycleListener(onResume: widget.state.resumed);
+    // 前台是 resumed：桌面上窗口失去焦点是 inactive，这时和网页控制台一样算不在前台，来了通知要弹。
+    _lifecycle = AppLifecycleListener(
+      onResume: widget.state.resumed,
+      onStateChange: (s) => widget.state.setForeground(s == AppLifecycleState.resumed),
+    );
   }
 
   @override
