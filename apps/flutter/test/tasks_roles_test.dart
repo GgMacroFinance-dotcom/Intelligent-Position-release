@@ -146,6 +146,7 @@ void main() {
     await h.start(tester);
     await tester.tap(find.byTooltip('我'));
     await tester.pumpAndSettle();
+    await h.scrollMe(tester, find.text('断开并忘掉这台主机'));
     expect(find.text('断开并忘掉这台主机'), findsOneWidget);
     await tester.tap(find.text('断开并忘掉这台主机'));
     await tester.pumpAndSettle();
@@ -163,6 +164,7 @@ void main() {
     expect(find.byType(NavigationRail), findsOneWidget);
     await tester.tap(find.byTooltip('我'));
     await tester.pumpAndSettle();
+    await h.scrollMe(tester, find.text('断开并忘掉这台主机'));
     expect(find.text('断开并忘掉这台主机'), findsOneWidget);
     await h.stop(tester);
   });

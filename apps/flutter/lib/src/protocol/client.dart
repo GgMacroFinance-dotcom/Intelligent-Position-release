@@ -334,6 +334,17 @@ extension IpRequests on IpClient {
         }) as Json,
       );
 
+  /// 这台设备的通知设置（共用令牌连上时是共用的那份）。
+  Future<NotifySettings> getNotifySettings() async =>
+      NotifySettings.fromJson(await request({'type': 'get_notify_settings'}) as Json);
+
+  /// 改这台设备的通知设置，回复保存后的设置。日常权限就能改（改的是自己的）。
+  Future<NotifySettings> setNotifySettings(NotifySettings s) async =>
+      NotifySettings.fromJson(await request({'type': 'set_notify_settings', 'settings': s.toJson()}) as Json);
+
+  /// 告诉主机 App 在不在前台（m2-spec D-33）：在前台时主机不给这台设备推送，30 秒没报 `true` 就当不在。
+  Future<void> presence(bool active) => request({'type': 'presence', 'active': active});
+
   /// 今天（UTC）各岗位和语义分派的模型费用。
   Future<SpendToday> spendToday() async => SpendToday.fromJson(await request({'type': 'spend_today'}) as Json);
 

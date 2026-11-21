@@ -22,6 +22,10 @@ dependencies:
   markdown: ^7.3.1
   # 链接用系统浏览器打开，只认 http、https、mailto。BSD-3-Clause。
   url_launcher: ^6.3.3
+  # 系统通知（F-16）：主机的 alert 弹成系统通知，五个平台都支持。BSD-3-Clause。
+  # Linux 上它经 dbus 包（MPL-2.0，原样使用）连通知服务，tool/check_licenses.dart 按包放行。
+  # 23.x 要 compileSdk 37，先用 22.x。
+  flutter_local_notifications: ^22.3.3
 
 dev_dependencies:
   flutter_test:
