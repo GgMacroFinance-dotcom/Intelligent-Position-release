@@ -1,8 +1,10 @@
 #include "flutter_window.h"
 
+#include <algorithm>
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "utils.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -27,8 +29,12 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
+  // 开机启动时带 --hidden：窗口不弹出来，只在托盘里（F-17）。
+  const auto args = GetCommandLineArguments();
+  const bool start_hidden =
+      std::find(args.begin(), args.end(), "--hidden") != args.end();
+  flutter_controller_->engine()->SetNextFrameCallback([this, start_hidden]() {
+    if (!start_hidden) this->Show();
   });
 
   // Flutter can complete the first frame before the "show window" callback is

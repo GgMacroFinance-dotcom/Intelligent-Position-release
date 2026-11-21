@@ -103,6 +103,9 @@ class AppState extends ChangeNotifier {
   /// 点了通知、还没被主界面处理的去向：`(threadId,)`，threadId 为空是去“待办”。
   (String?,)? pendingOpen;
 
+  /// 点过几次通知；桌面上每点一次把窗口叫出来一次（F-17）。
+  int alertTaps = 0;
+
   Timer? _presenceTimer;
 
   /// 新对话发给谁；null 是“自动分派”。
@@ -257,6 +260,7 @@ class AppState extends ChangeNotifier {
 
   void _alertTapped(String? threadId) {
     pendingOpen = (threadId,);
+    alertTaps++;
     notifyListeners();
   }
 

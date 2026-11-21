@@ -50,9 +50,9 @@ jobs:
         run: flutter test
       - name: Dependency licenses
         run: dart run tool/check_licenses.dart
-      # 原生插件（安全存储、打开链接）的 C++ 代码也要编得过。
+      # 原生插件（安全存储、打开链接、托盘）的 C++ 代码也要编得过。托盘（F-17）要 appindicator。
       - name: Install system libraries
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libsecret-1-dev ninja-build
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libsecret-1-dev libayatana-appindicator3-dev ninja-build
       - name: Build Linux
         run: flutter build linux --release
 
@@ -94,7 +94,7 @@ jobs:
           cache: true
       - name: Install system libraries
         if: runner.os == 'Linux' && matrix.target == 'linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libsecret-1-dev ninja-build
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libsecret-1-dev libayatana-appindicator3-dev ninja-build
       - run: flutter pub get --enforce-lockfile
       # 没有签名证书：Android 用调试签名，macOS 第一次打开要右键“打开”，Windows 会弹 SmartScreen 提示。
       - run: flutter build ${{ matrix.target }} --release

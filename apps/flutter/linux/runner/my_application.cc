@@ -10,20 +10,31 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  // 已经建好的窗口：再打开一次 App 时把它叫出来，不另建（F-17）。
+  GtkWindow* window;
+  // 开机启动时带 --hidden：窗口不弹出来，只在托盘里。
+  gboolean start_hidden;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
+  if (self->start_hidden) return;
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+  // 又打开了一次（GApplication 把第二个进程的 activate 转给了这个）：叫出藏在托盘里的窗口。
+  if (self->window != nullptr) {
+    gtk_window_present(self->window);
+    return;
+  }
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  self->window = window;
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -85,6 +96,9 @@ static gboolean my_application_local_command_line(GApplication* application,
   MyApplication* self = MY_APPLICATION(application);
   // Strip out the first argument as it is the binary name.
   self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
+  self->start_hidden = g_strv_contains(
+      const_cast<const gchar* const*>(self->dart_entrypoint_arguments),
+      "--hidden");
 
   g_autoptr(GError) error = nullptr;
   if (!g_application_register(application, nullptr, &error)) {
@@ -142,7 +156,14 @@ MyApplication* my_application_new() {
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
 
+  // 只开一个（F-17）：有 D-Bus 会话总线时按 application-id 认，第二次打开转给已经开着的那个。
+  // 没有会话总线（比如没有桌面的测试环境）时照原来的不限个数，免得注册失败起不来。
+  const gboolean has_session_bus =
+      g_getenv("DBUS_SESSION_BUS_ADDRESS") != nullptr;
+  const GApplicationFlags flags = has_session_bus
+                                      ? static_cast<GApplicationFlags>(0)
+                                      : G_APPLICATION_NON_UNIQUE;
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     flags, nullptr));
 }

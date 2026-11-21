@@ -7,6 +7,18 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // 只开一个（F-17）：已经开着时把那个窗口叫出来（藏在托盘里的也算），自己退出。
+  HANDLE single = ::CreateMutexW(nullptr, TRUE, L"Local\\IntelligentPosition.IpApp");
+  if (single != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    HWND existing = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"intelligent-position");
+    if (existing != nullptr) {
+      ::ShowWindow(existing, ::IsIconic(existing) ? SW_RESTORE : SW_SHOW);
+      ::SetForegroundWindow(existing);
+    }
+    ::CloseHandle(single);
+    return EXIT_SUCCESS;
+  }
+
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
