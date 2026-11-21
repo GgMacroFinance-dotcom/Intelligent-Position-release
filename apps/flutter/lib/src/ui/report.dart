@@ -51,7 +51,8 @@ String? reportPathOf(String? href) {
 Future<void> openReport(BuildContext context, String path, {String? hint}) {
   final page = ReportView(path: path, hint: hint);
   if (MediaQuery.sizeOf(context).width < 840) {
-    return Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+    // 用最外层的导航器：对话页里嵌着自己的导航器（窗口缩放时保留会话），报告要盖住整个窗口。
+    return Navigator.of(context, rootNavigator: true).push(MaterialPageRoute<void>(builder: (_) => page));
   }
   return showDialog<void>(
     context: context,
