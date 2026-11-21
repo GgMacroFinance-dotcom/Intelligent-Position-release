@@ -7,6 +7,7 @@
 # 要调整的东西用 PROBE_ 开头的变量传；gateway_check.py 的 --remote-env 会把它们写在脚本开头：
 #   PROBE_COMPOSE_PROJECT  docker compose 的项目名，默认 new-api
 #   PROBE_SERVICES         要求 active 的 systemd 服务，空格分隔，默认 nginx
+#   PROBE_USER_SERVICES    要求 active 的用户级服务（systemctl --user），写成 用户:服务，空格分隔，默认不查
 #   PROBE_DISK_PATHS       要看用量的挂载点，空格分隔，默认 /
 #   PROBE_BACKUP_DIR       数据库备份目录；不设就不查备份
 #   PROBE_BACKUP_GLOB      备份文件名的通配，默认 *.dump
@@ -14,6 +15,7 @@ set -u
 
 project=${PROBE_COMPOSE_PROJECT:-new-api}
 services=${PROBE_SERVICES:-nginx}
+user_services=${PROBE_USER_SERVICES:-}
 disks=${PROBE_DISK_PATHS:-/}
 backup_dir=${PROBE_BACKUP_DIR:-}
 backup_glob=${PROBE_BACKUP_GLOB:-*.dump}
@@ -36,6 +38,12 @@ fi
 for s in $services; do
   state=$(systemctl is-active "$s" 2>/dev/null || true)
   echo "{\"kind\":\"service\",\"name\":\"$(q "$s")\",\"state\":\"$(q "${state:-unknown}")\"}"
+done
+
+for us in $user_services; do
+  u=${us%%:*} s=${us#*:}
+  state=$(systemctl --user -M "$u@" is-active "$s" 2>/dev/null || true)
+  echo "{\"kind\":\"service\",\"name\":\"$(q "$u:$s")\",\"state\":\"$(q "${state:-unknown}")\"}"
 done
 
 for d in $disks; do

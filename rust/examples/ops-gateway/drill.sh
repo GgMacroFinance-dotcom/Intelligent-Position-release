@@ -33,7 +33,8 @@ scenario() {
     --baseline "$here/fixtures/baseline.json" \
     --probe-token-env GATEWAY_PROBE_TOKEN --probe-model model-a --probe-model model-b --probe-timeout 5 --slow-secs 1 \
     --remote-cmd "env PATH=$here/fake-bin:$PATH $hostenv sh -s" \
-    --remote-env "PROBE_SERVICES=nginx opencodex" --remote-env "PROBE_BACKUP_DIR=$backups" 2>&1)
+    --remote-env "PROBE_SERVICES=nginx opencodex" --remote-env "PROBE_USER_SERVICES=ops:proxy" \
+    --remote-env "PROBE_BACKUP_DIR=$backups" 2>&1)
   got=$?
   kill $gw 2>/dev/null
   wait $gw 2>/dev/null
@@ -60,6 +61,7 @@ scenario 模型偏慢      1 "偏慢"                 "slow=model-a:1.5"        
 scenario 容器不健康    2 "unhealthy"            ""                         "FAKE_UNHEALTHY=new-api"
 scenario 容器退出      2 "Exited"               ""                         "FAKE_EXITED=redis"
 scenario 服务停了      2 "opencodex：failed" ""                       "FAKE_INACTIVE=opencodex"
+scenario 用户服务停了  2 "ops:proxy：failed"   ""                         "FAKE_INACTIVE=ops:proxy"
 scenario 磁盘快满      1 "已用 85%"             ""                         "FAKE_DISK_PCT=85"
 BACKUP_AGE=30 scenario 备份过期 1 "30.0 小时前"  ""                         ""
 BACKUP_AGE=60 scenario 备份停了 2 "60.0 小时前"  ""                         ""
