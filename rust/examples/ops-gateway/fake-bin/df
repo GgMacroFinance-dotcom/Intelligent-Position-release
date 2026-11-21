@@ -1,0 +1,4 @@
+#!/bin/sh
+# 假的 df -P：用量取 FAKE_DISK_PCT，默认 41%。
+echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+echo "/dev/vda1 104857600 42991616 61865984 ${FAKE_DISK_PCT:-41}% ${2:-/}"
