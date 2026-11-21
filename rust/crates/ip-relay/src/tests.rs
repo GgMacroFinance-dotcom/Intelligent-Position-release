@@ -12,7 +12,6 @@ use aws_lc_rs::signature::{
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
-use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD as B64};
 use serde_json::{Value, json};
 
