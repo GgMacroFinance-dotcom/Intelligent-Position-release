@@ -1,22 +1,24 @@
 //! Codex 引擎（`docs/ip/m2-spec.md` D-21、D-22、D-24）。
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ip_core::Body;
 use ip_models::{Price, Usage};
 use ip_runtime::engine::{BoxFuture, Engine, McpGrant, TurnContext, TurnReport};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::Semaphore;
 
-/// 写进对话的命令输出上限（字节）。完整输出在 Codex 自己的会话记录里。
-const MAX_OUTPUT: usize = 16 * 1024;
-/// 出错时附上的 stderr 末尾（字节）。
-const MAX_STDERR: usize = 4 * 1024;
+use crate::process::{self, Action, clip};
+
+const KIND: process::Kind = process::Kind {
+    name: "Codex",
+    end_event: "turn.completed",
+    parse: parse_line,
+};
+
 /// MCP 服务端在 Codex 配置里的名字；组织工具在 Codex 里叫 `mcp__ip__<工具>`。
 const MCP_NAME: &str = "ip";
 
@@ -137,128 +139,48 @@ impl CodexEngine {
     }
 
     async fn run(&self, ctx: TurnContext<'_>) -> TurnReport {
-        let mut report = TurnReport::default();
-        // 一轮的时限从排队等空位就开始算：本轮令牌的期限按 turn_timeout 定，不能被排队时间吃掉。
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let timeout = self.turn_timeout();
-        let _slot = match tokio::time::timeout(timeout, self.slots.acquire()).await {
-            Ok(Ok(slot)) => slot,
-            Ok(Err(_)) => {
-                report.error = Some("Codex 引擎已关闭".into());
-                return report;
-            }
-            Err(_) => {
-                report.error = Some(format!("排队等 Codex 空位超过 {} 秒", timeout.as_secs()));
-                return report;
-            }
+        let fail = |e: String| TurnReport {
+            error: Some(e),
+            ..TurnReport::default()
+        };
+        let _slot = match process::acquire(&self.slots, timeout, KIND.name).await {
+            Ok(slot) => slot,
+            Err(e) => return fail(e),
         };
         let Some(workspace) = ctx.workspace else {
-            report.error = Some("Codex 引擎需要工作目录：这个员工的 tools 不能设为 false".into());
-            return report;
+            return fail("Codex 引擎需要工作目录：这个员工的 tools 不能设为 false".into());
         };
         let home = self.home_root.join(ctx.agent.id.as_str());
         let codex_home = home.join("codex");
         if let Err(e) = std::fs::create_dir_all(&codex_home) {
-            report.error = Some(format!("创建 {} 失败：{e}", codex_home.display()));
-            return report;
+            return fail(format!("创建 {} 失败：{e}", codex_home.display()));
         }
         let prompt = match ctx.session {
             None => format!("{}\n\n---\n\n{}", ctx.system_prompt, ctx.input),
             Some(_) => ctx.input.to_string(),
         };
 
-        let mut cmd = tokio::process::Command::new(&self.config.command);
+        let mut cmd = process::command(&self.config.command, workspace);
         cmd.args(self.args(ctx.session, workspace, ctx.mcp.as_ref()))
-            .current_dir(workspace)
-            .env_clear()
             .env("HOME", &home)
-            .env("CODEX_HOME", &codex_home)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .process_group(0);
-        if let Some(path) = std::env::var_os("PATH") {
-            cmd.env("PATH", path);
-        }
+            .env("CODEX_HOME", &codex_home);
         if let Some(key) = &self.api_key {
             cmd.env("CODEX_API_KEY", key);
         }
         if let Some(grant) = &ctx.mcp {
             cmd.env("IP_MCP_TOKEN", &grant.token);
         }
-        let mut child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => {
-                report.error = Some(format!("启动 {} 失败：{e}", self.config.command));
-                return report;
-            }
-        };
-        let pid = child.id();
-        if let Some(mut stdin) = child.stdin.take() {
-            // 单独的任务里写：提示词超过管道缓冲、而进程又不读时，不能卡在超时保护之外。
-            // 写失败多半是进程已经退出，原因会出现在 stderr 和退出码里。
-            tokio::spawn(async move {
-                let _ = stdin.write_all(prompt.as_bytes()).await;
-            });
-        }
-        let stderr = child.stderr.take().map(|s| tokio::spawn(tail(s)));
-        let stdout = child.stdout.take().expect("stdout 已设为 piped");
-
-        let mut state = Turn::default();
-        let read = async {
-            let mut lines = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                for action in parse_line(&line) {
-                    state.apply(action, &ctx).await;
-                }
-            }
-            child.wait().await
-        };
-        let status = tokio::time::timeout(timeout.saturating_sub(started.elapsed()), read).await;
-        let stderr = match stderr {
-            Some(task) if status.is_ok() => task.await.unwrap_or_default(),
-            Some(task) => {
-                task.abort();
-                String::new()
-            }
-            None => String::new(),
-        };
-
-        report.steps = state.steps;
+        let mut report = process::drive(&KIND, cmd, prompt, started, timeout, &ctx).await;
         // 续接的会话里，`turn.completed` 报的是整个会话的累计用量（2026-11-14 用 codex-cli 0.169.0 核对过），
         // 只有减掉以前几轮的才是这一轮的。没续接、或者 Codex 另开了会话时，基线是 0。
-        let resumed = ctx.session.is_some() && state.session.as_deref().is_none_or(|id| Some(id) == ctx.session);
+        let resumed = ctx.session.is_some() && report.session_id.as_deref().is_none_or(|id| Some(id) == ctx.session);
         let baseline = if resumed { ctx.session_usage } else { Usage::default() };
-        let (turn_usage, session_usage) = split_usage(baseline, state.usage);
+        let (turn_usage, session_usage) = split_usage(baseline, report.usage);
         report.usage = turn_usage;
         report.cost_usd = self.config.price.map_or(0.0, |p| p.cost(&turn_usage));
         report.session_usage = Some(session_usage);
-        report.session_id = state.session;
-        report.error = match status {
-            Err(_) => {
-                if let Some(pid) = pid.and_then(|p| i32::try_from(p).ok()) {
-                    let _ =
-                        nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pid), nix::sys::signal::Signal::SIGKILL);
-                }
-                Some(format!("Codex 超过 {} 秒没有完成，已终止", timeout.as_secs()))
-            }
-            Ok(Err(e)) => Some(format!("等待 Codex 退出失败：{e}")),
-            Ok(Ok(exit)) => {
-                let last = state
-                    .warning
-                    .map(|w| format!("；最后一条错误：{w}"))
-                    .unwrap_or_default();
-                match (state.failure, state.completed) {
-                    (Some(e), _) => Some(format!("Codex 报错：{e}")),
-                    (None, true) => None,
-                    (None, false) if exit.success() => {
-                        Some(format!("Codex 没有报告这一轮结束（缺少 turn.completed）{last}"))
-                    }
-                    (None, false) => Some(format!("Codex 异常退出（{exit}）：{}{last}", stderr.trim())),
-                }
-            }
-        };
         report
     }
 }
@@ -280,27 +202,6 @@ impl Engine for CodexEngine {
 /// TOML 字符串字面量（`-c key=value` 的值按 TOML 解析）。
 fn toml_string(s: &str) -> String {
     Value::String(s.to_string()).to_string()
-}
-
-/// 读完 stderr，只留末尾。
-async fn tail(mut stderr: tokio::process::ChildStderr) -> String {
-    let mut buf = Vec::new();
-    let _ = stderr.read_to_end(&mut buf).await;
-    let start = buf.len().saturating_sub(MAX_STDERR);
-    String::from_utf8_lossy(&buf[start..]).into_owned()
-}
-
-/// 解析一行输出得到的动作。
-#[derive(Debug, PartialEq)]
-enum Action {
-    Session(String),
-    Append(Body),
-    Usage(Usage),
-    Completed,
-    Failed(String),
-    /// 顶层 `error` 事件。codex-cli 0.169.0 用它报中途重试（如 `Reconnecting... 2/5`），
-    /// 之后常常照样跑完，所以只记下来；这一轮有没有失败看 `turn.failed` 和 `turn.completed`。
-    Warning(String),
 }
 
 /// 把 Codex 这次报的用量拆成（这一轮的用量，会话累计用量）。`baseline` 是会话到上一轮为止的累计值。
@@ -331,53 +232,10 @@ fn split_usage(baseline: Usage, reported: Usage) -> (Usage, Usage) {
     }
 }
 
-#[derive(Default)]
-struct Turn {
-    session: Option<String>,
-    usage: Usage,
-    steps: u32,
-    completed: bool,
-    failure: Option<String>,
-    /// 最近一条 `error` 事件；这一轮没正常结束时附在失败原因里。
-    warning: Option<String>,
-}
-
-impl Turn {
-    async fn apply(&mut self, action: Action, ctx: &TurnContext<'_>) {
-        match action {
-            Action::Session(id) => self.session = Some(id),
-            Action::Append(body) => {
-                if !matches!(body, Body::ToolResult { .. }) {
-                    self.steps += 1;
-                }
-                if let Err(e) = ctx.sink.append(body).await {
-                    tracing::warn!(error = %e, "写回 Codex 的输出失败");
-                }
-            }
-            Action::Usage(u) => {
-                self.usage.prompt_tokens += u.prompt_tokens;
-                self.usage.cached_tokens += u.cached_tokens;
-                self.usage.cache_write_tokens += u.cache_write_tokens;
-                self.usage.completion_tokens += u.completion_tokens;
-            }
-            Action::Completed => self.completed = true,
-            Action::Failed(e) => self.failure = Some(e),
-            Action::Warning(w) => {
-                tracing::warn!(warning = %w, "Codex 报了一条错误，这一轮继续");
-                self.warning = Some(w);
-            }
-        }
-    }
-}
-
 fn tokens(v: &Value, key: &str) -> u32 {
     v.get(key)
         .and_then(Value::as_u64)
         .map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX))
-}
-
-fn clip(text: &str) -> String {
-    ip_tools::truncate_output(text.to_string(), MAX_OUTPUT, 0)
 }
 
 fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {

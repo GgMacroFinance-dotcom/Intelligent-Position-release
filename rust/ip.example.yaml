@@ -114,7 +114,7 @@ roles:
   # 执行层第二个岗位：运维测试。工作目录指向要维护的项目（见 agents 里的 workspace）。
   - id: ops-tester
     name: 运维测试
-    # budget_per_day_usd: 2        # 这个岗位配了 Codex 引擎时，还要在 engines 里写 price
+    # budget_per_day_usd: 2        # 这个岗位配了外部引擎（Codex、Claude Code）时，还要在 engines 里写 price
     description: |
       维护服务器和数据管道，编写并运行测试，发现问题后定位原因并给出修复。
       工作流程：
@@ -201,7 +201,7 @@ data_sources:
 #     # agent: macro-1                 # 可选：这个渠道的消息都交给固定员工，不走路由
 # 路由规则可以按 Slack 用户写：when: { from: ["slack:U012ABCDEF"] }（显示名谁都能改，所以只认用户 id）。
 
-# 外部引擎：把某个岗位的每一轮交给 Codex，不走内置循环（见 docs/ip/m2-spec.md 第 6 节）。
+# 外部引擎：把某个岗位的每一轮交给 Codex 或 Claude Code，不走内置循环（见 docs/ip/m2-spec.md 第 6 节）。
 # Codex 用自己的 shell 和改文件工具，跑在它自带的沙箱里；组织工具（create_task、update_task、ask_human 等）
 # 通过本服务的 /mcp 回调，每轮一个令牌。这个岗位的员工需要工作目录（不能 tools: false）。
 # engines:
@@ -215,6 +215,19 @@ data_sources:
 #     turn_timeout_secs: 1800
 #     # price: { input: 2, cached_input: 0.1, cache_write: 2.5, output: 10 }   # 美元 / 百万 token；设了 budget_per_day_usd 时必填。
 #     #   这是 Codex 默认模型 gpt-6.1-sol 的官方价（2026-11-14 核对）；换了 model 就换成那个模型的价
+#
+# 也可以交给 Claude Code（见 docs/ip/m2-spec.md D-36）。它没有 Codex 那样的系统沙箱，靠权限规则限定：
+# 文件工具只能动工作目录，Claude Code 认为安全的简单命令自动放行，别的命令要写进 allowed_tools 才能跑。
+# 放行的命令不受工作目录限制，能执行项目里的代码，只在可信的项目上放行。
+#   ops-tester:
+#     kind: claude_code
+#     command: claude                # 可执行文件
+#     # model: <模型名>              # 省略时用 Claude Code 的默认模型
+#     api_key_env: ANTHROPIC_API_KEY # 必填，密钥只放环境变量
+#     access: workspace-write        # read-only | workspace-write
+#     allowed_tools: ["Bash(cargo test:*)"]   # 预先放行的权限规则，原样交给 claude --allowedTools
+#     turn_timeout_secs: 1800
+#     # price: { input: 0, cached_input: 0, cache_write: 0, output: 0 }   # 美元 / 百万 token；设了 budget_per_day_usd 时必填
 
 # 外部 MCP 服务器：工具以 mcp__<名字>__<工具> 出现在员工的工具列表里。有两种接法：
 #   url      远程服务器（Streamable HTTP）。必须是 https，只有本机地址可以用 http；

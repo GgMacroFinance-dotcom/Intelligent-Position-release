@@ -40,7 +40,7 @@ WebSocket 接口在 `/ws`。发一条消息：
 `/mcp` 是给 Codex 这类外部引擎用的 MCP 服务端（Streamable HTTP），开放的是组织工具、本岗位的数据工具和外部 MCP 工具，不含 shell 和文件工具。
 它只认运行时为每一轮签发的令牌（`Runtime::grant_turn`），不认上面的访问令牌，并且只接受本机地址的请求。详见[《M2 规格》](../docs/ip/m2-spec.md) D-17 到 D-19。
 
-启动前可以先检查配置：`ip check --config ip.yaml` 逐项检查模型端点的 key、工具沙箱、数据源、MCP 服务器、Codex 和 Slack 令牌能不能用，有失败时退出码为 1。它不发消息、不调模型。用真实账号验收的步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)。
+启动前可以先检查配置：`ip check --config ip.yaml` 逐项检查模型端点的 key、工具沙箱、数据源、MCP 服务器、外部引擎（Codex、Claude Code）和 Slack 令牌能不能用，有失败时退出码为 1。它不发消息、不调模型。用真实账号验收的步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)。
 
 质量评测：`ip eval --config ip.yaml --set evals/macro-smoke.yaml` 用真实模型跑评测集里的固定问题，每次用一个新的临时数据目录。
 检查项都用程序判定：本轮正常结束、调了取数工具、写了报告、报告里的数字能在工具结果里找到（允许四舍五入、单位换算和两数之差）、
@@ -96,7 +96,7 @@ docker compose up -d --build
 | `ip-data` | 数据源与只读取数工具（`data_catalog`、`data_series`，同比 / 环比），按岗位授权 | M1 |
 | `ip-browser` | 浏览器自动化、截图预处理 | M2 |
 | `ip-connectors` | 外部渠道的通用接口（`Channel`、`Hub`）和测试用的假渠道、假 Slack 服务器；Slack 渠道（Socket Mode）已接入，飞书、邮件以后接在这里 | M2 |
-| `ip-engines` | 外部引擎：把岗位的每一轮交给外部编程智能体；目前有 Codex（`codex exec --json`，组织工具经 `/mcp` 回调），Claude Code 待做 | M2 |
+| `ip-engines` | 外部引擎：把岗位的每一轮交给外部编程智能体；有 Codex（`codex exec --json`）和 Claude Code（`claude -p --output-format stream-json`，D-36），组织工具经 `/mcp` 回调 | M2 |
 
 ## M0 任务清单
 
@@ -173,6 +173,7 @@ docker compose up -d --build
 - [x] Slack 渠道（Socket Mode）：`ip.yaml` 的 `channels` 配置，主机不需要公网入口；在频道里 @机器人 或私信开启会话，回复和审批卡片都在同一个线程里，卡片用按钮选，选定后原卡片更新；应用清单在 `examples/slack/manifest.yaml`。用假 Slack 服务器跑通了，真实工作区待验收。收到的事件先存进数据库再向 Slack 确认，处理暂时失败时退避重试，进程在确认后退出也会在重启后接着处理；渠道去重改在处理成功之后（D-28，#69，只用假 Slack 测过）。主机只能经代理出网时，Socket Mode 按 `HTTPS_PROXY`/`NO_PROXY` 走代理的 CONNECT 隧道，代理地址可带用户名密码（D-37，backlog E-12，只用本地假代理和假 Slack 测过）
 - [x] MCP 服务端：组织工具开放给外部引擎，每轮一个令牌
 - [x] 引擎接口和 Codex 引擎（先只给运维测试岗位）：`ip.yaml` 的 `engines` 按岗位配置；每轮起一个 `codex exec --json` 进程，同一对话用 `resume` 续接、只交新消息；超时整组终止；用量计入岗位预算。用假 codex 跑通了；真实 Codex 的验收见下面“真实验收：Codex”一条
+- [x] Claude Code 引擎（backlog E-6，`docs/ip/m2-spec.md` D-36）：`engines` 里写 `kind: claude_code`。每轮起一个 `claude -p --bare --restricted --output-format stream-json` 进程，同一对话用 `--resume` 续接、只交新消息，系统提示词放文件传；文件工具只能动工作目录，要人批准的一律拒绝，`allowed_tools` 预先放行命令；组织工具经 `/mcp` 回调，令牌从环境变量展开、不进参数；按 `usage` 和价格记账（不用续接时累计的 `total_cost_usd`）。和 Codex 共用进程管理。用本机 Claude Code 2.1.330 连假的模型接口核对过参数和输出格式，`ip serve` 里派任务、经 `/mcp` 交回、续接、放行和拒绝命令都走通；没用真的 Claude 模型跑过
 - [x] Docker 部署：`rust/Dockerfile`、`docker-compose.yml`、`deploy/env.example`；镜像带 bubblewrap，可选带 Codex；以 uid 10001 运行，数据放命名卷，端口只绑本机。在容器里用假模型跑通了沙箱里的 shell，`ip check`、健康检查、令牌校验都测过；真实模型、Slack、Codex 和其他验收一起做。见[《用 Docker 部署》](../docs/ip/deploy-docker.md)
 - [x] 质量评测 `ip eval`（backlog B-1）：评测集 `evals/macro-smoke.yaml` 两个固定问题（有数据的、一半取不到的），检查项全由程序判定；2026-11-12 用 `gpt-6-luna` 真实跑两遍，都是 2/2 通过，每遍不到 0.01 美元，结果在 `docs/ip/evals/2026-11-12-luna/`
 - [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（当时容器只能经代理出网、Socket Mode 不走代理，backlog E-12；现在已能直接走代理，经真实代理没验）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
