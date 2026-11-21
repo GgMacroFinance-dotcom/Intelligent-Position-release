@@ -30,6 +30,17 @@ services:
       - seccomp=unconfined
       - apparmor=unconfined
       - systempaths=unconfined
+    # 容器整体的资源上限（backlog E-15 第一步）。上面放开了三项限制，员工的 shell 命令在沙箱里仍然可以
+    # 不停 fork、吃内存、往 /tmp（tmpfs，算内存）写大文件；这几项让它们最多耗尽这个容器，不拖垮主机。
+    # 这是整个容器的兜底，服务进程和所有员工的命令共用这份额度，不是每条命令的上限。
+    # 默认值按 2 核 4 GB 的小主机取，在 .env 里设同名变量覆盖，怎么调见 docs/ip/deploy-docker.md“资源上限”。
+    # 进程（线程也算）总数。服务自己的线程、MCP 子进程、Codex 和员工命令都在里面。
+    pids_limit: ${IP_PIDS_LIMIT:-1024}
+    # 内存上限；memswap_limit 和它取同一个值，不让超出的部分换到 swap 上。
+    mem_limit: ${IP_MEM_LIMIT:-2g}
+    memswap_limit: ${IP_MEM_LIMIT:-2g}
+    # CPU 核数上限。不能大于主机的核数，否则容器起不来，所以默认取 1。
+    cpus: ${IP_CPUS:-1}
     # 收到停止信号后，等正在进行的一轮做完再退出。
     stop_grace_period: 60s
 

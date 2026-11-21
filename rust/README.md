@@ -174,6 +174,8 @@ docker compose up -d --build
 - [x] MCP 服务端：组织工具开放给外部引擎，每轮一个令牌
 - [x] 引擎接口和 Codex 引擎（先只给运维测试岗位）：`ip.yaml` 的 `engines` 按岗位配置；每轮起一个 `codex exec --json` 进程，同一对话用 `resume` 续接、只交新消息；超时整组终止；用量计入岗位预算。用假 codex 跑通了；真实 Codex 的验收见下面“真实验收：Codex”一条
 - [x] Docker 部署：`rust/Dockerfile`、`docker-compose.yml`、`deploy/env.example`；镜像带 bubblewrap，可选带 Codex；以 uid 10001 运行，数据放命名卷，端口只绑本机。在容器里用假模型跑通了沙箱里的 shell，`ip check`、健康检查、令牌校验都测过；真实模型、Slack、Codex 和其他验收一起做。见[《用 Docker 部署》](../docs/ip/deploy-docker.md)
+- [x] Docker 部署的资源上限（backlog E-15 第一步）：`docker-compose.yml` 给容器整体设 `pids_limit`、`mem_limit`、`cpus`，可用 `.env` 覆盖；只用 `docker compose config` 校验过写法。这是容器整体的兜底
+- [ ] 每条 shell 命令的资源上限（backlog E-15 第二步）：`prlimit` 限内存、文件大小和进程数，`/tmp` 加 `--size`，`ip check` 报告是否生效
 - [x] 质量评测 `ip eval`（backlog B-1）：评测集 `evals/macro-smoke.yaml` 两个固定问题（有数据的、一半取不到的），检查项全由程序判定；2026-11-12 用 `gpt-6-luna` 真实跑两遍，都是 2/2 通过，每遍不到 0.01 美元，结果在 `docs/ip/evals/2026-11-12-luna/`
 - [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（容器只能经代理出网，backlog E-12）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
 - [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账 2026-11-16 修了（E-10，只用假 codex 测过）
