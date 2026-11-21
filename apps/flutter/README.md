@@ -2,7 +2,7 @@
 
 intelligent-position 的 App，一份 Dart 代码出 Android、iOS、macOS、Windows、Linux 五个平台。连用户自己的主机（`ip serve`），在手机和电脑上处理待办、和数字员工对话。为什么用 Flutter、和网页控制台、Tauri 桌面 App 是什么关系，见 [`docs/ip/apps-plan.md`](../../docs/ip/apps-plan.md) 第 9 节；推进清单是 backlog F-13 起。
 
-现在能做的（F-13、F-14、F-15、F-16、F-22）。导航是待办、星图、对话、任务、岗位五页，“我”在顶栏右上角（宽屏在导航栏底部）：
+现在能做的（F-13 到 F-17、F-22）。导航是待办、星图、对话、任务、岗位五页，“我”在顶栏右上角（宽屏在导航栏底部）：
 
 - **连接主机**：填主机地址和 6 位配对码，或者直接粘贴控制台给的配对链接。先请人确认主机地址再配对；明文连局域网地址（不是 HTTPS、不是 Tailscale 的 `*.ts.net`、不是本机）要勾“我信任这个网络”。配对拿到的设备令牌放系统的安全存储。
 - **待办**（手机首页）：员工提问、等你决定的审批卡片（选项整行可点）、受阻的任务（显示受阻原因、执行对话和派活对话，状态能直接改），“最近 7 天”完成的任务和新报告。导航上的角标是待决定的卡片加受阻的任务。
@@ -13,9 +13,10 @@ intelligent-position 的 App，一份 Dart 代码出 Android、iOS、macOS、Win
 - **岗位**（F-15）：今天的模型费用合计和提示词缓存命中率；每个岗位的模型、今天花费对比每日预算、缓存命中、员工（点了和他开新对话）、最近的报告。
 - **我**：连的主机、设备名、权限、协议版本；这台设备的通知设置；断开并忘掉这台主机。
 - **系统通知**（F-16）：App 不在前台（手机切到别的 App、桌面窗口没有焦点）时，主机发来的通知弹成系统通知，同一件事的新通知替换旧的，在别处处理过了就撤掉；点通知去那个对话，没有对话的去待办。通知哪些事、带不带预览、静音、按岗位关，在“我”页改，存在主机上（和控制台“设备与通知”页是同一份设置）。连上主机后才向系统要通知权限。手机锁屏、App 被系统关掉以后暂时收不到（F-21）。
+- **桌面托盘**（F-17，macOS、Windows、Linux）：关窗口只是藏到托盘，连接不断，照样弹通知；从托盘菜单“退出”才真的退出。托盘提示“N 件待办”，macOS、Linux 图标旁边再显示数字。托盘菜单里勾“开机启动”：Linux、Windows 开机后只在托盘里，不弹窗口；macOS 要 13 以上，在“系统设置 > 通用 > 登录项”里也能关。点托盘图标、点通知、再打开一次 App 都把开着的那个窗口叫出来，不另起一个。Linux 的托盘要桌面支持 AppIndicator（GNOME 要装 AppIndicator 扩展）。
 - 断线自动重连（500 毫秒起翻倍，最多 8 秒），带上次的事件序号让主机补发断开期间的事件；补不上就整个重新拉。App 从后台回到前台时马上重连。主机吊销了这台设备（401）时不再重连，提示重新配对。
 
-还没有的（按顺序做，见 backlog）：托盘和开机启动（F-17）、“管理”权限的页（F-18）、扫码配对（F-19）、从 Rust 生成协议类型（F-20）、手机锁屏推送（F-21）。
+还没有的（按顺序做，见 backlog）：“管理”权限的页（F-18）、扫码配对（F-19）、从 Rust 生成协议类型（F-20）、手机锁屏推送（F-21）。
 
 ## 桌面交互验证
 
@@ -42,6 +43,7 @@ intelligent-position 的 App，一份 Dart 代码出 Android、iOS、macOS、Win
 | `lib/src/pairing.dart` | `POST /pair` |
 | `lib/src/storage.dart` | 主机列表和令牌放安全存储 |
 | `lib/src/notifications.dart` | 系统通知：弹、按标签撤、点开回调（F-16） |
+| `lib/src/desktop/` | 桌面的托盘和窗口（`shell.dart`）、开机启动（`autostart.dart`）（F-17）；只开一个、`--hidden` 在 `linux/runner/`、`windows/runner/` 里，macOS 的开机启动在 `macos/Runner/MainFlutterWindow.swift` |
 | `lib/src/app_state.dart` | App 的状态：连接、员工、对话、审批、任务、哪些员工正在处理或上一轮失败 |
 | `lib/src/star_map.dart` | 星图的数据：谁坐太阳、每位员工的紧急度、重要度、理由和天体 |
 | `lib/src/ui/` | 各页（`task_card.dart` 是待办和任务页共用的任务卡片）；`star_map_page.dart` 是星图，`celestial_painter.dart` 画太阳、行星和恒星，`report.dart` 是报告链接和看报告 |
@@ -59,7 +61,7 @@ flutter pub get
 flutter run -d linux        # 或 macos、windows、一台连着的手机、模拟器
 ```
 
-Linux 上编译要 `libgtk-3-dev`、`libsecret-1-dev`、`ninja-build`、`clang`、`cmake`。Android 要 Android SDK 和 JDK 17；iOS、macOS 要 Xcode。
+Linux 上编译要 `libgtk-3-dev`、`libsecret-1-dev`、`libayatana-appindicator3-dev`、`ninja-build`、`clang`、`cmake`；运行要 `libsecret-1-0`、`libayatana-appindicator3-1`。Android 要 Android SDK 和 JDK 17；iOS、macOS 要 Xcode。
 
 本地改了用到的图标后，发布版里图标显示成方框或乱码时，是图标字体的裁剪结果被缓存了：`flutter clean` 后再编（CI 每次从头编，不受影响）。
 
@@ -78,7 +80,7 @@ flutter build linux --release
 
 CI 的 `flutter` 工作流在 PR 改到 `apps/flutter/` 时跑上面这些（只用 Linux）。五个平台的安装包只在手动触发或打 `app-v*` 标签时打：Linux、Android（APK，调试签名）、macOS、iOS（不签名，只看能不能编过）、Windows。都没有签名证书。
 
-依赖只用和 Apache-2.0 兼容的许可（BSD、MIT、Apache-2.0），`tool/check_licenses.dart` 按每个包的 LICENSE 正文查，认不出的就失败。现在的直接依赖：`flutter_secure_storage`、`flutter_markdown_plus`、`markdown`、`url_launcher`、`flutter_local_notifications`（都是 BSD-3-Clause）。按包放行的例外只有 `dbus`（MPL-2.0，`flutter_local_notifications` 在 Linux 上用，原样使用）。
+依赖只用和 Apache-2.0 兼容的许可（BSD、MIT、Apache-2.0），`tool/check_licenses.dart` 按每个包的 LICENSE 正文查，认不出的就失败。现在的直接依赖：`flutter_secure_storage`、`flutter_markdown_plus`、`markdown`、`url_launcher`、`flutter_local_notifications`（都是 BSD-3-Clause），`tray_manager`、`window_manager`（MIT）。按包放行的例外只有 `dbus`（MPL-2.0，`flutter_local_notifications` 在 Linux 上用，原样使用）。
 
 ## 连真主机的端到端测试
 

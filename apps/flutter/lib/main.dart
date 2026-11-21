@@ -1,9 +1,13 @@
 // intelligent-position 的各平台 App（docs/ip/apps-plan.md 第 9 节）。
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'src/app_state.dart';
+import 'src/desktop/autostart.dart';
+import 'src/desktop/shell.dart';
 import 'src/notifications.dart';
 import 'src/storage.dart';
 import 'src/ui/common.dart';
@@ -15,6 +19,17 @@ void main() {
   final state = AppState(store: HostStore(SystemSecretStore()), notifier: LocalNotifier());
   runApp(IpApp(state: state));
   state.init();
+  // 桌面：关窗口留在托盘、托盘显示待办数、开机启动（F-17）。
+  if (isDesktop) {
+    unawaited(
+      DesktopShell(
+        state: state,
+        tray: SystemTray(),
+        window: SystemWindow(),
+        autostart: platformAutoStart(),
+      ).init().catchError((Object e) => debugPrint('托盘用不了：$e')),
+    );
+  }
 }
 
 /// 和网页控制台一样的主色。
