@@ -528,14 +528,58 @@ enum Scope {
 }
 
 class DeviceInfo {
-  const DeviceInfo({required this.id, required this.name, required this.scope});
+  const DeviceInfo({
+    required this.id,
+    required this.name,
+    required this.scope,
+    this.pairedAtMs,
+    this.lastSeenMs,
+    this.online = false,
+  });
 
-  factory DeviceInfo.fromJson(Json j) =>
-      DeviceInfo(id: j['id'] as String, name: j['name'] as String, scope: Scope.parse(j['scope']));
+  factory DeviceInfo.fromJson(Json j) => DeviceInfo(
+    id: j['id'] as String,
+    name: j['name'] as String,
+    scope: Scope.parse(j['scope']),
+    pairedAtMs: _intOrNull(j['paired_at_ms']),
+    lastSeenMs: _intOrNull(j['last_seen_ms']),
+    online: j['online'] as bool? ?? false,
+  );
 
   final String id;
   final String name;
   final Scope scope;
+
+  /// 配对、最后在线的时间；配对的回复（`Claimed`）里没有。
+  final int? pairedAtMs;
+  final int? lastSeenMs;
+
+  /// 现在有没有连着。
+  final bool online;
+}
+
+/// `create_pairing` 的回复：配对码只在这里出现一次。
+class NewPairing {
+  const NewPairing({required this.code, required this.name, required this.expiresMs, this.link, this.qr});
+
+  factory NewPairing.fromJson(Json j) => NewPairing(
+    code: j['code'] as String,
+    name: j['name'] as String,
+    expiresMs: _int(j['expires_ms']),
+    link: _str(j['link']),
+    qr: (j['qr'] as List?)?.cast<String>(),
+  );
+
+  /// 6 位数字。
+  final String code;
+  final String name;
+  final int expiresMs;
+
+  /// 扫码打开的地址（`<控制台地址>/#/pair/<配对码>`）。
+  final String? link;
+
+  /// `link` 的二维码，每行一串 `1`（黑）和 `0`（白），不含四周留白。
+  final List<String>? qr;
 }
 
 /// `POST /pair` 成功时的回复：令牌只出现这一次。

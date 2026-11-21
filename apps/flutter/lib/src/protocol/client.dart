@@ -334,6 +334,24 @@ extension IpRequests on IpClient {
         }) as Json,
       );
 
+  // ---------- 设备管理（“管理”权限，F-18） ----------
+
+  Future<List<DeviceInfo>> listDevices() => _list({'type': 'list_devices'}, DeviceInfo.fromJson);
+
+  /// 生成一个 2 分钟内有效的 6 位配对码；`linkBase` 是控制台的地址，给了就附上扫码地址和二维码。
+  Future<NewPairing> createPairing(String name, {String? linkBase}) async =>
+      NewPairing.fromJson(await request({'type': 'create_pairing', 'name': name, 'link_base': ?linkBase}) as Json);
+
+  Future<List<DeviceInfo>> renameDevice(String deviceId, String name) =>
+      _list({'type': 'rename_device', 'device_id': deviceId, 'name': name}, DeviceInfo.fromJson);
+
+  Future<List<DeviceInfo>> setDeviceScope(String deviceId, Scope scope) =>
+      _list({'type': 'set_device_scope', 'device_id': deviceId, 'scope': scope.name}, DeviceInfo.fromJson);
+
+  /// 吊销一台设备，它的连接立即断开。
+  Future<List<DeviceInfo>> revokeDevice(String deviceId) =>
+      _list({'type': 'revoke_device', 'device_id': deviceId}, DeviceInfo.fromJson);
+
   /// 这台设备的通知设置（共用令牌连上时是共用的那份）。
   Future<NotifySettings> getNotifySettings() async =>
       NotifySettings.fromJson(await request({'type': 'get_notify_settings'}) as Json);

@@ -113,6 +113,20 @@ class AppState extends ChangeNotifier {
   bool _agentForNewChosen = false;
 
   bool get connected => status == ConnStatus.open;
+
+  /// 连着的客户端，给“管理”的各页直接发请求用（F-18）；没连上时抛错。
+  IpClient get client {
+    final c = _client;
+    if (c == null || c.status != ConnStatus.open) throw const RequestError('尚未连接');
+    return c;
+  }
+
+  /// 重新问一次主机这台设备是谁、什么权限（在设备页改了自己的权限后用）。
+  Future<void> refreshMe() async {
+    me = await client.whoAmI();
+    notifyListeners();
+  }
+
   bool get isAdmin => me?.scope == Scope.admin;
 
   List<Approval> get pendingApprovals => approvals.where((a) => a.pending).toList();
