@@ -40,7 +40,7 @@ WebSocket 接口在 `/ws`。发一条消息：
 `/mcp` 是给 Codex 这类外部引擎用的 MCP 服务端（Streamable HTTP），开放的是组织工具、本岗位的数据工具和外部 MCP 工具，不含 shell 和文件工具。
 它只认运行时为每一轮签发的令牌（`Runtime::grant_turn`），不认上面的访问令牌，并且只接受本机地址的请求。详见[《M2 规格》](../docs/ip/m2-spec.md) D-17 到 D-19。
 
-启动前可以先检查配置：`ip check --config ip.yaml` 逐项检查模型端点的 key、工具沙箱、数据源、MCP 服务器、Codex 和 Slack 令牌能不能用，有失败时退出码为 1。它不发消息、不调模型。用真实账号验收的步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)。
+启动前可以先检查配置：`ip check --config ip.yaml` 逐项检查模型端点的 key、工具沙箱、数据源、MCP 服务器、外部引擎（Codex、Claude Code）和 Slack 令牌能不能用，有失败时退出码为 1。它不发消息、不调模型。用真实账号验收的步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)。
 
 质量评测：`ip eval --config ip.yaml --set evals/macro-smoke.yaml` 用真实模型跑评测集里的固定问题，每次用一个新的临时数据目录。
 检查项都用程序判定：本轮正常结束、调了取数工具、写了报告、报告里的数字能在工具结果里找到（允许四舍五入、单位换算和两数之差）、
@@ -96,7 +96,7 @@ docker compose up -d --build
 | `ip-data` | 数据源与只读取数工具（`data_catalog`、`data_series`，同比 / 环比），按岗位授权 | M1 |
 | `ip-browser` | 浏览器自动化、截图预处理 | M2 |
 | `ip-connectors` | 外部渠道的通用接口（`Channel`、`Hub`）和测试用的假渠道、假 Slack 服务器；Slack 渠道（Socket Mode）已接入，飞书、邮件以后接在这里 | M2 |
-| `ip-engines` | 外部引擎：把岗位的每一轮交给外部编程智能体；目前有 Codex（`codex exec --json`，组织工具经 `/mcp` 回调），Claude Code 待做 | M2 |
+| `ip-engines` | 外部引擎：把岗位的每一轮交给外部编程智能体；有 Codex（`codex exec --json`）和 Claude Code（`claude -p --output-format stream-json`，D-36），组织工具经 `/mcp` 回调 | M2 |
 | `ip-relay` | 手机 App 锁屏推送的中转（独立程序 `ip-relay`）：收主机发来的 Web Push 密文，原样转给 APNs、FCM；设备推送令牌封在订阅地址里，不用数据库（D-35） | App |
 
 ## M0 任务清单
@@ -159,7 +159,7 @@ docker compose up -d --build
 - [x] 定时任务：`ip.yaml` 的 `schedules`（五段 cron + `utc_offset` 时区），到点给岗位或员工发一条消息、开一段新对话，不写 `to` 时按路由规则分派；停机期间错过的不补跑；上次运行结果存数据库；控制台任务页显示下次运行时间，可立即运行
 - [x] MCP 远程接入和 Finance Macro Data API：`mcp_servers` 可以写 `url` 连远程服务器（Streamable HTTP，令牌用 `bearer_token_env`；必须是 https，只有本机地址可以用 http）。宏观研报岗位的美国和全球数据改为直接调 Finance Macro Data API（which-api 仓库的 `packages/macro-mcp`，12 个工具），中国数据仍用 `ip data pull` 拉的国家统计局序列。用本机启动的同一版服务（0.2.0）联调过：握手、列工具、取 FRED 实时数据都通。2026-11-11 的真实验收里，真实模型经 Render 上的测试部署取到了数（见下面宏观研报岗位的真实验收一条）
 - [x] Finance Macro Data API 开源（backlog C-2）：9 个美国宏观数据工具放进仓库根目录的 `macro-mcp/`（MIT，Node.js 18.17 以上，零依赖），示例配置改成本机 stdio 启动。和 WhichAPI 托管版的差别：不带 API 目录工具；FRED 不直连，经 WhichAPI 托管服务取，要 `WHICHAPI_API_KEY`；快照不带 ICE BofA 的三个面板（2026-11-16 起这些序列可以用 `get_fred_series` 取，只用模拟的回复测过）。包自己的测试进 CI（`macro-mcp` 工作流）；经 WhichAPI 取 FRED 这条路包自己的测试用的是模拟；2026-11-14 的评测里配真实模型真实跑过（[记录](../docs/ip/evals/2026-11-14-e8/README.md)）
-- [x] 中国数据进 Finance Macro Data API（backlog E-2）：`macro-mcp` 有国家统计局 4 个工具：`search_china_indicators` 按中文名搜指标，`browse_china_catalog` 浏览目录，`get_china_indicator` 取任一指标（月度、季度、年度），`get_china_series` 是 CPI、PPI、PMI、M2 的快捷入口，存的 id 失效时按名字重新找到。代码和 which-api 托管版是同一份（which-api PR #14）。2026-11-15 在境内网络上真实跑通；境外网络能否访问没测
+- [x] 中国数据进 Finance Macro Data API（backlog E-2）：`macro-mcp` 有国家统计局 4 个工具：`search_china_indicators` 按中文名搜指标，`browse_china_catalog` 浏览目录，`get_china_indicator` 取任一指标（月度、季度、年度），`get_china_series` 是 CPI、PPI、PMI、M2 的快捷入口，存的 id 失效时按名字重新找到。代码和 which-api 托管版是同一份（which-api PR #14）。2026-11-15 在境内网络上真实跑通；2026-11-21 经 Render 上的托管版从境外真实取到数（[记录](../docs/ip/acceptance-2026-11-21-hosted-nbs.md)），境外主机本机启动开源版没测
 - [x] FRED 走官方 API（backlog C-2）：WhichAPI 托管服务改调 FRED 官方 API（which-api PR #13，key 配在 Render 上）；`macro-mcp` 的 `get_fred_series` 把 `units` 转发过去，算同比用 `pc1`，岗位说明写明不要自己算。托管服务这条路在本机用真实 key 跑通过；Render 上部署后的调用 2026-11-15 直接请求过一次，取到了数（见[发布前清单](../docs/ip/release-checklist.md)）
 - [x] 示例配置的模型：协调员用 `openai/gpt-6-astra`，执行岗位用 `openai/gpt-6-luna`，配了价格，协调员和宏观研究员设了每日费用上限（价格 2026-11-14 按 OpenAI 的模型文档核对过，补了 `cached_input` 和 `cache_write`，用之前再核对）
 - [x] 模型端点支持 OpenAI Responses 接口：端点写 `api: responses`（可选 `reasoning_effort`），其余端点默认仍走 Chat Completions。gpt-6-astra、gpt-6-luna 在 Chat Completions 里不能同时带工具和推理，只能走 Responses
@@ -172,13 +172,16 @@ docker compose up -d --build
 
 - [x] `ip-core` 新增两个字段：系统消息带类型 `notice`，外部渠道只转发“这轮失败”；人的消息可带来源渠道 `via`，路由规则 `from` 对渠道用户只按用户 id 匹配，改显示名冒用不了
 - [x] 通用渠道接口、绑定表、投递器、假渠道和渠道测试：`ip_server::channels::start` 把一个渠道接到服务上；收消息时去重、按名单准入、找或建会话绑定、分派，同一会话的追问粘住原来的员工；投递器从事件日志读，只发员工回复、“这轮失败”、卡片和卡片选定结果，失败重试、顺序不乱、重启不重发；卡片按 `approvers` 决定谁能点。用假渠道跑通了 T1–T11
-- [x] Slack 渠道（Socket Mode）：`ip.yaml` 的 `channels` 配置，主机不需要公网入口；在频道里 @机器人 或私信开启会话，回复和审批卡片都在同一个线程里，卡片用按钮选，选定后原卡片更新；应用清单在 `examples/slack/manifest.yaml`。用假 Slack 服务器跑通了，真实工作区待验收。收到的事件先存进数据库再向 Slack 确认，处理暂时失败时退避重试，进程在确认后退出也会在重启后接着处理；渠道去重改在处理成功之后（D-28，#69，只用假 Slack 测过）
+- [x] Slack 渠道（Socket Mode）：`ip.yaml` 的 `channels` 配置，主机不需要公网入口；在频道里 @机器人 或私信开启会话，回复和审批卡片都在同一个线程里，卡片用按钮选，选定后原卡片更新；应用清单在 `examples/slack/manifest.yaml`。用假 Slack 服务器跑通了，真实工作区待验收。收到的事件先存进数据库再向 Slack 确认，处理暂时失败时退避重试，进程在确认后退出也会在重启后接着处理；渠道去重改在处理成功之后（D-28，#69，只用假 Slack 测过）。主机只能经代理出网时，Socket Mode 按 `HTTPS_PROXY`/`NO_PROXY` 走代理的 CONNECT 隧道，代理地址可带用户名密码（D-37，backlog E-12，只用本地假代理和假 Slack 测过）
 - [x] MCP 服务端：组织工具开放给外部引擎，每轮一个令牌
 - [x] 引擎接口和 Codex 引擎（先只给运维测试岗位）：`ip.yaml` 的 `engines` 按岗位配置；每轮起一个 `codex exec --json` 进程，同一对话用 `resume` 续接、只交新消息；超时整组终止；用量计入岗位预算。用假 codex 跑通了；真实 Codex 的验收见下面“真实验收：Codex”一条
+- [x] Claude Code 引擎（backlog E-6，`docs/ip/m2-spec.md` D-36）：`engines` 里写 `kind: claude_code`。每轮起一个 `claude -p --bare --restricted --output-format stream-json` 进程，同一对话用 `--resume` 续接、只交新消息，系统提示词放文件传；文件工具只能动工作目录，要人批准的一律拒绝，`allowed_tools` 预先放行命令；组织工具经 `/mcp` 回调，令牌从环境变量展开、不进参数；按 `usage` 和价格记账（不用续接时累计的 `total_cost_usd`）。和 Codex 共用进程管理。用本机 Claude Code 2.1.330 连假的模型接口核对过参数和输出格式，`ip serve` 里派任务、经 `/mcp` 交回、续接、放行和拒绝命令都走通；没用真的 Claude 模型跑过
 - [x] Docker 部署：`rust/Dockerfile`、`docker-compose.yml`、`deploy/env.example`；镜像带 bubblewrap，可选带 Codex；以 uid 10001 运行，数据放命名卷，端口只绑本机。在容器里用假模型跑通了沙箱里的 shell，`ip check`、健康检查、令牌校验都测过；真实模型、Slack、Codex 和其他验收一起做。见[《用 Docker 部署》](../docs/ip/deploy-docker.md)
+- [x] Docker 部署的资源上限（backlog E-15 第一步）：`docker-compose.yml` 给容器整体设 `pids_limit`、`mem_limit`、`cpus`，可用 `.env` 覆盖；只用 `docker compose config` 校验过写法。这是容器整体的兜底
+- [ ] 每条 shell 命令的资源上限（backlog E-15 第二步）：`prlimit` 限内存、文件大小和进程数，`/tmp` 加 `--size`，`ip check` 报告是否生效
 - [x] 质量评测 `ip eval`（backlog B-1）：评测集 `evals/macro-smoke.yaml` 两个固定问题（有数据的、一半取不到的），检查项全由程序判定；2026-11-12 用 `gpt-6-luna` 真实跑两遍，都是 2/2 通过，每遍不到 0.01 美元，结果在 `docs/ip/evals/2026-11-12-luna/`
-- [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（容器只能经代理出网，backlog E-12）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
-- [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账还没修（E-10）
+- [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（当时容器只能经代理出网、Socket Mode 不走代理，backlog E-12；现在已能直接走代理，经真实代理没验）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
+- [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账 2026-11-16 修了（E-10，只用假 codex 测过）
 
 **M0 验收**：在云主机上用一个可执行文件启动；通过 WebSocket 和一个岗位对话，它能在沙箱里跑 shell 命令；中文能搜到历史消息；启动、内存、并发三项达到方案里的性能目标。
 
@@ -186,7 +189,7 @@ docker compose up -d --build
 
 设计见 [`docs/ip/context-memory-design.md`](../docs/ip/context-memory-design.md)，分 7 步做。
 
-- [x] 第 1 步：系统提示词多两层，决策者笔记和岗位记忆摘要，按岗位存在设置表里，排在稳定内容之后；`memory` 配置（默认关，可限定岗位，两层各有字数上限）；`ip context show / set / clear` 查看和修改，服务运行时也能改，下一轮生效；`ip bench store` 加了每轮读这两层的耗时。只用假模型测过
+- [x] 第 1 步：系统提示词多两层，决策者笔记和岗位记忆摘要，按岗位存在设置表里，排在稳定内容之后；`memory` 配置（当时默认关，2026-11-16 起默认开，可限定岗位，两层各有字数上限）；`ip context show / set / clear` 查看和修改，服务运行时也能改，下一轮生效；`ip bench store` 加了每轮读这两层的耗时。只用假模型测过
 - [x] 第 2 步：后台任务从凉下来的对话里按岗位提炼摘要（默认闲置 6 小时后，每轮最多 2 份）。交给模型前和存库前都做密钥脱敏；费用记在岗位当天的账上，预算剩余不到 25% 时不提炼；失败退避重试；外部渠道的对话默认不进记忆，从渠道对话派出去的执行对话（顺着任务的派活来源往上查）也一样（#67）。`ip context show` 能看到提炼结果。只用假模型测过
 - [x] 第 3 步：同一个后台任务里，每轮提炼之后按岗位把对话摘要合并成岗位记忆摘要，员工下一轮开工就带上。选中的对话摘要（默认 30 天内用过或生成的，最多 256 份）和上次合并时一样就不调模型；没变的只给标题，新增和改过的给全文；失败或没有输出时保留旧的一版。默认用岗位自己的模型，可用 `memory.consolidation_model` 另指定。分批合并时，暂缓更新的摘要保留已合并版本的来源记录，后续过期或移除仍能清理。只用假模型测过
 - [x] 第 4 步：开了记忆的岗位多两个只读工具。`memory_search` 在本岗位的对话记忆里按词查找，`memory_read` 读一份全文；岗位取自调用者本人，别的岗位的搜不到也读不到。读成功记一次使用，合并时用得多的优先、长期没人读的淘汰。`ip bench store` 加了搜索耗时（2000 份时 p95 约 8 毫秒）。只用假模型测过

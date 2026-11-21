@@ -119,6 +119,11 @@ pub fn migrate(connection: &Connection) -> rusqlite::Result<()> {
              session_id    TEXT NOT NULL,
              last_message  TEXT NOT NULL,
              updated_at_ms INTEGER NOT NULL,
+             -- 这个会话到上一轮为止累计报告的用量；续接时引擎报的是累计值，记账只记差值（D-23）。
+             used_prompt_tokens      INTEGER NOT NULL DEFAULT 0,
+             used_cached_tokens      INTEGER NOT NULL DEFAULT 0,
+             used_cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+             used_completion_tokens  INTEGER NOT NULL DEFAULT 0,
              PRIMARY KEY (agent_id, thread_id)
          ) WITHOUT ROWID;
          -- 岗位记忆：一个对话在一个岗位下的摘要（docs/ip/context-memory-design.md 5.8）。
@@ -150,5 +155,26 @@ pub fn migrate(connection: &Connection) -> rusqlite::Result<()> {
          CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
              body, content = '', contentless_delete = 1, tokenize = 'unicode61'
          );",
-    )
+    )?;
+    // 旧库的 engine_sessions 没有累计用量的四列，补上；默认 0，旧会话的下一轮按全量记一次。
+    for column in [
+        "used_prompt_tokens",
+        "used_cached_tokens",
+        "used_cache_write_tokens",
+        "used_completion_tokens",
+    ] {
+        add_column(connection, "engine_sessions", column, "INTEGER NOT NULL DEFAULT 0")?;
+    }
+    Ok(())
+}
+
+/// 表里没有这一列时加上。表名、列名和类型都是代码里写死的。
+fn add_column(connection: &Connection, table: &str, column: &str, definition: &str) -> rusqlite::Result<()> {
+    let exists = connection
+        .prepare(&format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"))?
+        .exists([column])?;
+    if !exists {
+        connection.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition};"))?;
+    }
+    Ok(())
 }

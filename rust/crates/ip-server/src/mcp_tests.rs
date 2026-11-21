@@ -82,7 +82,7 @@ async fn turn_token_acts_as_its_agent_in_its_thread() {
         .unwrap();
     let peer = client(s.addr, &token).await;
 
-    // 只开放组织工具（这个员工没有数据源和外部 MCP），没有 shell 和文件工具。
+    // 只开放组织工具和记忆工具（记忆默认开；这个员工没有数据源和外部 MCP），没有 shell 和文件工具。
     let mut names: Vec<String> = peer
         .list_all_tools()
         .await
@@ -91,7 +91,18 @@ async fn turn_token_acts_as_its_agent_in_its_thread() {
         .map(|t| t.name.to_string())
         .collect();
     names.sort();
-    assert_eq!(names, ["ask_human", "create_task", "list_tasks", "update_task"]);
+    assert_eq!(
+        names,
+        [
+            "ask_human",
+            "create_task",
+            "list_tasks",
+            "memory_note",
+            "memory_read",
+            "memory_search",
+            "update_task"
+        ]
+    );
 
     let (ok, out) = call(&peer, "create_task", json!({"title": "整理 10 月 PPI"}))
         .await
@@ -197,6 +208,9 @@ async fn hub_connects_to_a_remote_server_over_http() {
             "mcp__remote__ask_human",
             "mcp__remote__create_task",
             "mcp__remote__list_tasks",
+            "mcp__remote__memory_note",
+            "mcp__remote__memory_read",
+            "mcp__remote__memory_search",
             "mcp__remote__update_task"
         ]
     );
@@ -241,7 +255,7 @@ async fn hub_connects_to_a_remote_server_over_http() {
         },
     );
     let hub = ip_mcp::McpHub::connect_with_env(&configs, &env).await.unwrap();
-    assert_eq!(hub.specs_for(&"macro-researcher".into()).len(), 4);
+    assert_eq!(hub.specs_for(&"macro-researcher".into()).len(), 7);
     assert_eq!(hub.unavailable().len(), 1);
     assert_eq!(hub.unavailable()[0].name, "broken");
     hub.shutdown().await;
@@ -367,7 +381,7 @@ async fn assert_mcp_startup_degrades(failure: StartupFailure) {
     assert_eq!(*state.methods.lock().unwrap(), expected_methods);
 
     let specs = hub.specs_for(&role);
-    assert_eq!(specs.len(), 8);
+    assert_eq!(specs.len(), 14);
     assert!(specs.iter().all(|s| !s.name.starts_with("mcp__b_broken__")));
     for name in ["a_healthy", "c_healthy"] {
         let out = hub

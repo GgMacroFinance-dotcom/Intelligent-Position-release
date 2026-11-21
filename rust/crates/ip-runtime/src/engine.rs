@@ -29,6 +29,9 @@ pub struct TurnContext<'a> {
     pub workspace: Option<&'a Path>,
     /// 引擎在这个对话里已有的会话。为 `None` 时是第一轮，要把 `system_prompt` 一并交给引擎。
     pub session: Option<&'a str>,
+    /// `session` 到上一轮为止累计报告的用量；没有会话时全是 0。
+    /// 续接时报累计用量的引擎（Codex）用它算出这一轮的差值，见 [`TurnReport::session_usage`]。
+    pub session_usage: Usage,
     /// 组织规则、岗位说明、同事名单，和内置循环用的一样。
     pub system_prompt: &'a str,
     /// 上一轮之后对话里的新消息（不含员工自己写的），已整理成文字。
@@ -50,8 +53,12 @@ pub trait TurnSink: Send + Sync {
 pub struct TurnReport {
     /// 引擎内部的步数（工具调用加回复的条数），只用于展示。
     pub steps: u32,
+    /// 这一轮自己的用量，不含会话里以前几轮的。记账和计费都用它。
     pub usage: Usage,
     pub cost_usd: f64,
+    /// 会话到这一轮为止的累计用量，存进引擎会话表，下一轮经 [`TurnContext::session_usage`] 交回来。
+    /// `None` 表示这一轮没拿到用量（比如进程没起来），已存的累计值保持不变。
+    pub session_usage: Option<Usage>,
     /// 引擎的会话 id（新开或沿用），下一轮用它续接。
     pub session_id: Option<String>,
     /// 这一轮失败的原因；`None` 表示成功。

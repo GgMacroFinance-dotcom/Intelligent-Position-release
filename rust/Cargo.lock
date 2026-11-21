@@ -1033,6 +1033,7 @@ version = "0.8.0"
 dependencies = [
  "axum",
  "futures-util",
+ "hyper-util",
  "ip-core",
  "reqwest",
  "serde",

@@ -66,7 +66,7 @@ cd Intelligent-Position-release/rust && cargo build --release --locked
 | ✗ 渠道 slack：机器人令牌不能用 | `SLACK_BOT_TOKEN` 不对，或者应用没装进工作区 |
 | ✗ 渠道 slack：应用级令牌不能用 | `SLACK_APP_TOKEN` 不对，或者应用没打开 Socket Mode |
 | `ip check` 全过，但在 Slack 里 @ip 没有任何反应，服务日志也没动静 | 多半是应用的 “Event Subscriptions” 没开，或者权限比清单少。这两样 `ip check` 查不出来。在应用设置的 “App Manifest” 里重贴 `examples/slack/manifest.yaml`，保存后重装应用。另外 @ip 要从弹出的列表里选中机器人，直接粘贴的文字不算提及 |
-| 主机只能经代理出网，`ip serve` 连不上 Slack | Socket Mode 连接不走 `HTTPS_PROXY`（backlog E-12），目前要用能直接出网的主机 |
+| 主机只能经代理出网，`ip serve` 连不上 Slack | Socket Mode 会按 `HTTPS_PROXY`/`NO_PROXY` 走代理的 CONNECT 隧道（M2 规格 D-37），日志“Slack Socket Mode 已连接”里写明是直连还是经哪个代理。看服务日志里“连接 Socket Mode 失败”的原因：407 是代理要认证，把用户名密码写进代理地址（`http://用户名:密码@主机:端口`）；403 是代理不放行 Slack 的 `wss-primary.slack.com` 等主机，找代理管理员加放行；`slack.com` 写进了 `NO_PROXY` 就会绕过代理直连。代理不允许 `CONNECT` 时，退路是在本机起一个转发器（见 [2026-11-16 验收记录](acceptance-2026-11-16-slack.md)），或者换能直接出网的主机。经真实代理连真实 Slack 还没验过 |
 
 - [ ] `ip check` 全部 ✓（`数据源 public` 除外）
 

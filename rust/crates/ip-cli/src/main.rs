@@ -30,7 +30,7 @@ enum Command {
         #[arg(long)]
         config: Option<PathBuf>,
     },
-    /// 逐项检查配置里的端点、密钥、数据源、MCP 服务器、Codex 和 Slack 能不能用。有失败时退出码为 1。
+    /// 逐项检查配置里的端点、密钥、数据源、MCP 服务器、外部引擎（Codex、Claude Code）和 Slack 能不能用。有失败时退出码为 1。
     Check {
         /// 组织配置文件。
         #[arg(long)]

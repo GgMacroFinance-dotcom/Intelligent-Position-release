@@ -264,10 +264,17 @@ async fn engine_sessions_upsert_without_events_and_survive_reopen() {
             session_id: "sess-1".into(),
             last_message: "m1".into(),
             updated_at_ms: 1,
+            used: crate::SessionUsage::default(),
         };
         store.put_engine_session(s.clone()).await.unwrap();
         s.last_message = "m2".into();
         s.updated_at_ms = 2;
+        s.used = crate::SessionUsage {
+            prompt_tokens: 25_006,
+            cached_tokens: 12_489,
+            cache_write_tokens: 12_511,
+            completion_tokens: 23,
+        };
         store.put_engine_session(s).await.unwrap();
         // 每轮都会更新，不写事件日志。
         assert_eq!(store.last_seq().await.unwrap(), before);
@@ -278,7 +285,49 @@ async fn engine_sessions_upsert_without_events_and_survive_reopen() {
         (s.session_id.as_str(), s.last_message.as_str(), s.updated_at_ms),
         ("sess-1", "m2", 2)
     );
+    // 累计用量跟着会话存下来，重开还在。
+    assert_eq!(
+        (
+            s.used.prompt_tokens,
+            s.used.cached_tokens,
+            s.used.cache_write_tokens,
+            s.used.completion_tokens
+        ),
+        (25_006, 12_489, 12_511, 23)
+    );
     assert_eq!(store.engine_session(&agent, &"t2".into()).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn engine_sessions_from_an_older_database_gain_the_usage_columns() {
+    let path = temp_db("engine-old");
+    {
+        // 加累计用量之前的表结构，带一行旧会话。
+        let old = rusqlite::Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE engine_sessions (
+                 agent_id      TEXT NOT NULL,
+                 thread_id     TEXT NOT NULL,
+                 engine        TEXT NOT NULL,
+                 session_id    TEXT NOT NULL,
+                 last_message  TEXT NOT NULL,
+                 updated_at_ms INTEGER NOT NULL,
+                 PRIMARY KEY (agent_id, thread_id)
+             ) WITHOUT ROWID;
+             INSERT INTO engine_sessions VALUES ('ops-1', 't1', 'codex', 'sess-old', 'm9', 7);",
+        )
+        .unwrap();
+    }
+    // 打开两次：补列只做一次，第二次不报错。
+    drop(Store::open(&path).unwrap());
+    let store = Store::open(&path).unwrap();
+    let s = store
+        .engine_session(&"ops-1".into(), &"t1".into())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((s.session_id.as_str(), s.last_message.as_str()), ("sess-old", "m9"));
+    assert_eq!(s.used, crate::SessionUsage::default());
 }
 
 #[tokio::test]

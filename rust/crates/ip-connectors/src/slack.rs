@@ -3,7 +3,8 @@
 //! - 收：`apps.connections.open` 拿到 wss 地址连上；每个信封先原样存下（`Hub::stash`），再回 `envelope_id`
 //!   确认，再交给后台任务按顺序处理，确认不会被处理慢的消息耽误。处理时 `auth.test` 或 Hub 暂时失败就退避重试，
 //!   成功后才算处理完；进程在确认之后、处理完之前退出，重启时接着处理（D-28）。
-//!   收到 `disconnect` 就换新地址重连，断线退避重连。
+//!   收到 `disconnect` 就换新地址重连，断线退避重连。设了 `HTTPS_PROXY` 时 WebSocket 经代理的 CONNECT 隧道连接，
+//!   `NO_PROXY` 里的主机直连，规则和 Web API 一样（D-37，见 `ws_proxy`）。
 //! - 会话：`<team>/<channel>/<thread_ts>`，顶层消息的 `thread_ts` 就是它自己的 `ts`，回复总在线程里。
 //! - 发：`chat.postMessage`（文字用 `markdown` 块，卡片用 Block Kit 按钮）、`chat.update`（卡片选定后去掉按钮）、
 //!   `chat.postEphemeral`（不符合 `approvers` 的点击，只给点的人看原因）。
@@ -20,6 +21,7 @@ use serde_json::{Value, json};
 use tokio::sync::{OnceCell, mpsc};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
+use crate::ws_proxy::WsConnector;
 use crate::{
     BoxFuture, CancellationToken, CardClick, Channel, DeliverError, Delivered, Hub, HubError, Inbound, Outbound,
     Sender, Settle, Stashed,
@@ -96,6 +98,8 @@ struct Me {
 pub struct SlackChannel {
     config: SlackConfig,
     http: reqwest::Client,
+    /// 建 Socket Mode 连接用，按 `HTTPS_PROXY`/`NO_PROXY` 走代理（D-37）。
+    ws: WsConnector,
     me: OnceCell<Me>,
     names: Mutex<HashMap<String, (String, Instant)>>,
 }
@@ -149,9 +153,14 @@ enum Ended {
 
 impl SlackChannel {
     pub fn new(config: SlackConfig) -> Arc<Self> {
+        Self::with_connector(config, WsConnector::from_env())
+    }
+
+    fn with_connector(config: SlackConfig, ws: WsConnector) -> Arc<Self> {
         Arc::new(Self {
             config,
             http: reqwest::Client::new(),
+            ws,
             me: OnceCell::new(),
             names: Mutex::default(),
         })
@@ -264,11 +273,13 @@ impl SlackChannel {
             .await
             .map_err(|e| format!("apps.connections.open 失败：{e}"))?;
         let url = str_of(&open, "url");
-        let (ws, _) = tokio_tungstenite::connect_async(url)
+        let (ws, via) = self
+            .ws
+            .connect(url)
             .await
             .map_err(|e| format!("连接 Socket Mode 失败：{e}"))?;
         let (mut write, mut read) = ws.split();
-        tracing::info!(channel = %self.config.name, "Slack Socket Mode 已连接");
+        tracing::info!(channel = %self.config.name, proxy = via.as_deref().unwrap_or("直连"), "Slack Socket Mode 已连接");
         loop {
             let frame = tokio::select! {
                 () = shutdown.cancelled() => {

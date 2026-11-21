@@ -586,3 +586,46 @@ fn splitting_and_parsing_helpers() {
     let m = parse_message(&in_thread, &me, "T1", &[]).unwrap();
     assert_eq!((m.conversation.as_str(), m.may_start), ("T1/C1/1.0", true));
 }
+
+/// D-37：设了代理时，Socket Mode 经代理的 CONNECT 隧道连上假 Slack，事件照常收到、确认。
+/// 用的是本地假代理和假 Slack，不是真实的代理和 Slack。
+#[tokio::test]
+async fn socket_mode_connects_through_http_proxy() {
+    use crate::ws_proxy::WsConnector;
+    use crate::ws_proxy::fake_proxy::{FakeProxy, Mode};
+
+    let fake = FakeSlack::start().await;
+    fake.set_user("U1", "张三");
+    let proxy = FakeProxy::start(Mode::Allow).await;
+    let channel = SlackChannel::with_connector(
+        SlackConfig {
+            name: "slack".into(),
+            bot_token: "xoxb-test".into(),
+            app_token: "xapp-test".into(),
+            api_url: fake.api_url(),
+            allow_channels: Vec::new(),
+            retry: quick_retry(),
+        },
+        // 假 Slack 给的是 ws:// 地址，所以走 HTTP_PROXY 那一项。
+        WsConnector::with_proxy(&proxy.url(), &proxy.url(), ""),
+    );
+    let hub = Arc::new(Recorder::default());
+    let shutdown = CancellationToken::new();
+    let task = tokio::spawn(channel.clone().run(hub.clone(), shutdown.clone()));
+    fake.wait_connected(1).await;
+    let requests = proxy.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with("CONNECT 127.0.0.1:"), "{}", requests[0]);
+
+    let id = fake
+        .event(json!({"type": "app_mention", "user": "U1", "text": "<@UBOT> 经代理", "ts": "1.0", "channel": "C1"}));
+    wait_until("消息交给 Hub", || !hub.messages.lock().unwrap().is_empty()).await;
+    wait_until("信封确认", || fake.acks().contains(&id)).await;
+    assert_eq!(hub.messages.lock().unwrap()[0].text, "经代理");
+
+    shutdown.cancel();
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+}
