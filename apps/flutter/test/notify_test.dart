@@ -12,6 +12,10 @@ void main() {
   test('通知 id 由标签算出来，同一标签同一个 id，都是正的 31 位', () {
     expect(alertId('approval:a1'), alertId('approval:a1'));
     expect(alertId('approval:a1'), isNot(alertId('approval:a2')));
+    // Android 原生弹锁屏推送（F-21，IpPush.kt）用同样的算法，WebPushCryptoTest.kt 里核对同样这三个数。
+    expect(alertId(''), 18652613);
+    expect(alertId('approval:a1'), 518277434);
+    expect(alertId('thread:对话'), 157519743);
     for (final t in ['', 'thread:t1', 'task:${'x' * 200}']) {
       expect(alertId(t), inInclusiveRange(0, 0x7fffffff));
     }

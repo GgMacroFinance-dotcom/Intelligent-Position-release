@@ -425,6 +425,14 @@ extension IpRequests on IpClient {
   /// 告诉主机 App 在不在前台（m2-spec D-33）：在前台时主机不给这台设备推送，30 秒没报 `true` 就当不在。
   Future<void> presence(bool active) => rpc(w.RequestPresence(active: active));
 
+  /// 登记锁屏推送的订阅（m2-spec D-33、D-35）：`endpoint` 是推送中转给的地址，`p256dh`、`auth` 是这台手机的
+  /// Web Push 公钥。同一个地址再登记是更新。日常权限就能用。
+  Future<void> subscribePush(String endpoint, String p256dh, String auth) =>
+      rpc(w.RequestSubscribePush(endpoint: endpoint, p256dh: p256dh, auth: auth));
+
+  /// 删掉一个推送订阅。
+  Future<void> unsubscribePush(String endpoint) => rpc(w.RequestUnsubscribePush(endpoint: endpoint));
+
   /// 今天（UTC）各岗位和语义分派的模型费用。
   Future<SpendToday> spendToday() async => SpendToday.fromJson(await _object(const w.RequestSpendToday()));
 

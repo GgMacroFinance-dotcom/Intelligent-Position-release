@@ -13,12 +13,32 @@ intelligent-position 的 App，一份 Dart 代码出 Android、iOS、macOS、Win
 - **岗位**（F-15）：今天的模型费用合计和提示词缓存命中率；每个岗位的模型、今天花费对比每日预算、缓存命中、员工（点了和他开新对话）、最近的报告。
 - **我**：连的主机、设备名、权限、协议版本；这台设备的通知设置；断开并忘掉这台主机。
 - **管理**（F-18，只给“管理”权限的设备，在“我”页里）：**设备**页添加设备（6 位配对码、二维码、配对链接）、改名、改权限、吊销；**定时任务**页看下次和上次运行，立即运行一次；**记忆**页按岗位改决策者笔记和岗位记忆摘要，删更正，抹掉、关掉对话的记忆，清空；**路由规则**页试一试、采纳或忽略规则草案、编辑整套规则（条件、交给谁、顺序、语义匹配、兜底）。
-- **系统通知**（F-16）：App 不在前台（手机切到别的 App、桌面窗口没有焦点）时，主机发来的通知弹成系统通知，同一件事的新通知替换旧的，在别处处理过了就撤掉；点通知去那个对话，没有对话的去待办。通知哪些事、带不带预览、静音、按岗位关，在“我”页改，存在主机上（和控制台“设备与通知”页是同一份设置）。连上主机后才向系统要通知权限。手机锁屏、App 被系统关掉以后暂时收不到（F-21）。
+- **系统通知**（F-16）：App 不在前台（手机切到别的 App、桌面窗口没有焦点）时，主机发来的通知弹成系统通知，同一件事的新通知替换旧的，在别处处理过了就撤掉；点通知去那个对话，没有对话的去待办。通知哪些事、带不带预览、静音、按岗位关，在“我”页改，存在主机上（和控制台“设备与通知”页是同一份设置）。连上主机后才向系统要通知权限。手机锁屏、App 被系统关掉以后要靠下面的锁屏推送。
 - **桌面托盘**（F-17，macOS、Windows、Linux）：关窗口只是藏到托盘，连接不断，照样弹通知；从托盘菜单“退出”才真的退出。托盘提示“N 件待办”，macOS、Linux 图标旁边再显示数字。托盘菜单里勾“开机启动”：Linux、Windows 开机后只在托盘里，不弹窗口；macOS 要 13 以上，在“系统设置 > 通用 > 登录项”里也能关。点托盘图标、点通知、再打开一次 App 都把开着的那个窗口叫出来，不另起一个。Linux 的托盘要桌面支持 AppIndicator（GNOME 要装 AppIndicator 扩展）。
 - **扫码配对**（F-19，Android、iOS、macOS）：“连接主机”页点“扫配对二维码”，扫控制台或 App“设备”页上的码，扫到后和手填一样先确认主机再配对。相机画面在本机解码（纯 Dart 的 zxing2），不用谷歌的 ML Kit。第一次扫时系统会要相机权限。
+- **锁屏推送**（F-21，先做了 Android）：App 被系统关掉、手机锁屏以后也能收到通知。连上主机、有了通知权限后，App 向推送中转（`rust/crates/ip-relay`）登记 FCM 令牌和这台手机自己的 Web Push 公钥，再把中转给的地址告诉主机；主机照旧发加密的 Web Push，中转原样转给 FCM，手机上的原生代码（`android/app/src/main/kotlin/…/IpPush.kt`）用自己的私钥解开后弹通知，中转看不到内容。“已在别处处理”直接撤掉原来那条。“我”页“这台设备的通知”里有“锁屏推送”开关，关掉会删掉主机上的订阅和手机上的密钥。要谷歌 Play 服务；构建时没给推送参数（见下）就没有这个功能。iPhone 还没做。
 - 断线自动重连（500 毫秒起翻倍，最多 8 秒），带上次的事件序号让主机补发断开期间的事件；补不上就整个重新拉。App 从后台回到前台时马上重连。主机吊销了这台设备（401）时不再重连，提示重新配对。
 
-还没有的（按顺序做，见 backlog）：手机锁屏推送（F-21）。
+还没有的（按顺序做，见 backlog）：iPhone 的锁屏推送（F-21 之五）；锁屏推送还没用真的 Firebase、推送中转在真手机上收过。
+
+## 锁屏推送的构建参数（F-21）
+
+Firebase 的配置和推送中转的地址不放进仓库，构建 Android 版时给：
+
+```sh
+flutter build apk --release \
+  --dart-define=IP_PUSH_RELAY=https://push.example.com \
+  -PIP_FCM_APP_ID=1:1234567890:android:abc -PIP_FCM_API_KEY=… \
+  -PIP_FCM_PROJECT_ID=ip-demo -PIP_FCM_SENDER_ID=1234567890
+```
+
+`-P` 的四项也可以用同名的环境变量给，值在 Firebase 控制台“项目设置”里这个 Android 应用下面（包名 `dev.intelligent_position.ip_app`）。都没给时 App 照常能用，只是“锁屏推送”开关是灰的。主机的 `ip.yaml` 要把中转的域名写进 `push.hosts`（m2-spec D-35）。
+
+解密的单元测试（RFC 8291 的例子、和 Dart 那边同样的通知 id）在 JVM 上跑，要 Android SDK：
+
+```sh
+cd android && ./gradlew :app:testDebugUnitTest
+```
 
 ## 协议类型从 Rust 生成（F-20）
 
@@ -58,6 +78,7 @@ cd ../apps/flutter && dart run tool/gen_protocol.dart
 | `lib/src/storage.dart` | 主机列表和令牌放安全存储 |
 | `lib/src/qr/` | 扫二维码（F-19）：`decode.dart` 把相机画面转成灰度图再用 zxing2 解，`scanner.dart` 是各平台的相机 |
 | `lib/src/notifications.dart` | 系统通知：弹、按标签撤、点开回调（F-16） |
+| `lib/src/push/lock_push.dart` | 锁屏推送（F-21）：向推送中转登记、`subscribe_push`、令牌变了换地址、开关；原生那一半在 `android/app/src/main/kotlin/dev/intelligent_position/ip_app/`（`IpPush.kt` 收 FCM、存密钥、弹通知，`WebPushCrypto.kt` 解密） |
 | `lib/src/desktop/` | 桌面的托盘和窗口（`shell.dart`）、开机启动（`autostart.dart`）（F-17）；只开一个、`--hidden` 在 `linux/runner/`、`windows/runner/` 里，macOS 的开机启动在 `macos/Runner/MainFlutterWindow.swift` |
 | `lib/src/app_state.dart` | App 的状态：连接、员工、对话、审批、任务、哪些员工正在处理或上一轮失败 |
 | `lib/src/star_map.dart` | 星图的数据：谁坐太阳、每位员工的紧急度、重要度、理由和天体 |
@@ -99,7 +120,7 @@ flutter build linux --release
 
 CI 的 `flutter` 工作流在 PR 改到 `apps/flutter/` 或 `rust/web/src/types/` 时跑上面这些（只用 Linux）。五个平台的安装包只在手动触发或打 `app-v*` 标签时打：Linux、Android（APK，调试签名）、macOS、iOS（不签名，只看能不能编过）、Windows。都没有签名证书。
 
-依赖只用和 Apache-2.0 兼容的许可（BSD、MIT、Apache-2.0），`tool/check_licenses.dart` 按每个包的 LICENSE 正文查，认不出的就失败。现在的直接依赖：`flutter_secure_storage`、`flutter_markdown_plus`、`markdown`、`url_launcher`、`flutter_local_notifications`（都是 BSD-3-Clause），`tray_manager`、`window_manager`（MIT），扫码用的 `camera`、`zxing2`（BSD-3-Clause）和 `camera_macos`（MIT）。按包放行的例外只有 `dbus`（MPL-2.0，`flutter_local_notifications` 在 Linux 上用，原样使用）。
+依赖只用和 Apache-2.0 兼容的许可（BSD、MIT、Apache-2.0），`tool/check_licenses.dart` 按每个包的 LICENSE 正文查，认不出的就失败。现在的直接依赖：`flutter_secure_storage`、`flutter_markdown_plus`、`markdown`、`url_launcher`、`flutter_local_notifications`（都是 BSD-3-Clause），`tray_manager`、`window_manager`（MIT），扫码用的 `camera`、`zxing2`（BSD-3-Clause）和 `camera_macos`（MIT）。按包放行的例外只有 `dbus`（MPL-2.0，`flutter_local_notifications` 在 Linux 上用，原样使用）。Android 原生那边另有两个 Gradle 依赖：`com.google.firebase:firebase-messaging`（Apache-2.0，运行时要手机上闭源的谷歌 Play 服务）和 `androidx.core`（Apache-2.0）；只在测试时用的 `junit`（EPL-1.0）不进 App。
 
 ## 连真主机的端到端测试
 
@@ -120,9 +141,10 @@ flutter test integration_test -d <设备> \
 
 2026-11-21：
 
-- `flutter test`：69 个测试，假主机。
+- `flutter test`：118 个测试，假主机。
 - 真的 Linux 版 App（Xvfb 虚拟屏幕、GNOME 钥匙串）连本机真的 `ip serve`，**模型是假的**（一个本机的假 OpenAI 流式接口，回固定文字）：端到端测试在宽屏（1280 像素）和手机宽度（390 像素）各跑通一次；另外用 `xdotool` 在发布版里用真键盘配对、连发两条消息、Shift+Enter 换行。
 - 星图：同一台假模型的主机上配了一位协调员和十位员工，用脚本造了员工提问、协调员派活、任务过期、受阻、快到期、一轮失败、慢回复几种情况，在真的 Linux 版里看了位置、大小、理由和气泡，宽屏和手机宽度都点过。Impeller 的 GL 后端在这台机器的 Mesa 软件渲染上画 1 像素的圆描边会出方块、在透明度图层里画背景模糊会整块丢掉，已经绕开（轨道画成折线，气泡不做淡入动画）；真显卡上没试过。
 - 待办和看报告（F-14）：同一台主机上把手写的报告放进员工工作目录，在真的 Linux 版（手机宽度）里从完成的任务结果打开报告、在报告里打开上一份、把受阻的任务改成已取消，主机上核对过状态。
 - 任务页和岗位页（F-15）：真的 Linux 版（手机宽度）里用真键盘新建了任务（选负责人、选截止日期），主机上署了设备名、另开了执行对话；岗位页显示了主机算的当天费用和缓存命中，从岗位页点开和员工的新对话。
-- Android、iOS、macOS、Windows 没编过也没跑过（容器里没有 Android SDK 和 Xcode）；CI 的安装包任务没触发过。真手机、真主机上的 HTTPS、Tailscale 都没试过。
+- 锁屏推送（F-21 之四）：`flutter test` 里 7 个测试用假的推送通道和假中转走登记、换令牌、开关、点通知；Kotlin 的解密用 RFC 8291 附录 A 的例子在 JVM 上核对过（`./gradlew :app:testDebugUnitTest`，4 个）。没用真的 Firebase 项目、没在真手机上收过推送。
+- Android：2026-11-21 在容器里装了 Android SDK，`flutter build apk --debug` 编过（改锁屏推送之前和之后各一次），没在模拟器或真手机上跑过。iOS、macOS、Windows 没编过也没跑过（容器里没有 Xcode）；CI 的安装包任务没触发过。真手机、真主机上的 HTTPS、Tailscale 都没试过。

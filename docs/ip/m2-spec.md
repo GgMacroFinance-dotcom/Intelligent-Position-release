@@ -948,7 +948,8 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
   - 连上主机、要到系统通知权限后，拿设备推送令牌（iOS 向 APNs 要，Android 向 FCM 要），生成 P-256 密钥对和 16 字节的 `auth`，向中转登记，再 `subscribe_push`。私钥放系统安全存储；iOS 的通知扩展要读到它，放在 App 和扩展共用的钥匙串分组里。不上传。
   - 收到后按 F-16 的规则弹通知：同标签替换；`silent` 的“已在别处处理”直接按标签撤掉原来那条（原生 App 能做到，浏览器做不到）。点通知去那个对话，没有对话的去“待办”。
   - 推送令牌、中转地址变了就重新登记、重新 `subscribe_push`（同一台设备同一个地址替换）。在“我”页关掉锁屏推送、断开主机时 `unsubscribe_push`；设备被吊销时主机已经会删它的订阅（D-33）。
-- **不重复打扰**：App 已经按 D-33 报 `presence`（F-16），在前台时主机不推。App 在后台但连接还在时，`alert` 和推送都会到，App 按标签去重，同一个标签 10 分钟内只弹一次。
+- **不重复打扰**：App 已经按 D-33 报 `presence`（F-16），在前台时主机不推。App 在后台但连接还在时，`alert` 和推送都会到：两边用同一个通知 id（标签的 FNV-1a，和 F-16 一样），后到的只替换、不再响铃（Android 的 `setOnlyAlertOnce`）。
+- **Android 的实现**（F-21 之四）：收 FCM、解密、弹通知都在原生代码里（`IpPush.kt`、`WebPushCrypto.kt`），App 被杀掉后 FCM 叫起服务就能弹，不用启动 Flutter。中转在 FCM 的数据消息里另带 `urgency`（`high` 或 `normal`），App 按它选“要我处理的”或“员工回复和任务完成”通知渠道。私钥用 Android Keystore 里的一把 AES 密钥包起来，存在应用私有的 SharedPreferences。Firebase 的配置不进仓库（没有 `google-services.json`），构建时用 `-PIP_FCM_*` 给；中转地址用 `--dart-define=IP_PUSH_RELAY` 给。
 - **要维护者准备的**：苹果开发者账号（APNs 密钥，并用它给 iOS App 签名，Q-12）；一个 Firebase 项目（FCM 服务账号，Android App 的 `google-services.json`）；跑中转的主机和域名。没有这些之前，中转和 App 只用假的 APNs、FCM 测。
 - **Android 的依赖**：收 FCM 要谷歌 Play 服务（闭源）。官方 App 接受这一点；以后可以加 UnifiedPush 给没有 Play 服务的手机，主机这边不用再改。
 - 测试：主机加白名单的单元测试（`push.hosts` 里的认、相近的写法不认）和配置检查；`/ws` 集成测试用假中转走一遍 App 式的订阅。中转用假的 APNs、FCM 测登记、封条解不开、转发的字段、令牌失效回 410、限流。App 用假的推送通道测登记、换令牌、关掉、收到后解密弹通知和撤销。没有在真的 APNs、FCM 和真手机上跑过之前，不写“可用”。

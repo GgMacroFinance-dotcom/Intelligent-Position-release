@@ -34,6 +34,19 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 锁屏推送（F-21）：FCM 叫起这个服务，解密后弹通知（IpPush.kt）。 -->
+        <service
+            android:name=".IpPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+        <!-- 没有 google-services.json，不让 Firebase 在启动时自己初始化；配了时由 IpPush.ensureFirebase 初始化。 -->
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider"
+            tools:node="remove"/>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

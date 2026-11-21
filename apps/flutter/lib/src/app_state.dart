@@ -9,6 +9,7 @@ import 'notifications.dart';
 import 'pairing.dart';
 import 'protocol/client.dart';
 import 'protocol/models.dart';
+import 'push/lock_push.dart';
 import 'qr/scanner.dart';
 import 'storage.dart';
 
@@ -23,6 +24,7 @@ class AppState extends ChangeNotifier {
     this.notifier = const SilentNotifier(),
     this.presenceEvery = const Duration(seconds: 20),
     this.scanner,
+    this.lockPush,
   }) : _clientFactory = clientFactory ?? ((h, t) => IpClient(wsUri: h.wsUri, token: t)),
        _pairer = pairer ?? claimPairing;
 
@@ -36,6 +38,9 @@ class AppState extends ChangeNotifier {
 
   /// 扫配对二维码用的相机（F-19）；这个平台不能扫码时为 null，连接页不显示“扫码”。
   final QrScanner? scanner;
+
+  /// 锁屏推送（F-21）；这个平台或构建没有时为 null，“我”页不显示开关。
+  final LockPush? lockPush;
   final ClientFactory _clientFactory;
   final Pairer _pairer;
 
@@ -158,6 +163,16 @@ class AppState extends ChangeNotifier {
 
   Future<void> init() async {
     await notifier.init(_alertTapped);
+    final push = lockPush;
+    if (push != null) {
+      // 点锁屏推送的通知打开 App，和点本地通知一样去那个对话或“待办”。
+      push.channel.taps.listen((t) => _alertTapped(t.isEmpty ? null : t));
+      push.channel.tokenChanges.listen((_) => unawaited(_syncLockPush()));
+      try {
+        final t = await push.channel.takeTapped();
+        if (t != null) _alertTapped(t.isEmpty ? null : t);
+      } catch (_) {}
+    }
     final hosts = await store.hosts();
     if (hosts.isNotEmpty) {
       final token = await store.token(hosts.first.address);
@@ -184,6 +199,7 @@ class AppState extends ChangeNotifier {
   /// 断开并删掉这台主机和它的令牌。主机那边的设备记录要在控制台“设备”页吊销。
   Future<void> forgetHost() async {
     final h = host;
+    if (h != null) await lockPush?.forget(_client?.status == ConnStatus.open ? _client : null, h.address.text);
     await _disconnect();
     if (h != null) await store.forget(h.address);
     _reset();
@@ -258,7 +274,11 @@ class AppState extends ChangeNotifier {
     if (s == ConnStatus.open) {
       _reportPresence();
       // 第一次连上时向系统要通知权限：配对以前问，人还不知道要通知什么。
-      if (notificationsAllowed == null) unawaited(askNotificationPermission());
+      if (notificationsAllowed == null) {
+        unawaited(askNotificationPermission());
+      } else {
+        unawaited(_syncLockPush());
+      }
     }
     notifyListeners();
   }
@@ -268,6 +288,26 @@ class AppState extends ChangeNotifier {
   /// 向系统要通知权限。“我”页上被拒绝后可以再点一次。
   Future<void> askNotificationPermission() async {
     notificationsAllowed = await notifier.requestPermission();
+    notifyListeners();
+    await _syncLockPush();
+  }
+
+  /// 连着主机时登记锁屏推送（F-21）：同一个订阅再告诉主机一次，令牌变了换新的。
+  Future<void> _syncLockPush() async {
+    final push = lockPush;
+    final c = _client;
+    final h = host;
+    if (push == null || c == null || h == null || c.status != ConnStatus.open) return;
+    await push.sync(c, h.address.text, permitted: notificationsAllowed == true);
+  }
+
+  /// “我”页的锁屏推送开关。
+  Future<void> setLockPush(bool on) async {
+    final push = lockPush;
+    final h = host;
+    if (push == null || h == null) return;
+    final c = _client;
+    await push.setEnabled(on, c != null && c.status == ConnStatus.open ? c : null, h.address.text);
     notifyListeners();
   }
 

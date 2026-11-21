@@ -9,6 +9,7 @@ import 'src/app_state.dart';
 import 'src/desktop/autostart.dart';
 import 'src/desktop/shell.dart';
 import 'src/notifications.dart';
+import 'src/push/lock_push.dart';
 import 'src/qr/scanner.dart';
 import 'src/storage.dart';
 import 'src/ui/common.dart';
@@ -21,6 +22,10 @@ void main() {
     store: HostStore(SystemSecretStore()),
     notifier: LocalNotifier(),
     scanner: platformQrScanner(),
+    lockPush: switch (platformPushChannel()) {
+      final channel? => LockPush(channel: channel, relay: Uri.parse(pushRelay), store: SystemSecretStore()),
+      null => null,
+    },
   );
   runApp(IpApp(state: state));
   state.init();
