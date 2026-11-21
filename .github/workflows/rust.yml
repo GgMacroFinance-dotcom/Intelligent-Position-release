@@ -51,6 +51,9 @@ jobs:
       - name: Type-check web console
         working-directory: rust/web
         run: npx -y -p typescript@5.9.3 tsc -p tsconfig.json
+      - name: Unit-test web console
+        working-directory: rust/web
+        run: node --test test/*.test.mjs
 
   bench:
     runs-on: ubuntu-latest
@@ -69,3 +72,7 @@ jobs:
         run: ./target/release/ip bench store --check | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Concurrent agents targets
         run: ./target/release/ip bench agents --check | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Event fan-out and replay targets
+        run: ./target/release/ip bench events --check | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Notification rules targets
+        run: ./target/release/ip bench notify --check | tee -a "$GITHUB_STEP_SUMMARY"

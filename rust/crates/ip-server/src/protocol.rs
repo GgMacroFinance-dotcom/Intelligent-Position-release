@@ -168,6 +168,54 @@ pub enum Request {
     ListMemoryOffThreads,
     /// 关掉或重新打开一个对话的记忆。回复 `ThreadId[]`：改完后关掉了记忆的对话。
     SetThreadMemory { thread_id: ThreadId, enabled: bool },
+    /// 回复 `ReportInfo[]`：员工工作目录 `reports/` 下的报告，新改的在前。省略 `agent_id` 时列所有员工的。
+    ListReports {
+        #[serde(default)]
+        #[ts(optional)]
+        agent_id: Option<AgentId>,
+        #[serde(default)]
+        #[ts(optional)]
+        limit: Option<usize>,
+    },
+    /// 回复 `ReportText`：读一份报告，`path` 是 `list_reports` 给出的 `reports/<文件名>.md`。
+    ReadReport { agent_id: AgentId, path: String },
+    /// 回复 `WhoAmI`：这个连接是哪台设备、有什么权限。
+    WhoAmI,
+    /// 回复 `DeviceInfo[]`：配对过的设备。以下设备管理的请求都要“管理”权限。
+    ListDevices,
+    /// 回复 `NewPairing`：生成一个 2 分钟内有效的 6 位配对码。`link_base` 是控制台的地址，给了就附上扫码地址和二维码。
+    /// 新配对的设备是“日常”权限。
+    CreatePairing {
+        name: String,
+        #[serde(default)]
+        #[ts(optional)]
+        link_base: Option<String>,
+    },
+    /// 回复 `DeviceInfo[]`：改完后的设备列表。
+    RenameDevice { device_id: String, name: String },
+    /// 回复 `DeviceInfo[]`：改一台设备的权限，它连着的连接下一个请求就按新权限算。
+    SetDeviceScope {
+        device_id: String,
+        scope: crate::devices::Scope,
+    },
+    /// 回复 `DeviceInfo[]`：吊销一台设备，它的连接立即断开。
+    RevokeDevice { device_id: String },
+    /// 回复 `NotifySettings`：这台设备的通知设置（共用令牌连上的控制台共用一份）。
+    GetNotifySettings,
+    /// 改这台设备的通知设置，回复保存后的 `NotifySettings`。
+    SetNotifySettings { settings: crate::notify::NotifySettings },
+    /// 回复 `VapidKey`：浏览器订阅推送时要的主机公钥。
+    PushKey,
+    /// 登记这台设备上一个浏览器的推送订阅（`PushSubscription` 的地址和两把钥匙，base64url）。回复 `null`。
+    SubscribePush {
+        endpoint: String,
+        p256dh: String,
+        auth: String,
+    },
+    /// 删掉这台设备的一个推送订阅。回复 `null`。
+    UnsubscribePush { endpoint: String },
+    /// 页面在不在前台。在前台时不给这台设备推送，页面自己显示；页面每 20 秒报一次。回复 `null`。
+    Presence { active: bool },
     /// 回复 `SendResult`；员工的回复随后以事件推送。
     Send {
         /// 省略时由路由规则决定。
@@ -250,6 +298,42 @@ pub struct CorrectionView {
     pub applied_ms: Option<i64>,
 }
 
+/// `list_reports` 的一项。
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ReportInfo {
+    pub agent_id: AgentId,
+    /// 相对员工工作目录的路径，形如 `reports/2026-11-16-cpi.md`。
+    pub path: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    #[ts(type = "number")]
+    pub modified_ms: i64,
+}
+
+/// `who_am_i` 的回复。
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct WhoAmI {
+    /// 用设备令牌连上时是这台设备；共用令牌时为空。
+    pub device: Option<crate::devices::DeviceInfo>,
+    /// 这个连接的权限。共用令牌（或本机不设令牌）是“管理”。
+    pub scope: crate::devices::Scope,
+}
+
+/// `read_report` 的回复。
+#[derive(Clone, Debug, Serialize, TS)]
+#[ts(export)]
+pub struct ReportText {
+    pub agent_id: AgentId,
+    pub path: String,
+    pub text: String,
+    #[ts(type = "number")]
+    pub modified_ms: i64,
+    /// 文件超过 1 MB 时只给前 1 MB。
+    pub truncated: bool,
+}
+
 /// `list_rules` 的回复。
 #[derive(Clone, Debug, Serialize, TS)]
 #[ts(export)]
@@ -277,6 +361,18 @@ pub struct SendResult {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
 pub enum ServerFrame {
+    /// 连上后的第一帧（`docs/ip/m2-spec.md` D-29）。客户端收到它才算连上。
+    Hello {
+        /// 协议版本号，只有不兼容的改动才加一（服务端 `events.rs` 的 `PROTOCOL_VERSION`，控制台 `client.js` 的 `PROTOCOL`）。
+        protocol: u32,
+        /// 本次启动的标识。序号每次启动重新编号，重连补发时要和它一起用。
+        epoch: String,
+        /// 从哪个序号接着推：补发时是客户端给的 `since`，否则是当前最新的序号。
+        #[ts(type = "number")]
+        seq: u64,
+        /// 是否补发了断开期间的事件。为 false 时客户端要重新拉列表。
+        resumed: bool,
+    },
     /// 对某个请求的回复。`ok` 为 true 时看 `data`，否则看 `error`。
     Reply {
         id: Option<Value>,
@@ -288,13 +384,22 @@ pub enum ServerFrame {
         #[ts(optional)]
         error: Option<String>,
     },
-    /// 运行时事件，推给所有连接。装箱是因为事件远比另外两种帧大。
-    Event { event: Box<RuntimeEvent> },
-    /// 本连接处理太慢，跳过了 `skipped` 个事件；客户端应重新拉取历史。
+    /// 运行时事件，推给所有连接。装箱是因为事件远比其他帧大。
+    Event {
+        /// 事件序号，从 1 起、连续，每次启动重新编号。
+        #[ts(type = "number")]
+        seq: u64,
+        event: Box<RuntimeEvent>,
+    },
+    /// 本连接跳过了 `skipped` 个事件，留着的事件里也补不上；客户端应重新拉取。不知道跳过几个时为 0。
     Lagged {
         #[ts(type = "number")]
         skipped: u64,
     },
+    /// 要告诉人的一件事，已按这台设备的通知设置筛过（`docs/ip/m2-spec.md` D-32）。不编号，断开期间的不补发。
+    Alert { alert: crate::notify::Alert },
+    /// 撤掉这个标签的通知：审批卡在别处处理过了，或者受阻的任务又动起来了。
+    Dismiss { tag: String },
 }
 
 impl ServerFrame {

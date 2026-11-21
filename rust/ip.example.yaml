@@ -4,6 +4,7 @@
 data_dir: ./data                  # 数据库和各员工工作目录；相对路径以本文件所在目录为准
 # auth_token_env: IP_TOKEN        # 监听非本机地址（如 0.0.0.0）时必须设置
 # allowed_origins: [https://ip.example.com]  # 反向代理把 Host 改成上游地址时，写上控制台对外的地址
+# push: { contact: mailto:ops@example.com }   # Web Push 的联系方式，推送服务有问题时找谁；发给 iPhone、Safari 要有
 utc_offset: "+08:00"              # 员工看到的消息时间按这个时区显示（北京时间 +08:00）；省略时是 UTC。每日预算仍按 UTC 0 点重置
 org_prompt: |
   你在一家 AI 原生的研究机构工作。结论先行；引用数据注明来源和日期；不确定时直接说明。

@@ -33,12 +33,23 @@ pub struct App {
     /// 接上的外部渠道；关闭时先停掉它们。
     channels: Arc<tokio::sync::Mutex<Vec<crate::channels::ChannelHandle>>>,
     pub(crate) schedules: Arc<crate::schedule::Schedules>,
+    /// 有工作目录的员工和他们的工作目录，控制台从这里读报告（backlog F-4）。
+    pub(crate) workspaces: Arc<std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>>,
+    /// 编好号、留着备补发的事件（`docs/ip/m2-spec.md` D-29）。转发任务在第一个 `/ws` 连接进来时启动。
+    pub(crate) events: Arc<crate::events::EventLog>,
+    /// 配对过的设备和设备令牌（backlog F-7）。
+    pub(crate) devices: Arc<crate::devices::Devices>,
+    /// 通知规则和各设备的通知设置（backlog F-9）。服务启动时（或第一个 `/ws` 连接进来时）启动规则任务。
+    pub(crate) notifier: Arc<crate::notify::Notifier>,
+    /// Web Push 的密钥和订阅（backlog F-10）。
+    pub(crate) push: Arc<crate::webpush::WebPush>,
 }
 
 impl App {
     /// 测试和嵌入使用：直接给出运行时。
     pub fn new(runtime: Runtime, org: OrgSpec, token: Option<String>) -> Self {
         let (closing, _) = tokio::sync::watch::channel(false);
+        let store = runtime.store().clone();
         Self {
             runtime,
             org: Arc::new(org),
@@ -53,6 +64,11 @@ impl App {
             closing: Arc::new(closing),
             channels: Arc::default(),
             schedules: Arc::default(),
+            workspaces: Arc::default(),
+            events: Arc::default(),
+            devices: Arc::new(crate::devices::Devices::new(store.clone())),
+            notifier: Arc::new(crate::notify::Notifier::new(store.clone())),
+            push: Arc::new(crate::webpush::WebPush::new(store, None)),
         }
     }
 
@@ -63,11 +79,27 @@ impl App {
         self
     }
 
+    /// 告诉服务各员工的工作目录，控制台才能读他们写的报告。
+    #[must_use]
+    pub fn with_workspaces(
+        mut self,
+        workspaces: std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>,
+    ) -> Self {
+        self.workspaces = Arc::new(workspaces);
+        self
+    }
+
     /// 换上定时任务（还要调用 [`App::start_schedules`] 才会到点运行）。
     #[must_use]
     pub fn with_schedules(mut self, schedules: crate::schedule::Schedules) -> Self {
         self.schedules = Arc::new(schedules);
         self
+    }
+
+    /// 启动通知规则和 Web Push：页面都关着时也要推（backlog F-10）。
+    pub fn start_notifications(&self) {
+        self.notifier.start(self.runtime.clone());
+        self.push.start(&self.notifier);
     }
 
     /// 启动定时任务的后台调度，服务关闭时停止。
@@ -249,6 +281,7 @@ impl App {
         for role in &org.roles {
             runtime.add_role(role.clone());
         }
+        let mut workspaces = std::collections::HashMap::new();
         for a in &config.agents {
             let Some(role) = org.role(&RoleId::from(a.role.as_str())) else {
                 bail!("数字员工 {} 的岗位 {} 不存在", a.id, a.role);
@@ -267,7 +300,9 @@ impl App {
                         ws
                     }
                 };
-                Some(Toolbox::new(&ws, sandbox.clone(), Limits::default())?)
+                let toolbox = Toolbox::new(&ws, sandbox.clone(), Limits::default())?;
+                workspaces.insert(ip_core::AgentId::from(a.id.as_str()), ws);
+                Some(toolbox)
             } else {
                 None
             };
@@ -285,8 +320,28 @@ impl App {
         let mut app = Self::new(runtime, org, token)
             .with_allowed_origins(allowed_origins)
             .with_router(router)
-            .with_schedules(config.schedules()?);
+            .with_schedules(config.schedules()?)
+            .with_workspaces(workspaces);
         app.mcp = mcp;
+        app.devices
+            .load()
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("读设备列表")?;
+        app.notifier
+            .load()
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("读通知设置")?;
+        app.push = Arc::new(crate::webpush::WebPush::new(
+            app.runtime.store().clone(),
+            config.push.contact.clone(),
+        ));
+        app.push
+            .load()
+            .await
+            .map_err(anyhow::Error::msg)
+            .context("读推送订阅和 VAPID 密钥")?;
         crate::rules::load_saved(&app).await;
         for (name, channel) in &config.channels {
             let crate::config::ChannelConfig::Slack(slack) = channel;

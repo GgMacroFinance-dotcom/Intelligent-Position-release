@@ -3,6 +3,7 @@
 
 import { Client } from './client.js';
 import { h, formatTime } from './dom.js';
+import { renderMarkdown } from './markdown.js';
 
 /** @typedef {import('./types/Role').Role} Role */
 /** @typedef {import('./types/Agent').Agent} Agent */
@@ -23,6 +24,16 @@ import { h, formatTime } from './dom.js';
 /** @typedef {import('./types/ScheduleView').ScheduleView} ScheduleView */
 /** @typedef {import('./types/MemoryView').MemoryView} MemoryView */
 /** @typedef {import('./types/MemoryLayer').MemoryLayer} MemoryLayer */
+/** @typedef {import('./types/ReportInfo').ReportInfo} ReportInfo */
+/** @typedef {import('./types/ReportText').ReportText} ReportText */
+/** @typedef {import('./types/DeviceInfo').DeviceInfo} DeviceInfo */
+/** @typedef {import('./types/NewPairing').NewPairing} NewPairing */
+/** @typedef {import('./types/WhoAmI').WhoAmI} WhoAmI */
+/** @typedef {import('./types/Scope').Scope} Scope */
+/** @typedef {import('./types/Alert').Alert} Alert */
+/** @typedef {import('./types/NotifySettings').NotifySettings} NotifySettings */
+/** @typedef {import('./types/NotifyLevel').NotifyLevel} NotifyLevel */
+/** @typedef {import('./types/Claimed').Claimed} Claimed */
 
 /** @type {Record<TaskStatus, string>} */
 const STATUS_TEXT = { open: '待开始', in_progress: '进行中', blocked: '受阻', done: '已完成', cancelled: '已取消' };
@@ -59,8 +70,20 @@ if (params.get('token')) {
   store.set(TOKEN_KEY, params.get('token') ?? '');
   history.replaceState(null, '', location.pathname + location.hash);
 }
-const token = store.get(TOKEN_KEY);
-const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+
+/**
+ * 在桌面 App（Tauri，backlog F-11）里运行时有它，浏览器里是 null。只用来调壳的几条命令（`apps/desktop/src-tauri/src/lib.rs`）。
+ * @type {{ core: { invoke(cmd: string, args?: Record<string, unknown>): Promise<any> } } | null}
+ */
+const desktop = /** @type {any} */ (window).__TAURI__ ?? null;
+/** 桌面 App 连的主机和这台设备的令牌（令牌存在系统钥匙串里）；还没连过时为 null。 @type {{ url: string, token: string | null } | null} */
+const desktopHost = desktop ? await desktop.core.invoke('get_host').catch((/** @type {unknown} */ e) => (console.error(e), null)) : null;
+/** 主机地址：浏览器里就是打开控制台的这个地址；桌面 App 还没连主机时为 null。 */
+const hostUrl = desktop ? (desktopHost?.url ?? null) : location.origin;
+const token = desktop ? (desktopHost?.token ?? null) : store.get(TOKEN_KEY);
+const wsUrl = hostUrl
+  ? `${hostUrl.startsWith('https:') ? 'wss' : 'ws'}://${new URL(hostUrl).host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`
+  : '';
 const client = new Client(wsUrl);
 
 const state = {
@@ -72,6 +95,7 @@ const state = {
   /** 正在生成的文字，按员工 id。 @type {Map<string, string>} */ drafts: new Map(),
   /** 每个对话最近一次和哪个员工说话。 @type {Map<string, string>} */ threadAgent: new Map(),
   /** @type {string} */ agentForNew: '',
+  /** 窄屏上对话页显示列表还是对话本身；宽屏两栏都显示，不看这个值。 @type {'list' | 'thread'} */ chatPane: 'list',
   /** @type {SearchHit[] | null} */ searchHits: null,
   /** @type {Map<string, string>} 对话最近一轮的状态说明 */ turnNote: new Map(),
   /** @type {RulesView | null} */ rules: null,
@@ -85,22 +109,45 @@ const state = {
   /** “记忆”页正在看的岗位。 @type {string | null} */ memoryRole: null,
   /** @type {MemoryView | null} */ memory: null,
   /** 关掉了记忆的对话。 @type {string[]} */ memoryOff: [],
+  /** 员工写的报告，新改的在前。 @type {ReportInfo[]} */ reports: [],
+  /** 这个连接是哪台设备。 @type {WhoAmI | null} */ whoami: null,
+  /** 这台设备的通知设置；旧服务没有时为空。 @type {NotifySettings | null} */ notify: null,
+  /** 这个浏览器的推送：null 是主机不支持（旧服务）。 @type {'unsupported' | 'off' | 'on' | null} */ push: null,
+  /** 配对过的设备（只有共用令牌看得到）。 @type {DeviceInfo[]} */ devices: [],
+  /** 刚生成、还没用掉的配对码。 @type {NewPairing | null} */ pairing: null,
 };
 
+// short 是窄屏底部导航栏上的短名字。admin 的页只有“管理”权限才显示（backlog F-8）。
 const PAGES = [
-  { id: 'chat', title: '对话' },
-  { id: 'roles', title: '岗位与员工' },
-  { id: 'tasks', title: '任务' },
-  { id: 'approvals', title: '审批' },
-  { id: 'router', title: '路由规则' },
-  { id: 'memory', title: '记忆' },
+  { id: 'inbox', title: '待办', short: '待办' },
+  { id: 'chat', title: '对话', short: '对话' },
+  { id: 'roles', title: '岗位与员工', short: '岗位' },
+  { id: 'tasks', title: '任务', short: '任务' },
+  { id: 'approvals', title: '审批', short: '审批' },
+  { id: 'router', title: '路由规则', short: '路由', admin: true },
+  { id: 'memory', title: '记忆', short: '记忆', admin: true },
+  { id: 'devices', title: '设备与通知', short: '设备' },
 ];
+
+/** 这个连接有没有“管理”权限。共用令牌是“管理”；旧服务没有 who_am_i，也按“管理”算。 */
+function isAdmin() {
+  return (state.whoami?.scope ?? 'admin') === 'admin';
+}
+
+function visiblePages() {
+  return PAGES.filter((p) => !p.admin || isAdmin());
+}
 
 const root = /** @type {HTMLElement} */ (document.getElementById('app'));
 
+/** 窄屏（手机）。和 style.css 里的断点一致。 */
+const narrow = window.matchMedia('(max-width: 720px)');
+
+/** 当前页。地址栏没指定时，手机上先看待办（backlog F-5），宽屏先看对话。 */
 function page() {
   const id = location.hash.replace(/^#\/?/, '').split('/')[0];
-  return PAGES.some((p) => p.id === id) ? id : 'chat';
+  if (visiblePages().some((p) => p.id === id)) return id;
+  return narrow.matches ? 'inbox' : 'chat';
 }
 
 /** @param {string} id */
@@ -109,6 +156,8 @@ function agentName(id) {
 }
 
 function render() {
+  if (connectShown) return;
+  syncTray();
   const current = page();
   root.replaceChildren(renderHeader(current), h('main', null, renderPage(current)));
   if (current === 'chat') scrollMessages();
@@ -124,17 +173,21 @@ function renderHeader(current) {
       h(
         'nav',
         null,
-        ...PAGES.map((p) => {
-          const pending = p.id === 'approvals' ? state.approvals.filter((a) => a.state.state === 'pending').length : 0;
+        ...visiblePages().map((p) => {
+          const pending =
+            p.id === 'approvals' ? state.approvals.filter((a) => a.state.state === 'pending').length : p.id === 'inbox' ? inboxCount() : 0;
           return h(
             'a' + (p.id === current ? '.active' : ''),
             { href: `#/${p.id}` },
-            p.title,
+            h('span.long', null, p.title),
+            h('span.short', null, p.short),
             pending ? h('span.badge', null, pending) : null,
           );
         }),
       ),
-      h('div.status.' + client.status, { title: '与服务的连接' }, { open: '已连接', connecting: '连接中', closed: '已断开' }[client.status]),
+      client.outdated
+        ? h('button.ghost.danger', { onclick: () => location.reload(), title: '服务端的协议版本和这个页面不同' }, '服务已更新，点此刷新')
+        : h('div.status.' + client.status, { title: '与服务的连接' }, { open: '已连接', connecting: '连接中', closed: '已断开' }[client.status]),
       h('button.ghost', { onclick: askToken, title: '设置访问令牌' }, '令牌'),
     )
   );
@@ -143,6 +196,8 @@ function renderHeader(current) {
 /** @param {string} id */
 function renderPage(id) {
   switch (id) {
+    case 'inbox':
+      return renderInbox();
     case 'roles':
       return renderRoles();
     case 'tasks':
@@ -153,6 +208,8 @@ function renderPage(id) {
       return renderRouter();
     case 'memory':
       return renderMemory();
+    case 'devices':
+      return renderDevices();
     default:
       return renderChat();
   }
@@ -235,8 +292,37 @@ function renderRoles() {
             h('button', { onclick: () => startChat(a.id) }, `和 ${a.name} 对话`),
           ),
         ),
+        roleReports(agents),
       );
     }),
+  );
+}
+
+/** 岗位卡片里这个岗位员工最近的报告，先列 5 份，其余收起来。 @param {Agent[]} agents */
+function roleReports(agents) {
+  const ids = new Set(agents.map((a) => a.id));
+  const list = state.reports.filter((r) => ids.has(r.agent_id));
+  if (!list.length) return null;
+  const many = agents.length > 1;
+  /** @param {ReportInfo} r */
+  const item = (r) => reportItem(r, many);
+  const rest = list.slice(5);
+  return h(
+    'div.reports',
+    null,
+    h('div.muted.small', null, '最近的报告'),
+    h('ul.report-list', null, ...list.slice(0, 5).map(item)),
+    rest.length ? h('details', null, h('summary.muted.small', null, `还有 ${rest.length} 份`), h('ul.report-list', null, ...rest.map(item))) : null,
+  );
+}
+
+/** 报告列表里的一行：文件名（点开看）、谁写的、什么时候改的。 @param {ReportInfo} r @param {boolean} showAgent */
+function reportItem(r, showAgent) {
+  return h(
+    'li',
+    null,
+    h('button.link.report-link', { type: 'button', onclick: () => openReport(r.path, r.agent_id) }, r.path.replace(/^reports\//, '')),
+    h('span.muted.small', null, ` ${showAgent ? `${agentName(r.agent_id)} · ` : ''}${formatTime(r.modified_ms)}`),
   );
 }
 
@@ -250,6 +336,7 @@ function startChat(agentId) {
   state.threadId = null;
   state.messages = [];
   state.agentForNew = agentId;
+  state.chatPane = 'thread';
   composerEl = null;
   location.hash = '#/chat';
   render();
@@ -272,6 +359,65 @@ function renderHeaderOnly() {
   const header = root.querySelector('header.top');
   if (header) header.replaceWith(renderHeader(page()));
   else render();
+}
+
+// ---------- 待办（backlog F-5） ----------
+
+/** “最近完成”看多久以内的。 */
+const RECENT_MS = 7 * 24 * 3600 * 1000;
+/** “最近完成”的任务和报告各列几条。 */
+const RECENT_MAX = 10;
+
+/** 等人处理的事：待决定的审批卡片（含员工提问）和受阻的任务。导航栏上的角标用它。 */
+function inboxCount() {
+  return state.approvals.filter((a) => a.state.state === 'pending').length + state.tasks.filter((t) => t.status === 'blocked').length;
+}
+
+function renderInbox() {
+  const pending = state.approvals.filter((a) => a.state.state === 'pending');
+  const questions = pending.filter((a) => a.subject.kind === 'agent_question');
+  const decisions = pending.filter((a) => a.subject.kind !== 'agent_question');
+  const blocked = state.tasks.filter((t) => t.status === 'blocked');
+  const since = Date.now() - RECENT_MS;
+  const done = state.tasks.filter((t) => t.status === 'done' && t.updated_at_ms >= since).slice(0, RECENT_MAX);
+  const reports = state.reports.filter((r) => r.modified_ms >= since).slice(0, RECENT_MAX);
+  return h(
+    'section.inbox',
+    null,
+    pending.length || blocked.length ? null : h('p.inbox-empty', null, '没有等你处理的事。'),
+    questions.length ? h('h2', null, `员工在问你（${questions.length}）`) : null,
+    ...questions.map(approvalCard),
+    decisions.length ? h('h2', null, `等你决定（${decisions.length}）`) : null,
+    ...decisions.map(approvalCard),
+    blocked.length ? h('h2', null, `受阻的任务（${blocked.length}）`) : null,
+    blocked.length ? h('div.card', null, taskTable(blocked)) : null,
+    h('h2', null, '最近 7 天'),
+    h('div.card', null, h('h3', null, '完成的任务'), done.length ? h('ul.done-list', null, ...done.map(doneItem)) : h('p.muted', null, '没有。')),
+    h(
+      'div.card',
+      null,
+      h('h3', null, '新报告'),
+      reports.length ? h('ul.report-list', null, ...reports.map((r) => reportItem(r, true))) : h('p.muted', null, '没有。'),
+    ),
+  );
+}
+
+/** 最近完成的一项任务：标题、谁做的、什么时候，结果收起来。 @param {Task} t */
+function doneItem(t) {
+  return h(
+    'li',
+    null,
+    h('div', null, t.title),
+    h('div.muted.small', null, `${t.assignee ? agentName(t.assignee) : (t.role ?? '—')} · ${formatTime(t.updated_at_ms)}`, ...threadLinks(t)),
+    t.result
+      ? h(
+          'details.task-result',
+          null,
+          h('summary.muted.small', null, '结果'),
+          renderMarkdown(t.result, { onReport: (p) => openReport(p, t.assignee) }),
+        )
+      : null,
+  );
 }
 
 // ---------- 任务 ----------
@@ -414,7 +560,9 @@ function taskTable(tasks) {
               `由 ${t.created_by.kind === 'human' ? t.created_by.name : t.created_by.kind === 'agent' ? agentName(t.created_by.agent_id) : '系统'} 创建`,
               ...threadLinks(t),
             ),
-            t.result ? h('div.task-result', null, `结果：${t.result}`) : null,
+            t.result
+              ? h('div.task-result', null, h('span.muted', null, '结果'), renderMarkdown(t.result, { onReport: (p) => openReport(p, t.assignee) }))
+              : null,
           ),
           h('td', null, t.assignee ? agentName(t.assignee) : t.role ?? '—'),
           h('td', null, t.due_ms ? formatTime(t.due_ms) : '—'),
@@ -464,8 +612,8 @@ function approvalCard(a) {
   const choose = async (/** @type {number} */ i) => {
     try {
       await client.request({ type: 'resolve_approval', approval_id: a.id, choice: i, author: store.get(NAME_KEY) ?? undefined });
-      // 人工改派可能生成了新的规则草案。
-      state.ruleDrafts = await client.request({ type: 'list_rule_drafts' });
+      // 人工改派可能生成了新的规则草案（规则草案只给“管理”权限看）。
+      if (isAdmin()) state.ruleDrafts = await client.request({ type: 'list_rule_drafts' });
       render();
     } catch (e) {
       alert(`操作失败：${/** @type {Error} */ (e).message}`);
@@ -1066,7 +1214,7 @@ function buildMemory(view) {
 // ---------- 对话 ----------
 
 function renderChat() {
-  return h('section.chat', null, renderSidebar(), renderThread());
+  return h('section.chat.pane-' + state.chatPane, null, renderSidebar(), renderThread());
 }
 
 /** 搜索框和输入框跨重绘保留，事件推送重绘时不丢正在输入的内容。 @type {HTMLElement | null} */
@@ -1129,7 +1277,19 @@ function renderThread() {
     composerEl = renderComposer();
     composerFor = state.threadId;
   }
-  return h('div.thread', null, threadMemoryBar(), msgs, composerEl);
+  return h('div.thread', null, threadHead(), threadMemoryBar(), msgs, composerEl);
+}
+
+/** 窄屏上对话顶部的返回栏（宽屏用 CSS 隐藏）。 */
+function threadHead() {
+  const agent = currentAgent();
+  const title = state.threadId ? agentName(state.threadAgent.get(state.threadId) ?? agent) : '新对话';
+  return h(
+    'div.thread-head',
+    null,
+    h('button.link', { onclick: () => ((state.chatPane = 'list'), render()), 'aria-label': '返回对话列表' }, '‹ 对话列表'),
+    h('span', null, title),
+  );
 }
 
 /** 对话页顶部的一行：这个对话进不进岗位记忆。 */
@@ -1141,7 +1301,8 @@ function threadMemoryBar() {
     'div.thread-memory',
     null,
     off ? '这个对话不进岗位记忆。' : '岗位开了记忆时，这个对话闲置后会被提炼进岗位记忆。',
-    h('button.link', { onclick: () => setThreadMemory(id, off) }, off ? '重新打开' : '不让它进记忆'),
+    // 开关记忆要“管理”权限。
+    isAdmin() ? h('button.link', { onclick: () => setThreadMemory(id, off) }, off ? '重新打开' : '不让它进记忆') : null,
   );
 }
 
@@ -1155,7 +1316,14 @@ function messageNodes() {
   for (const m of state.messages) msgs.push(renderMessage(m));
   for (const [id, text] of state.drafts) {
     if (state.threadId && state.threadAgent.get(state.threadId) !== id) continue;
-    msgs.push(h('div.msg.agent.draft', null, h('div.who', null, agentName(id), h('span.muted', null, ' 正在输入…')), h('div.text', null, text)));
+    msgs.push(
+      h(
+        'div.msg.agent.draft',
+        null,
+        h('div.who', null, agentName(id), h('span.muted', null, ' 正在输入…')),
+        h('div.text.md-text', null, renderMarkdown(text, { onReport: (p) => openReport(p, id) })),
+      ),
+    );
   }
   const note = state.threadId ? state.turnNote.get(state.threadId) : undefined;
   if (note) msgs.push(h('div.turn-note', null, note));
@@ -1239,15 +1407,37 @@ function currentAgent() {
   return state.agentForNew || state.agents[0]?.id || '';
 }
 
+/**
+ * 渲染过的消息按 id 缓存：消息写进存储后不再变，流式输出时每来一段文字就重绘整个消息区，
+ * 不缓存的话每次都要把整段对话的 Markdown 重新解析一遍。
+ * @type {Map<string, HTMLElement>}
+ */
+const messageCache = new Map();
+
 /** @param {Message} m */
 function renderMessage(m) {
   const who =
     m.author.kind === 'human' ? m.author.name : m.author.kind === 'agent' ? agentName(m.author.agent_id) : '系统';
+  // 员工名单晚于消息加载时显示名会变，所以名字也算进缓存的键。
+  const key = `${m.id}\u0000${who}`;
+  const hit = messageCache.get(key);
+  if (hit) return hit;
+  if (messageCache.size > 2000) messageCache.clear();
+  const el = buildMessage(m, who);
+  messageCache.set(key, el);
+  return el;
+}
+
+/** @param {Message} m @param {string} who */
+function buildMessage(m, who) {
   const cls = m.author.kind === 'human' ? '.human' : m.author.kind === 'agent' ? '.agent' : '.system';
   const head = h('div.who', null, who, h('span.muted', null, ` ${formatTime(m.at_ms)}`));
+  const hint = m.author.kind === 'agent' ? m.author.agent_id : null;
   switch (m.body.kind) {
     case 'text':
-      return h('div.msg' + cls, null, head, h('div.text', null, m.body.text));
+      // 人写的消息照原样显示；员工和系统的消息按 Markdown 渲染（backlog F-3），里面提到的报告可以点开（F-4）。
+      if (m.author.kind === 'human') return h('div.msg' + cls, null, head, h('div.text', null, m.body.text));
+      return h('div.msg' + cls, null, head, h('div.text.md-text', null, renderMarkdown(m.body.text, { onReport: (p) => openReport(p, hint) })));
     case 'tool_call':
       return h(
         'details.tool',
@@ -1280,6 +1470,7 @@ function scrollMessages() {
 /** @param {string} threadId */
 async function openThread(threadId) {
   state.threadId = threadId;
+  state.chatPane = 'thread';
   state.messages = [];
   render();
   await loadThread();
@@ -1350,6 +1541,7 @@ function onEvent(e) {
     case 'turn_finished': {
       state.drafts.delete(e.agent_id);
       refreshSpendSoon();
+      refreshReportsSoon();
       const tokens = e.usage.prompt_tokens + e.usage.completion_tokens;
       const cached = e.usage.prompt_tokens ? Math.round((100 * e.usage.cached_tokens) / e.usage.prompt_tokens) : 0;
       state.turnNote.set(
@@ -1368,8 +1560,9 @@ function onEvent(e) {
     case 'task_changed':
       upsert(state.tasks, e.task);
       state.tasks.sort((a, b) => b.updated_at_ms - a.updated_at_ms);
+      // 待办的角标在顶栏，对话页也要更新。
       if (page() !== 'chat') return render();
-      return;
+      return renderHeaderOnly();
     case 'approval_changed':
       upsert(state.approvals, e.approval);
       state.approvals.sort((a, b) => b.created_at_ms - a.created_at_ms);
@@ -1380,9 +1573,683 @@ function onEvent(e) {
   if (page() === 'chat') updateChat();
 }
 
+// ---------- 设备（backlog F-7） ----------
+
+let pairingTimer = 0;
+
+async function loadWhoAmI() {
+  try {
+    state.whoami = await client.request({ type: 'who_am_i' });
+  } catch {
+    /* 旧服务没有这个请求 */
+    state.whoami = null;
+  }
+}
+
+async function loadDevices() {
+  try {
+    state.devices = isAdmin() ? await client.request({ type: 'list_devices' }) : [];
+  } catch {
+    /* 旧服务没有这个请求 */
+  }
+}
+
+const SCOPE_TEXT = /** @type {Record<Scope, string>} */ ({ daily: '日常', admin: '管理' });
+
+function renderDevices() {
+  const me = state.whoami;
+  if (!me) return h('section.placeholder', null, h('p.muted', null, '正在读取…'));
+  const mine = me.device
+    ? h(
+        'div.card',
+        null,
+        h('h3', null, `这台设备：${me.device.name}`),
+        h('p', null, `${formatTime(me.device.paired_at_ms)} 配对，权限“${SCOPE_TEXT[me.scope]}”。用这台设备发的消息、做的审批都署这个名字。`),
+        me.scope === 'admin'
+          ? null
+          : h('p.muted', null, '“日常”权限能对话、审批、处理任务、看报告；路由规则、定时任务、记忆和设备管理要“管理”权限，请用共用令牌或有“管理”权限的设备在这一页给。改了权限后刷新一下页面。'),
+      )
+    : null;
+  if (me.scope !== 'admin') return h('section.devices', null, mine, notifyCard());
+  const name = /** @type {HTMLInputElement} */ (h('input', { placeholder: '设备名，例如：张三的手机', maxlength: 40 }));
+  const create = async () => {
+    if (!name.value.trim()) return name.focus();
+    try {
+      state.pairing = await client.request({ type: 'create_pairing', name: name.value, link_base: hostUrl ?? location.origin });
+      watchPairing();
+      render();
+    } catch (e) {
+      alert(`生成配对码失败：${/** @type {Error} */ (e).message}`);
+    }
+  };
+  return h(
+    'section.devices',
+    null,
+    mine,
+    notifyCard(),
+    state.pairing ? pairingCard(state.pairing) : h('div.card', null, h('h3', null, '添加设备'), h('div.row', null, name, h('button.primary', { onclick: create }, '生成配对码'))),
+    h(
+      'div.card',
+      null,
+      h('h3', null, `配对过的设备（${state.devices.length}）`),
+      state.devices.length ? deviceTable() : h('p.muted', null, '还没有。'),
+      h(
+        'p.muted.small',
+        null,
+        '新配对的设备是“日常”权限：对话、审批、处理任务、看报告。“管理”另外能改路由规则、定时任务、记忆，管理设备。',
+        '手机要能访问这台主机：用公网 HTTPS 或 Tailscale，见部署文档。',
+      ),
+    ),
+  );
+}
+
+/** @param {NewPairing} p */
+function pairingCard(p) {
+  return h(
+    'div.card.pairing',
+    null,
+    h('h3', null, `给「${p.name}」配对`),
+    h('div.pair-code', null, p.code),
+    h('p.muted', null, `${new Date(Number(p.expires_ms)).toLocaleTimeString('zh-CN')} 前有效，只能用一次。在那台设备上打开控制台，点“令牌”输入这 6 位数字；或者用相机扫下面的二维码。`),
+    p.qr ? qrCanvas(p.qr) : null,
+    p.link ? h('p.mono.muted', null, p.link) : null,
+    h('button', { onclick: () => endPairing() }, '完成'),
+  );
+}
+
+/** 把二维码画到画布上：黑块白底，四周留 4 格白边，深色主题下也能扫。 @param {string[]} rows */
+function qrCanvas(rows) {
+  const cell = 6;
+  const quiet = 4;
+  const n = rows.length + quiet * 2;
+  const canvas = /** @type {HTMLCanvasElement} */ (h('canvas.qr', { width: n * cell, height: n * cell, 'aria-label': '配对二维码' }));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, n * cell, n * cell);
+  ctx.fillStyle = '#000000';
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) if (row[x] === '1') ctx.fillRect((x + quiet) * cell, (y + quiet) * cell, cell, cell);
+  });
+  return canvas;
+}
+
+/** 配对码有效期间每 3 秒看一次设备列表，那台设备配上了就收起配对码。 */
+function watchPairing() {
+  clearInterval(pairingTimer);
+  const before = new Set(state.devices.map((d) => d.id));
+  pairingTimer = window.setInterval(async () => {
+    const p = state.pairing;
+    if (!p || Date.now() > Number(p.expires_ms)) return endPairing();
+    await loadDevices();
+    if (state.devices.some((d) => !before.has(d.id))) return endPairing();
+    if (page() === 'devices') render();
+  }, 3000);
+}
+
+function endPairing() {
+  clearInterval(pairingTimer);
+  state.pairing = null;
+  loadDevices().then(() => page() === 'devices' && render());
+}
+
+function deviceTable() {
+  return h(
+    'table',
+    null,
+    h('thead', null, h('tr', null, h('th', null, '设备'), h('th', null, '权限'), h('th', null, '状态'), h('th', null, '配对时间'), h('th', null, ''))),
+    h(
+      'tbody',
+      null,
+      ...state.devices.map((d) =>
+        h(
+          'tr',
+          null,
+          h('td', null, d.name, d.id === state.whoami?.device?.id ? h('span.muted', null, '（这台）') : null),
+          h('td', null, scopeSelect(d)),
+          h('td', null, d.online ? h('span.online', null, '在线') : h('span.muted', null, `最后在线 ${formatTime(Number(d.last_seen_ms))}`)),
+          h('td', null, formatTime(Number(d.paired_at_ms))),
+          h(
+            'td.actions',
+            null,
+            h('button.link', { onclick: () => renameDevice(d) }, '改名'),
+            h('button.link.danger', { onclick: () => revokeDevice(d) }, '吊销'),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/** @param {DeviceInfo} d */
+function scopeSelect(d) {
+  const select = /** @type {HTMLSelectElement} */ (
+    h(
+      'select',
+      { 'aria-label': `「${d.name}」的权限` },
+      ...Object.entries(SCOPE_TEXT).map(([value, text]) => h('option', { value, selected: value === d.scope }, text)),
+    )
+  );
+  select.onchange = async () => {
+    const scope = /** @type {Scope} */ (select.value);
+    if (scope === 'admin' && !confirm(`给「${d.name}」“管理”权限？它就能改路由规则、定时任务、记忆，管理所有设备。`)) {
+      select.value = d.scope;
+      return;
+    }
+    try {
+      state.devices = await client.request({ type: 'set_device_scope', device_id: d.id, scope });
+      // 改的是这台自己：权限跟着变。
+      if (d.id === state.whoami?.device?.id) await loadWhoAmI();
+      render();
+    } catch (e) {
+      select.value = d.scope;
+      alert(`改权限失败：${/** @type {Error} */ (e).message}`);
+    }
+  };
+  return select;
+}
+
+/** @param {DeviceInfo} d */
+async function renameDevice(d) {
+  const name = prompt('新的设备名', d.name);
+  if (!name || name.trim() === d.name) return;
+  try {
+    state.devices = await client.request({ type: 'rename_device', device_id: d.id, name });
+    render();
+  } catch (e) {
+    alert(`改名失败：${/** @type {Error} */ (e).message}`);
+  }
+}
+
+/** @param {DeviceInfo} d */
+async function revokeDevice(d) {
+  if (!confirm(`吊销「${d.name}」？它的连接会立即断开，要再用得重新配对。`)) return;
+  try {
+    state.devices = await client.request({ type: 'revoke_device', device_id: d.id });
+    render();
+  } catch (e) {
+    alert(`吊销失败：${/** @type {Error} */ (e).message}`);
+  }
+}
+
+// ---------- 通知（backlog F-9） ----------
+
+/** 没有 Service Worker 时用 new Notification 弹的通知，按标签记着，撤的时候关掉。 @type {Map<string, Notification>} */
+const shownAlerts = new Map();
+
+const LEVEL_TEXT = /** @type {Record<NotifyLevel, string>} */ ({ needs_me: '只通知要我处理的', all: '全部', off: '不通知' });
+
+async function loadNotify() {
+  try {
+    state.notify = await client.request({ type: 'get_notify_settings' });
+  } catch {
+    /* 旧服务没有这个请求 */
+    state.notify = null;
+  }
+}
+
+/** 页面在前台时界面自己会更新，不弹通知（apps-plan.md 5.2）。 */
+function pageInFront() {
+  return document.visibilityState === 'visible' && document.hasFocus();
+}
+
+/** 服务端已按这台设备的设置筛过；这里只管弹不弹、怎么弹。 @param {Alert} alert */
+async function showAlert(alert) {
+  // 桌面 App 用系统通知，关掉窗口后它还在托盘里连着（backlog F-11）。点通知目前只能把窗口叫出来，去不了那个对话。
+  if (desktop) {
+    if (!pageInFront()) desktop.core.invoke('notify', { title: alert.title, body: alert.body }).catch((e) => console.warn(e));
+    return;
+  }
+  // 开了推送时由主机推送、Service Worker 弹，这里再弹就重复了。
+  if (state.push === 'on' || pageInFront() || !('Notification' in window) || Notification.permission !== 'granted') return;
+  /** @type {NotificationOptions} */
+  const options = { body: alert.body, tag: alert.tag, icon: '/assets/icon-192.png', data: { thread_id: alert.thread_id ?? null } };
+  try {
+    // 手机上的浏览器只认 Service Worker 弹的通知。
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) {
+      await reg.showNotification(alert.title, options);
+      return;
+    }
+    const n = new Notification(alert.title, options);
+    n.onclick = () => {
+      window.focus();
+      openAlert(alert.thread_id ?? null);
+      n.close();
+    };
+    shownAlerts.get(alert.tag)?.close();
+    shownAlerts.set(alert.tag, n);
+  } catch (e) {
+    console.warn('弹通知失败', e);
+  }
+}
+
+/** 审批在别处处理过了：撤掉这台设备上同一标签的通知。 @param {string} tag */
+async function dismissAlert(tag) {
+  shownAlerts.get(tag)?.close();
+  shownAlerts.delete(tag);
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    for (const n of (await reg?.getNotifications({ tag })) ?? []) n.close();
+  } catch {
+    /* 不支持就算了 */
+  }
+}
+
+/** 点开通知：有对话去那个对话，没有去待办。 @param {string | null} threadId */
+function openAlert(threadId) {
+  if (!threadId) {
+    location.hash = '#/inbox';
+    return;
+  }
+  history.replaceState(null, '', `${location.pathname}#/chat`);
+  openThread(threadId);
+}
+
+/** 地址是 #/chat/<对话 id>（通知点开的新窗口）时打开那个对话，地址改回 #/chat。 */
+function openLinkedThread() {
+  const id = /^#\/chat\/([^/]+)$/.exec(location.hash)?.[1];
+  if (!id) return false;
+  history.replaceState(null, '', `${location.pathname}#/chat`);
+  openThread(decodeURIComponent(id));
+  return true;
+}
+
+function nextMorning() {
+  const d = new Date();
+  d.setHours(8, 0, 0, 0);
+  if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+function permissionLine() {
+  if (desktop) return h('p', null, '桌面 App 用系统通知。关掉窗口后 App 留在托盘里，照样能收到；从托盘菜单“退出”才不再收。');
+  if (!('Notification' in window)) return h('p.muted', null, '这个浏览器不支持系统通知。iPhone 要先“添加到主屏幕”，再从主屏幕打开。');
+  if (Notification.permission === 'granted') return h('p', null, '浏览器通知：已允许。');
+  if (Notification.permission === 'denied') return h('p.muted', null, '浏览器通知被拒绝了，要在浏览器的网站设置里重新允许。');
+  return h('p', null, h('button', { onclick: () => Notification.requestPermission().then(() => render()) }, '允许浏览器通知'));
+}
+
+// ---------- 推送（backlog F-10） ----------
+
+/** 要 Service Worker、PushManager 和安全来源（HTTPS 或本机地址）。iPhone 要先添加到主屏幕才有 PushManager。 */
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && window.isSecureContext;
+}
+
+/** @param {string} text */
+function fromBase64Url(text) {
+  const bin = atob(text.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (text.length % 4)) % 4));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+
+/** @param {ArrayBuffer | null} a @param {Uint8Array} b */
+function sameBytes(a, b) {
+  if (!a || a.byteLength !== b.length) return false;
+  const x = new Uint8Array(a);
+  return x.every((v, i) => v === b[i]);
+}
+
+/** 把浏览器的订阅登记到主机。 @param {PushSubscription} sub */
+function registerPush(sub) {
+  const keys = sub.toJSON().keys ?? {};
+  return client.request({ type: 'subscribe_push', endpoint: sub.endpoint, p256dh: keys.p256dh ?? '', auth: keys.auth ?? '' });
+}
+
+/** 打开控制台时看这个浏览器订阅过没有。订阅过就再登记一次：主机换了密钥时换个新订阅，主机删了订阅时补上。 */
+async function checkPush() {
+  // 桌面 App 常驻托盘、连接不断，用不着推送。
+  if (desktop) {
+    state.push = null;
+    return;
+  }
+  /** @type {import('./types/VapidKey').VapidKey} */
+  let key;
+  try {
+    key = await client.request({ type: 'push_key' });
+  } catch {
+    state.push = null; // 旧服务
+    return;
+  }
+  if (!pushSupported()) {
+    state.push = 'unsupported';
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    let sub = await reg?.pushManager.getSubscription();
+    if (!reg || !sub || Notification.permission !== 'granted') {
+      state.push = 'off';
+      return;
+    }
+    const serverKey = fromBase64Url(key.public_key);
+    if (!sameBytes(sub.options.applicationServerKey, serverKey)) {
+      await sub.unsubscribe();
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: serverKey });
+    }
+    await registerPush(sub);
+    state.push = 'on';
+  } catch (e) {
+    console.warn('恢复推送订阅失败', e);
+    state.push = 'off';
+  }
+}
+
+async function enablePush() {
+  try {
+    if ((await Notification.requestPermission()) !== 'granted') {
+      render();
+      return;
+    }
+    /** @type {import('./types/VapidKey').VapidKey} */
+    const key = await client.request({ type: 'push_key' });
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromBase64Url(key.public_key) });
+    try {
+      await registerPush(sub);
+    } catch (e) {
+      // 主机不收（比如推送服务不在白名单里）：浏览器这边也退掉，免得两边对不上。
+      await sub.unsubscribe();
+      throw e;
+    }
+    state.push = 'on';
+    reportPresence();
+  } catch (e) {
+    alert(`开启推送失败：${/** @type {Error} */ (e).message}`);
+  }
+  render();
+}
+
+async function disablePush() {
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    const sub = await reg?.pushManager.getSubscription();
+    if (sub) {
+      await client.request({ type: 'unsubscribe_push', endpoint: sub.endpoint });
+      await sub.unsubscribe();
+    }
+    state.push = 'off';
+  } catch (e) {
+    alert(`关闭推送失败：${/** @type {Error} */ (e).message}`);
+  }
+  render();
+}
+
+/** 告诉主机页面在不在前台：在前台时主机不给这台设备推送，界面自己会更新（apps-plan.md 5.2）。 */
+function reportPresence() {
+  if (state.push === null || client.status !== 'open') return;
+  client.request({ type: 'presence', active: pageInFront() }).catch(() => {
+    /* 报不上就算了，主机 30 秒后当作不在前台 */
+  });
+}
+
+function pushLine() {
+  switch (state.push) {
+    case null:
+      return null;
+    case 'unsupported':
+      return h('p.muted', null, '这个浏览器收不到推送：控制台要用 HTTPS 打开；iPhone 要 iOS 16.4 以上，先“添加到主屏幕”，再从主屏幕打开。');
+    case 'on':
+      return h('div.row', null, h('span', null, '推送：已开启，页面关着也能收到。'), h('button.link', { onclick: disablePush }, '关闭推送'));
+    default:
+      return h('div.row', null, h('span', null, '推送：没开。'), h('button', { onclick: enablePush }, '开启推送'));
+  }
+}
+
+function notifyCard() {
+  const s = state.notify;
+  if (!s) return null;
+  /** @param {Partial<NotifySettings>} change */
+  const save = async (change) => {
+    try {
+      state.notify = await client.request({ type: 'set_notify_settings', settings: { ...s, ...change } });
+    } catch (e) {
+      alert(`保存通知设置失败：${/** @type {Error} */ (e).message}`);
+    }
+    render();
+  };
+  const level = /** @type {HTMLSelectElement} */ (
+    h('select', { 'aria-label': '通知哪些事' }, ...Object.entries(LEVEL_TEXT).map(([value, text]) => h('option', { value, selected: value === s.level }, text)))
+  );
+  level.onchange = () => save({ level: /** @type {NotifyLevel} */ (level.value) });
+  const preview = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', checked: s.preview }));
+  preview.onchange = () => save({ preview: preview.checked });
+  const now = Date.now();
+  const until = s.mute_until_ms;
+  const mute =
+    until !== null && until > now
+      ? [h('span', null, `静音到 ${formatTime(until)}`), h('button.link', { onclick: () => save({ mute_until_ms: null }) }, '取消静音')]
+      : [
+          h('button.link', { onclick: () => save({ mute_until_ms: now + 60 * 60 * 1000 }) }, '静音 1 小时'),
+          h('button.link', { onclick: () => save({ mute_until_ms: nextMorning() }) }, '静音到明早 8 点'),
+        ];
+  const roles = state.roles.map((r) => {
+    const box = /** @type {HTMLInputElement} */ (h('input', { type: 'checkbox', checked: !s.muted_roles.includes(r.id) }));
+    box.onchange = () => save({ muted_roles: box.checked ? s.muted_roles.filter((id) => id !== r.id) : [...s.muted_roles, r.id] });
+    return h('label.check', null, box, ` ${r.name ?? r.id}`);
+  });
+  return h(
+    'div.card.notify',
+    null,
+    h('h3', null, state.whoami?.device ? '这台设备的通知' : '通知'),
+    permissionLine(),
+    pushLine(),
+    h('div.row', null, h('span', null, '通知哪些事'), level),
+    h('label.check', null, preview, ' 通知里显示内容预览（密钥会打码）'),
+    h('div.row', null, ...mute),
+    roles.length ? h('div.row', null, h('span', null, '这些岗位的事要通知：'), ...roles) : null,
+    h(
+      'p.muted.small',
+      null,
+      '要我处理的：审批卡、员工提问、一轮失败、任务受阻。“全部”另外包括员工回复和任务完成。',
+      desktop ? '窗口在前台时不弹。' : '页面在前台时不弹；开了推送，页面关着也能收到，不开推送时只有页面开着才弹。',
+      state.whoami?.device ? '' : '用共用令牌打开的控制台共用这一份设置。',
+    ),
+  );
+}
+
+// ---------- 桌面 App（backlog F-11） ----------
+
+/** 正在显示“连接主机”，这时不画控制台。 */
+let connectShown = false;
+/** 上次告诉托盘的待办数。 */
+let trayCount = -1;
+
+/** 托盘图标上的待办数，和导航上“待办”的角标一样。 */
+function syncTray() {
+  if (!desktop || client.status !== 'open') return;
+  const count = inboxCount();
+  if (count === trayCount) return;
+  trayCount = count;
+  desktop.core.invoke('set_pending', { count }).catch((e) => console.warn(e));
+}
+
+/** 桌面 App 的“连接主机”：填主机地址和 6 位配对码（或访问令牌），令牌由壳存进系统钥匙串。 */
+function showConnect() {
+  if (!desktop) return;
+  const app = desktop;
+  connectShown = true;
+  const url = /** @type {HTMLInputElement} */ (
+    h('input', { type: 'url', placeholder: 'https://ip.example.com', value: hostUrl ?? '', 'aria-label': '主机地址', autocomplete: 'url' })
+  );
+  const code = /** @type {HTMLInputElement} */ (h('input', { placeholder: '6 位配对码，或访问令牌', 'aria-label': '配对码或访问令牌', autocomplete: 'off' }));
+  const name = /** @type {HTMLInputElement} */ (
+    h('input', { placeholder: '你的名字（用访问令牌时显示在消息上，可不填）', value: store.get(NAME_KEY) ?? '', 'aria-label': '你的名字' })
+  );
+  const status = h('p.muted', null, '在主机上运行 ip device pair --name <这台电脑的名字>，或者在已经连上的控制台“设备”页生成配对码。主机要配访问令牌（auth_token_env）。');
+  const button = /** @type {HTMLButtonElement} */ (h('button.primary', { type: 'submit' }, '连接'));
+  const form = h(
+    'form.connect',
+    {
+      onsubmit: async (/** @type {Event} */ e) => {
+        e.preventDefault();
+        button.disabled = true;
+        status.className = 'muted';
+        status.textContent = '正在连接…';
+        const secret = code.value.trim();
+        try {
+          if (/^\d{6}$/.test(secret)) await app.core.invoke('pair', { url: url.value, code: secret });
+          else await app.core.invoke('save_token', { url: url.value, token: secret });
+          if (name.value.trim()) store.set(NAME_KEY, name.value.trim());
+          location.hash = '#/inbox';
+          location.reload();
+        } catch (err) {
+          status.className = 'error';
+          status.textContent = String(err);
+          button.disabled = false;
+        }
+      },
+    },
+    h('label', null, '主机地址', url),
+    h('label', null, '配对码或访问令牌', code),
+    h('label', null, '名字', name),
+    h('div.row', null, button, hostUrl ? h('button.link', { type: 'button', onclick: () => location.reload() }, '取消') : null),
+  );
+  const forget = hostUrl
+    ? h(
+        'p',
+        null,
+        h(
+          'button.link.danger',
+          {
+            type: 'button',
+            onclick: async () => {
+              if (!confirm(`断开 ${hostUrl}？这台电脑上存的令牌会删掉，要再用得重新配对。`)) return;
+              await app.core.invoke('forget_host').catch((/** @type {unknown} */ err) => alert(String(err)));
+              location.reload();
+            },
+          },
+          '断开这台主机',
+        ),
+      )
+    : null;
+  root.replaceChildren(h('section.placeholder.connect', null, h('h2', null, hostUrl ? '换主机或重新配对' : '连接主机'), form, status, forget));
+  url.focus();
+}
+
+/** 用 6 位配对码换这台设备的令牌，存好后重新打开控制台。 @param {string} code */
+async function pairDevice(code) {
+  const status = h('p.muted', null, '正在用配对码换这台设备的令牌…');
+  root.replaceChildren(h('section.placeholder', null, h('h2', null, '配对这台设备'), status));
+  try {
+    const res = await fetch('/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error ?? `配对失败（${res.status}）`);
+    const claimed = /** @type {Claimed} */ (body);
+    store.set(TOKEN_KEY, claimed.token);
+    store.set(NAME_KEY, claimed.device.name);
+    history.replaceState(null, '', `${location.pathname}#/inbox`);
+    location.reload();
+  } catch (e) {
+    status.replaceWith(
+      h('p.error', null, e instanceof Error ? e.message : String(e)),
+      h('p', null, h('a', { href: '#/inbox', onclick: () => setTimeout(() => location.reload()) }, '回到控制台')),
+    );
+  }
+}
+
+// ---------- 报告（backlog F-4） ----------
+
+/** 正在看的报告的遮罩层。 @type {HTMLElement | null} */
+let reportEl = null;
+/** 打开报告前有焦点的元素，关掉后把焦点还给它。 @type {Element | null} */
+let reportFocus = null;
+let reportsTimer = 0;
+
+async function refreshReports() {
+  try {
+    state.reports = await client.request({ type: 'list_reports', limit: 200 });
+  } catch {
+    /* 读不了就先用旧的 */
+  }
+}
+
+/** 一轮结束后员工可能写了新报告，刷新列表（合并短时间内的多次）。 */
+function refreshReportsSoon() {
+  clearTimeout(reportsTimer);
+  reportsTimer = window.setTimeout(async () => {
+    await refreshReports();
+    if (page() === 'roles' || page() === 'inbox') render();
+  }, 800);
+}
+
+/**
+ * 报告是谁写的。先在报告列表里找这个路径，找不到就用 hint（比如写这条消息的员工）。
+ * 协调员转述研究员的报告时 hint 是协调员，列表里能找到真正写报告的人。
+ * @param {string} path
+ * @param {string | null | undefined} hint
+ */
+function reportOwner(path, hint) {
+  const found = state.reports.filter((r) => r.path === path);
+  if (hint && found.some((r) => r.agent_id === hint)) return hint;
+  return found[0]?.agent_id ?? hint ?? null;
+}
+
+/**
+ * 在遮罩层里打开一份报告。手机上按返回键也能关掉。
+ * @param {string} path 形如 `reports/2026-11-16-cpi.md`
+ * @param {string | null} [hint] 可能写了这份报告的员工
+ */
+async function openReport(path, hint) {
+  const nested = reportEl !== null;
+  closeReport(true);
+  reportFocus = document.activeElement;
+  const title = h('div.report-title', null, h('strong', null, path.replace(/^reports\//, '')));
+  const body = h('div.report-body', null, h('p.muted', null, '正在读取…'));
+  const close = h('button.ghost', { type: 'button', onclick: () => closeReport() }, '关闭');
+  const el = h(
+    'div.overlay',
+    { onclick: (/** @type {Event} */ e) => e.target === el && closeReport() },
+    h('div.report-view', { role: 'dialog', 'aria-modal': 'true', 'aria-label': `报告 ${path}` }, h('header', null, title, close), body),
+  );
+  reportEl = el;
+  document.body.append(el);
+  document.body.classList.add('report-open');
+  if (!nested) history.pushState({ ipReport: true }, '');
+  close.focus();
+  try {
+    if (!state.reports.some((r) => r.path === path)) await refreshReports();
+    const agent = reportOwner(path, hint);
+    if (!agent) throw new Error(`找不到报告 ${path}`);
+    /** @type {ReportText} */
+    const r = await client.request({ type: 'read_report', agent_id: agent, path });
+    if (reportEl !== el) return;
+    title.append(h('div.muted.small', null, `${agentName(agent)} · ${formatTime(r.modified_ms)}`));
+    body.replaceChildren(
+      ...(r.truncated ? [h('p.notice', null, '报告太长，只显示前 1 MB。')] : []),
+      renderMarkdown(r.text, { onReport: (p) => openReport(p, agent) }),
+    );
+  } catch (err) {
+    if (reportEl === el) body.replaceChildren(h('p.error', null, err instanceof Error ? err.message : String(err)));
+  }
+}
+
+/** @param {boolean} [keepHistory] 返回键触发的、或者马上要打开另一份时，不再退一步历史记录 */
+function closeReport(keepHistory = false) {
+  if (!reportEl) return;
+  reportEl.remove();
+  reportEl = null;
+  document.body.classList.remove('report-open');
+  if (!keepHistory && history.state?.ipReport) history.back();
+  if (reportFocus instanceof HTMLElement && reportFocus.isConnected) reportFocus.focus();
+  reportFocus = null;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && reportEl) closeReport();
+});
+window.addEventListener('popstate', () => {
+  if (reportEl) closeReport(true);
+});
+
 function askToken() {
-  const t = prompt('访问令牌（服务配置了 auth_token_env 时需要）', store.get(TOKEN_KEY) ?? '');
+  if (desktop) {
+    showConnect();
+    return;
+  }
+  const t = prompt('访问令牌（服务配置了 auth_token_env 时需要），或者 6 位配对码', store.get(TOKEN_KEY) ?? '');
   if (t === null) return;
+  if (/^\d{6}$/.test(t.trim())) return pairDevice(t.trim());
   store.set(TOKEN_KEY, t.trim());
   const n = prompt('你的名字（显示在消息上）', store.get(NAME_KEY) ?? '');
   if (n !== null && n.trim()) store.set(NAME_KEY, n.trim());
@@ -1390,6 +2257,9 @@ function askToken() {
 }
 
 async function loadAll() {
+  // 先知道自己的权限，“日常”设备不发只给“管理”的请求。
+  await loadWhoAmI();
+  const admin = isAdmin();
   [state.roles, state.agents, state.threads] = await Promise.all([
     client.request({ type: 'list_roles' }),
     client.request({ type: 'list_agents' }),
@@ -1397,34 +2267,84 @@ async function loadAll() {
   ]);
   [state.rules, state.ruleDrafts, state.tasks, state.approvals] = await Promise.all([
     client.request({ type: 'list_rules' }),
-    client.request({ type: 'list_rule_drafts' }),
+    admin ? client.request({ type: 'list_rule_drafts' }) : [],
     client.request({ type: 'list_tasks', limit: 200 }),
     client.request({ type: 'list_approvals', limit: 50 }),
   ]);
   [state.spend, state.schedules, state.memoryOff] = await Promise.all([
     client.request({ type: 'spend_today' }),
-    client.request({ type: 'list_schedules' }),
+    admin ? client.request({ type: 'list_schedules' }) : [],
     client.request({ type: 'list_memory_off_threads' }),
+    refreshReports(),
+    loadDevices(),
+    loadNotify(),
+    checkPush(),
   ]);
+  reportPresence();
   state.memory = null;
   memoryEl = null;
   memoryFailed = null;
   // 配了路由规则时，新对话默认自动分派。
   if (!state.agentForNew) state.agentForNew = state.rules?.spec.rules.length ? AUTO : (state.agents[0]?.id ?? '');
   composerEl = null;
+  if (openLinkedThread()) return;
   await loadThread();
   render();
 }
 
 client.onStatus((s) => {
-  if (s === 'open') loadAll().catch((e) => console.error(e));
+  // 重连时服务端补发了断开期间的事件，界面已经跟上，不用整个重新拉（backlog F-6）。
+  if (s === 'open' && !client.resumed) loadAll().catch((e) => console.error(e));
   render();
 });
 client.onEvent(onEvent);
+client.onAlert((a) => void showAlert(a));
+// 前台状态一变就报；在前台时每 20 秒再报一次，主机那边 30 秒没收到就当作不在前台（backlog F-10）。
+document.addEventListener('visibilitychange', reportPresence);
+window.addEventListener('focus', reportPresence);
+window.addEventListener('blur', () => setTimeout(reportPresence, 0));
+setInterval(() => {
+  if (pageInFront()) reportPresence();
+}, 20_000);
+client.onDismiss((tag) => void dismissAlert(tag));
+// 补不上断开期间或跟不上时漏掉的事件：整个重新拉。
 client.onLagged(() => {
-  loadThread();
-  refreshThreadsSoon();
+  loadAll().catch((e) => console.error(e));
 });
-window.addEventListener('hashchange', render);
-client.connect();
-render();
+window.addEventListener('hashchange', () => {
+  if (!openLinkedThread()) render();
+});
+// 地址栏没指定页面时，窗口跨过窄屏断点要换默认页。
+narrow.addEventListener('change', () => {
+  const id = location.hash.replace(/^#\/?/, '').split('/')[0];
+  if (!PAGES.some((p) => p.id === id)) render();
+});
+// 扫配对二维码打开的地址是 #/pair/<6 位配对码>：先换令牌，不连 /ws。
+const pairCode = desktop ? undefined : /^#\/pair\/(\d{6})$/.exec(location.hash)?.[1];
+if (desktop && !hostUrl) showConnect();
+else if (pairCode) pairDevice(pairCode);
+else client.connect();
+
+// 桌面 App 里的链接用系统浏览器打开，不在 App 窗口里跳走。
+if (desktop) {
+  document.addEventListener('click', (e) => {
+    const a = /** @type {Element | null} */ (e.target instanceof Element ? e.target.closest('a[href]') : null);
+    const href = a?.getAttribute('href') ?? '';
+    if (!/^(https?:|mailto:)/i.test(href)) return;
+    e.preventDefault();
+    desktop.core.invoke('open_url', { url: href }).catch((err) => console.warn(err));
+  });
+}
+
+// 注册 Service Worker，浏览器才会提供“安装应用”（backlog F-2）。只在 HTTPS 或本机地址上可用，失败不影响控制台。
+// 桌面 App 本身就是装好的应用，不用。
+if (!desktop && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {
+    /* 忽略：比如用 http:// 连非本机地址 */
+  });
+  // 点了 Service Worker 弹的通知，它把要打开的对话发过来（sw.js 的 notificationclick）。
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type === 'open-alert') openAlert(e.data.thread_id ?? null);
+  });
+}
+if (!pairCode && !connectShown) render();

@@ -25,12 +25,14 @@ WebSocket 接口在 `/ws`。发一条消息：
 {"id": 1, "type": "send", "agent_id": "macro-1", "text": "点评一下本月 CPI", "author": "张三"}
 ```
 
-服务先回 `{"type":"reply","id":1,"ok":true,"data":<消息>}`，随后推送 `{"type":"event","event":{...}}`：
+连上后服务先发 `{"type":"hello","protocol":1,"epoch":"…","seq":0,"resumed":false}`。
+服务回 `{"type":"reply","id":1,"ok":true,"data":<消息>}`，随后推送 `{"type":"event","seq":1,"event":{...}}`：
 `turn_started`、`delta`（流式文字）、`message`（写入存储的每条消息，含工具调用和结果）、`turn_finished` 或 `turn_failed`。
 其他请求：`list_roles`、`list_agents`、`list_threads`、`history`（`thread_id`、`before_ms`、`limit`）、`search`（`query`、`thread_id`）、
-`route`、`list_rules`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`，以及“记忆”页用的 `get_memory`、`save_memory_text`、`forget_thread_memory`、`delete_memory_note`、`clear_memory`、`list_memory_off_threads`、`set_thread_memory`。完整格式见 `web/src/types/Request.ts`。
+`route`、`list_rules`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`，以及“记忆”页用的 `get_memory`、`save_memory_text`、`forget_thread_memory`、`delete_memory_note`、`clear_memory`、`list_memory_off_threads`、`set_thread_memory`，看报告用的 `list_reports`、`read_report`。完整格式见 `web/src/types/Request.ts`。
 不指定 `agent_id` 的 `send` 按路由规则分派。
-监听非本机地址时必须设置 `auth_token_env`，客户端用 `Authorization: Bearer <令牌>` 或 `/ws?token=<令牌>` 连接。
+事件带连续的序号。断线重连时在地址里带上 `since=<收到的最后一个序号>&epoch=<hello 里的 epoch>`，服务端补发断开期间的事件（`hello.resumed` 为 true）；补不上（服务重启过、断开太久）时 `resumed` 为 false，客户端重新拉列表。见 `docs/ip/m2-spec.md` D-29。
+监听非本机地址时必须设置 `auth_token_env`，客户端用 `Authorization: Bearer <令牌>` 或 `/ws?token=<令牌>` 连接。令牌也可以是配对过的设备的令牌（`ip device pair`，见 `docs/ip/m2-spec.md` D-30）。
 握手时还检查来源，挡住别的网页借浏览器连控制台：没配令牌时 `Host` 必须是本机地址（`localhost`、`127.0.0.1`、`[::1]`），
 带 `Origin` 的请求（浏览器）必须和 `Host` 同源或写在 `allowed_origins` 里，否则 403。不带 `Origin` 的非浏览器客户端只看令牌。
 放在反向代理后面且代理改写了 `Host` 时，把对外地址写进 `allowed_origins`，如 `[https://ip.example.com]`。
@@ -116,6 +118,17 @@ docker compose up -d --build
 
 - [x] ts-rs 生成前端类型（含 WebSocket 协议），CI 检查生成结果已提交
 - [x] 最小 Web 控制台：对话、岗位与员工、任务、审批、路由规则五页（后来加了第六页“记忆”，见下面“上下文与记忆”）
+- [x] 控制台手机布局（backlog F-1）：窄屏（720px 以下）导航移到底部，对话页列表和对话分两屏、带返回栏，审批选项整行可点，输入框 16px 免得 iOS 放大，留出刘海和底部横条的安全区。只在 Playwright 的 390×844 手机视口里截图核对过（假模型），没在真手机上试过
+- [x] 控制台可安装成应用（PWA，backlog F-2）：`/manifest.webmanifest`、图标和根路径的 `/sw.js`；Service Worker 只缓存控制台自己的页面、脚本、样式和图标，先走网络、断网才用缓存，不碰 `/ws` 和数据。在 Playwright 的 Chromium 里核对过：没有可安装性错误，断网后页面外壳能从缓存打开。没在真手机和 Safari 上装过；装法见[《用 Docker 部署》](../docs/ip/deploy-docker.md)
+- [x] 员工回复渲染 Markdown（backlog F-3）：`web/src/markdown.js` 先解析成块和行内元素再生成 DOM，不执行 HTML，链接只认 http、https、mailto，表格在气泡里横向滚动；人写的消息照原样显示。渲染过的消息按 id 缓存，流式输出时不重复解析整段对话。解析器的单元测试在 `web/test/`（`node --test test/*.test.mjs`），CI 的 rust 工作流会跑。只在 Playwright 里用假模型核对过
+- [x] 看员工写的报告（backlog F-4）：`list_reports`、`read_report` 两个请求（`crates/ip-server/src/reports.rs`），只读员工工作目录 `reports/` 这一层的 `.md`，挡住子目录、`..`、隐藏文件和符号链接，再核对一次真实路径，单份最多读 1 MB。控制台岗位卡片列出最近的报告，对话、任务结果和报告里提到的 `reports/<文件名>.md` 都能点开，在浮层里按 Markdown 显示，手机上占满整屏、按返回键关掉。只在 Playwright 里用假模型和手写的示例报告核对过
+- [x] “待办”页（backlog F-5）：员工提问、等你决定的审批卡片、受阻的任务，以及最近 7 天完成的任务和新报告；导航角标是待决定的卡片加受阻的任务。手机上默认打开这一页，宽屏仍先打开对话。只在 Playwright 里用假模型核对过
+- [x] 断线续传（backlog F-6，`docs/ip/m2-spec.md` D-29）：`/ws` 连上先发 `hello`（协议版本号、本次启动的 `epoch`），事件带连续序号；服务端留最近 4096 个事件（不超过 4 MiB），重连带上次的序号就补发，补不上才让客户端重新拉。一个转发任务编号、序列化一次，各连接共用同一份文字；连接跟不上时也先从留着的事件里补。控制台重连后不再整个重新拉列表；服务端协议版本变了会提示刷新。`ip bench events` 量编号转发的吞吐和补发耗时（开发机上约 230 万个/秒，补发 4096 个约 0.1 毫秒），接入 CI。只在测试和 Playwright 里用假模型核对过断线重连
+- [x] 设备配对（backlog F-7，`docs/ip/m2-spec.md` D-30）：`ip device pair --name <设备名> [--url <控制台地址>]` 或控制台“设备”页生成 6 位配对码（2 分钟、一次性，终端和页面都能出二维码），设备用 `POST /pair` 换自己的令牌（库里只存 SHA-256）；`/ws` 认设备令牌，设备发的消息、做的审批署设备名；“设备”页看在线、改名、吊销（立即断开）。只在测试和 Playwright 里核对过
+- [x] 设备权限（backlog F-8，`docs/ip/m2-spec.md` D-31）：每台设备“日常”或“管理”一档，新配对的是“日常”。`/ws` 按请求类型放行、默认拒绝：“日常”能对话、审批、处理任务、看报告，路由规则、定时任务、记忆、设备管理要“管理”；共用令牌等同“管理”。“设备”页改权限，连着的设备下一个请求就按新权限算。只在测试和 Playwright 里核对过
+- [x] 通知规则（backlog F-9，`docs/ip/m2-spec.md` D-32）：服务端从运行时事件里挑出要告诉人的事（审批卡、员工提问、一轮失败、任务受阻为“要我处理”，员工回复、任务完成为“全部”），预览先脱敏再去掉代码块和表格、取头两句。每台设备自己设级别、按岗位静音、静音到、要不要预览；`/ws` 按设置推 `alert`，审批在别处处理过就推 `dismiss` 撤掉。控制台不在前台时弹系统通知，点开去那个对话（`#/chat/<对话 id>`）。`ip bench notify` 量每个事件过规则的吞吐和预览耗时，接入 CI。只在测试和 Playwright 里用假模型核对过；关掉页面后的推送在 F-10
+- [x] Web Push（backlog F-10，`docs/ip/m2-spec.md` D-33）：主机第一次用到时生成 VAPID 密钥，控制台“设备与通知”页点“开启推送”后，页面关着、手机锁屏也能收到上面那些通知。按 RFC 8291 加密、RFC 8292 签名，直接发给浏览器厂商的推送服务，只认 FCM、苹果、Mozilla、Windows 这几家的地址；推送服务回 404、410 的订阅自动删。页面在前台时不推；审批在别处处理过，推一条同标签、静音的“已在别处处理”盖掉旧的。`ip.yaml` 可选 `push.contact`（`mailto:` 或 `https://`）。`ip bench notify` 加了加密并签名一条推送的耗时。加密逐字节对过 RFC 8291 的例子；整条链路只用假推送服务和 Playwright 核对过，没在真的推送服务上跑过
+- [x] 桌面 App（backlog F-11，`apps/desktop/`，`docs/ip/m2-spec.md` D-34）：Tauri 2 壳里自带一份控制台，填主机地址和配对码连上，令牌放系统钥匙串；关窗口留在托盘、托盘显示待办数、系统通知、开机启动。`/ws` 在配了令牌时接受桌面 App 的来源。真的 App 只在 Linux 虚拟屏幕上跑过配对和连主机，托盘、通知和 macOS、Windows 没验过，见 `apps/desktop/README.md`
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片
 - [x] 路由 v2（二）：语义匹配（可选）：规则都没命中时请模型按岗位职责判断，把握够就分派，不够时把判断作为审批卡片的推荐项
@@ -153,7 +166,7 @@ docker compose up -d --build
 - [x] 引擎接口和 Codex 引擎（先只给运维测试岗位）：`ip.yaml` 的 `engines` 按岗位配置；每轮起一个 `codex exec --json` 进程，同一对话用 `resume` 续接、只交新消息；超时整组终止；用量计入岗位预算。用假 codex 跑通了；真实 Codex 的验收见下面“真实验收：Codex”一条
 - [x] Docker 部署：`rust/Dockerfile`、`docker-compose.yml`、`deploy/env.example`；镜像带 bubblewrap，可选带 Codex；以 uid 10001 运行，数据放命名卷，端口只绑本机。在容器里用假模型跑通了沙箱里的 shell，`ip check`、健康检查、令牌校验都测过；真实模型、Slack、Codex 和其他验收一起做。见[《用 Docker 部署》](../docs/ip/deploy-docker.md)
 - [x] 质量评测 `ip eval`（backlog B-1）：评测集 `evals/macro-smoke.yaml` 两个固定问题（有数据的、一半取不到的），检查项全由程序判定；2026-11-12 用 `gpt-6-luna` 真实跑两遍，都是 2/2 通过，每遍不到 0.01 美元，结果在 `docs/ip/evals/2026-11-12-luna/`
-- [ ] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)，先跑 `ip check`
+- [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（容器只能经代理出网，backlog E-12）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
 - [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账还没修（E-10）
 
 **M0 验收**：在云主机上用一个可执行文件启动；通过 WebSocket 和一个岗位对话，它能在沙箱里跑 shell 命令；中文能搜到历史消息；启动、内存、并发三项达到方案里的性能目标。

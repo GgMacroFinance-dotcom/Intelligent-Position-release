@@ -85,7 +85,12 @@ async fn start_with_schedules(
         })
         .unwrap();
     let org = OrgSpec { roles: vec![role] };
-    let mut app = App::new(runtime, org.clone(), token.map(String::from));
+    // 小宏的工作目录里放一份报告，测 list_reports、read_report。
+    let ws = dir.path().join("ws-macro-1");
+    std::fs::create_dir_all(ws.join("reports")).unwrap();
+    std::fs::write(ws.join("reports").join("2026-11-16-cpi.md"), "# CPI\n\n同比 2.9%").unwrap();
+    let mut app = App::new(runtime, org.clone(), token.map(String::from))
+        .with_workspaces(std::collections::HashMap::from([("macro-1".into(), ws)]));
     if let Some(spec) = rules {
         let agents = app.runtime().agents();
         app = app.with_router(ip_router::Router::new(serde_saphyr::from_str(spec).unwrap(), &org, &agents).unwrap());
@@ -197,6 +202,122 @@ async fn chat_roundtrip_over_websocket() {
     assert_eq!(hits["data"].as_array().unwrap().len(), 1, "{hits}");
 }
 
+/// 收事件直到一轮结束，返回途中所有事件帧。
+async fn until_turn_finished(ws: &mut Ws, mut frames: Vec<Value>) -> Vec<Value> {
+    while !frames.iter().any(|e| e["event"]["type"] == "turn_finished") {
+        frames.push(next_json(ws).await);
+    }
+    frames
+}
+
+/// 断线重连补发（`docs/ip/m2-spec.md` D-29）。
+#[tokio::test]
+async fn resumes_events_after_reconnect() {
+    let s = start(None).await;
+    let mut ws = connect(s.addr, "").await.unwrap();
+    let hello = next_json(&mut ws).await;
+    assert_eq!(hello["type"], "hello");
+    assert_eq!(hello["protocol"], crate::events::PROTOCOL_VERSION);
+    assert_eq!(hello["resumed"], false);
+    assert_eq!(hello["seq"], 0);
+    let epoch = hello["epoch"].as_str().unwrap().to_string();
+
+    let (_, events) = request(
+        &mut ws,
+        1,
+        json!({"type": "send", "agent_id": "macro-1", "text": "第一轮"}),
+    )
+    .await;
+    let events = until_turn_finished(&mut ws, events).await;
+    let seqs: Vec<u64> = events.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
+    assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>(), "序号从 1 起、连续");
+    let seen = *seqs.last().unwrap();
+    drop(ws);
+
+    // 断开期间另一个连接发了一轮
+    let mut other = connect(s.addr, "").await.unwrap();
+    assert_eq!(next_json(&mut other).await["seq"], seen);
+    let (_, events) = request(
+        &mut other,
+        1,
+        json!({"type": "send", "agent_id": "macro-1", "text": "第二轮"}),
+    )
+    .await;
+    let missed: Vec<Value> = until_turn_finished(&mut other, events).await;
+    let latest = missed.last().unwrap()["seq"].as_u64().unwrap();
+
+    // 带上次的序号重连：先 hello，再按顺序补发断开期间的事件
+    let mut back = connect(s.addr, &format!("?since={seen}&epoch={epoch}")).await.unwrap();
+    let hello = next_json(&mut back).await;
+    assert_eq!(
+        (hello["resumed"].clone(), hello["seq"].clone()),
+        (json!(true), json!(seen))
+    );
+    let mut replayed = Vec::new();
+    for _ in seen..latest {
+        replayed.push(next_json(&mut back).await);
+    }
+    assert_eq!(replayed, missed);
+    // 补完之后接着收请求的回复，没有多余的帧
+    let (r, extra) = request(&mut back, 2, json!({"type": "list_roles"})).await;
+    assert_eq!(r["ok"], true);
+    assert!(extra.is_empty(), "{extra:?}");
+
+    // epoch 不对（服务重启过）或序号比服务端还新：不补发，客户端重新拉
+    for query in [
+        format!("?since={seen}&epoch=old"),
+        format!("?since={}&epoch={epoch}", latest + 5),
+    ] {
+        let mut ws = connect(s.addr, &query).await.unwrap();
+        let hello = next_json(&mut ws).await;
+        assert_eq!(hello["resumed"], false, "{query}");
+        assert_eq!(hello["seq"], latest);
+        let (_, extra) = request(&mut ws, 1, json!({"type": "list_roles"})).await;
+        assert!(extra.is_empty(), "{query}: {extra:?}");
+    }
+}
+
+/// 连接跟不上广播时，从留着的事件里补上；留着的也补不上才发 `lagged`。
+#[tokio::test]
+async fn slow_connections_catch_up_from_kept_events() {
+    let s = start(None).await;
+    // 广播通道只积压 1 帧，事件一多这个连接必然跟不上。
+    let mut app = s.app.clone();
+    app.events = Arc::new(crate::events::EventLog::new(4096, usize::MAX, 1));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let r = router(Some(app.clone()));
+    tokio::spawn(async move { axum::serve(listener, r).await.unwrap() });
+    let delta = |n: u32| ip_runtime::RuntimeEvent::Delta {
+        agent_id: "macro-1".into(),
+        thread_id: "t".into(),
+        text: n.to_string(),
+    };
+
+    let mut ws = connect(addr, "").await.unwrap();
+    assert_eq!(next_json(&mut ws).await["type"], "hello");
+    // 测试跑在单线程运行时上，这个循环里连接的任务插不进来，广播通道一定会溢出。
+    for n in 1..=2000 {
+        app.events.push(delta(n));
+    }
+    for seq in 1..=2000u64 {
+        let frame = next_json(&mut ws).await;
+        assert_eq!(
+            (frame["type"].clone(), frame["seq"].clone()),
+            (json!("event"), json!(seq))
+        );
+    }
+
+    // 一下子来 5000 个，超过留着的 4096 个：补不上，发一次 lagged，然后接着推新的。
+    for n in 1..=5000 {
+        app.events.push(delta(n));
+    }
+    let lagged = next_json(&mut ws).await;
+    assert_eq!(lagged, json!({"type": "lagged", "skipped": 7000 - 4096 - 2000}));
+    app.events.push(delta(0));
+    assert_eq!(next_json(&mut ws).await["seq"], 7001);
+}
+
 #[tokio::test]
 async fn bad_requests_get_error_replies() {
     let s = start(None).await;
@@ -218,6 +339,402 @@ async fn token_is_required_when_configured() {
     let mut ws = connect(s.addr, "?token=s3cret").await.unwrap();
     let (r, _) = request(&mut ws, 1, json!({"type": "list_agents"})).await;
     assert_eq!(r["ok"], true);
+}
+
+/// 设备配对（backlog F-7）：共用令牌生成配对码，设备换到自己的令牌，署名用设备名，吊销后立即断开。
+#[tokio::test]
+async fn devices_pair_sign_with_their_name_and_can_be_revoked() {
+    let s = start(Some("s3cret")).await;
+    let mut admin = connect(s.addr, "?token=s3cret").await.unwrap();
+    let (me, _) = request(&mut admin, 1, json!({"type": "who_am_i"})).await;
+    assert_eq!(me["data"], json!({"device": null, "scope": "admin"}));
+    let (p, _) = request(
+        &mut admin,
+        2,
+        json!({"type": "create_pairing", "name": "张三的手机", "link_base": "https://ip.example.com"}),
+    )
+    .await;
+    let code = p["data"]["code"].as_str().unwrap().to_string();
+    assert_eq!(p["data"]["link"], format!("https://ip.example.com/#/pair/{code}"));
+
+    let http = reqwest::Client::new();
+    let pair = |body: Value, origin: Option<&'static str>| {
+        let mut req = http.post(format!("http://{}/pair", s.addr)).json(&body);
+        if let Some(o) = origin {
+            req = req.header("Origin", o);
+        }
+        req.send()
+    };
+    // 别的网页借浏览器来换令牌：挡在来源检查
+    assert_eq!(
+        pair(json!({"code": code}), Some("https://evil.example"))
+            .await
+            .unwrap()
+            .status(),
+        403
+    );
+    let wrong = if code == "000000" { "000001" } else { "000000" };
+    assert_eq!(pair(json!({"code": wrong}), None).await.unwrap().status(), 400);
+    let claimed: Value = pair(json!({"code": code}), None).await.unwrap().json().await.unwrap();
+    let token = claimed["token"].as_str().unwrap().to_string();
+    let device_id = claimed["device"]["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        pair(json!({"code": code}), None).await.unwrap().status(),
+        400,
+        "配对码只能用一次"
+    );
+
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+    let (me, _) = request(&mut phone, 1, json!({"type": "who_am_i"})).await;
+    assert_eq!(me["data"]["device"]["name"], "张三的手机");
+    assert_eq!(me["data"]["scope"], "daily", "新配对的设备是“日常”权限");
+    let (r, _) = request(&mut phone, 2, json!({"type": "list_devices"})).await;
+    assert_eq!(r["ok"], false, "日常设备不能管理设备");
+    // 自填的署名不算数
+    let (sent, _) = request(
+        &mut phone,
+        3,
+        json!({"type": "send", "agent_id": "macro-1", "text": "看看 CPI", "author": "冒充的名字"}),
+    )
+    .await;
+    assert_eq!(
+        sent["data"]["message"]["author"],
+        json!({"kind": "human", "name": "张三的手机"})
+    );
+
+    let (list, _) = request(&mut admin, 3, json!({"type": "list_devices"})).await;
+    assert_eq!(list["data"][0]["online"], true);
+    let (list, _) = request(
+        &mut admin,
+        4,
+        json!({"type": "rename_device", "device_id": device_id, "name": "张三的新手机"}),
+    )
+    .await;
+    assert_eq!(list["data"][0]["name"], "张三的新手机");
+    // 连着的时候改名，之后的署名就用新名字
+    let (sent, _) = request(
+        &mut phone,
+        4,
+        json!({"type": "send", "agent_id": "macro-1", "text": "再看看 PPI"}),
+    )
+    .await;
+    assert_eq!(sent["data"]["message"]["author"]["name"], "张三的新手机");
+    let (list, _) = request(&mut admin, 5, json!({"type": "revoke_device", "device_id": device_id})).await;
+    assert_eq!(list["data"], json!([]));
+    // 吊销后连接立即断开，令牌也不能再用
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(msg)) = phone.next().await {
+            if matches!(msg, Message::Close(_)) {
+                return true;
+            }
+        }
+        true
+    })
+    .await
+    .unwrap();
+    assert!(closed);
+    assert!(connect(s.addr, &format!("?token={token}")).await.is_err());
+}
+
+/// 管理端生成配对码，换到一台设备的令牌和 id。
+async fn pair_device(s: &Server, admin: &mut Ws, name: &str) -> (String, String) {
+    let (p, _) = request(admin, 900, json!({"type": "create_pairing", "name": name})).await;
+    let code = p["data"]["code"].as_str().unwrap();
+    let claimed: Value = reqwest::Client::new()
+        .post(format!("http://{}/pair", s.addr))
+        .json(&json!({"code": code}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    (
+        claimed["token"].as_str().unwrap().to_string(),
+        claimed["device"]["id"].as_str().unwrap().to_string(),
+    )
+}
+
+#[tokio::test]
+async fn daily_devices_only_get_daily_requests() {
+    let s = start(Some("s3cret")).await;
+    let mut admin = connect(s.addr, "?token=s3cret").await.unwrap();
+    let (token, id) = pair_device(&s, &mut admin, "李四的手机").await;
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+
+    // 日常：对话、任务、审批、报告，以及两样只读的（路由规则、关了记忆的对话）
+    for (n, body) in [
+        json!({"type": "list_threads"}),
+        json!({"type": "list_tasks"}),
+        json!({"type": "list_approvals"}),
+        json!({"type": "list_reports"}),
+        json!({"type": "list_rules"}),
+        json!({"type": "list_memory_off_threads"}),
+        json!({"type": "spend_today"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (r, _) = request(&mut phone, n as u64 + 1, body.clone()).await;
+        assert_eq!(r["ok"], true, "{body}");
+    }
+    // 管理：改路由、规则草案、定时任务、记忆、设备
+    for (n, body) in [
+        json!({"type": "list_rule_drafts"}),
+        json!({"type": "list_schedules"}),
+        json!({"type": "run_schedule", "schedule_id": "x"}),
+        json!({"type": "get_memory", "role_id": "macro"}),
+        json!({"type": "clear_memory", "role_id": "macro"}),
+        json!({"type": "set_thread_memory", "thread_id": "t", "enabled": false}),
+        json!({"type": "list_devices"}),
+        json!({"type": "set_device_scope", "device_id": id, "scope": "admin"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (r, _) = request(&mut phone, n as u64 + 100, body.clone()).await;
+        assert_eq!(r["ok"], false, "{body}");
+        assert!(r["error"].as_str().unwrap().contains("日常"), "{body}: {r}");
+    }
+
+    // 给了“管理”，连着的连接下一个请求就能用；收回后又不能用
+    let (list, _) = request(
+        &mut admin,
+        1,
+        json!({"type": "set_device_scope", "device_id": id, "scope": "admin"}),
+    )
+    .await;
+    assert_eq!(list["data"][0]["scope"], "admin");
+    let (me, _) = request(&mut phone, 200, json!({"type": "who_am_i"})).await;
+    assert_eq!(me["data"]["scope"], "admin");
+    let (r, _) = request(&mut phone, 201, json!({"type": "list_rule_drafts"})).await;
+    assert_eq!(r["ok"], true);
+    let (r, _) = request(
+        &mut phone,
+        202,
+        json!({"type": "set_device_scope", "device_id": id, "scope": "daily"}),
+    )
+    .await;
+    assert_eq!(r["data"][0]["scope"], "daily", "管理设备也能管理设备，包括自己");
+    let (r, _) = request(&mut phone, 203, json!({"type": "list_rule_drafts"})).await;
+    assert_eq!(r["ok"], false);
+}
+
+/// 一直读到满足条件的那一帧（含），返回读到的所有帧。
+async fn frames_until(ws: &mut Ws, mut frames: Vec<Value>, done: impl Fn(&Value) -> bool) -> Vec<Value> {
+    while !frames.iter().any(&done) {
+        frames.push(next_json(ws).await);
+    }
+    frames
+}
+
+fn alerts(frames: &[Value]) -> Vec<&Value> {
+    frames
+        .iter()
+        .filter(|f| f["type"] == "alert")
+        .map(|f| &f["alert"])
+        .collect()
+}
+
+/// 通知规则（`docs/ip/m2-spec.md` D-32）：每个连接按自己的设置收通知。
+#[tokio::test]
+async fn alerts_follow_each_connections_settings() {
+    let rules = "rules: [{ id: 数据点评, when: { any: [CPI, PPI] }, to: { role: macro } }]";
+    let s = start_with(None, Some(rules)).await;
+    let mut admin = connect(s.addr, "").await.unwrap();
+    let (token, _) = pair_device(&s, &mut admin, "手机").await;
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+    // 日常设备能改自己的通知设置：全部都要
+    let (saved, _) = request(
+        &mut phone,
+        1,
+        json!({"type": "set_notify_settings", "settings": {"level": "all", "muted_roles": [], "mute_until_ms": null, "preview": true}}),
+    )
+    .await;
+    assert_eq!(saved["data"]["level"], "all", "{saved}");
+    let (mine, _) = request(&mut admin, 1, json!({"type": "get_notify_settings"})).await;
+    assert_eq!(
+        mine["data"]["level"], "needs_me",
+        "共用令牌的设置是另一份，默认只推需要我的"
+    );
+
+    // 员工回复了（“全部”一档），然后来了一张审批卡（“需要我”）
+    let (sent, frames) = request(&mut admin, 2, json!({"type": "send", "text": "点评 PPI"})).await;
+    assert_eq!(sent["ok"], true, "{sent}");
+    let frames = until_turn_finished(&mut admin, frames).await;
+    let (r, more) = request(&mut admin, 3, json!({"type": "send", "text": "今天吃什么"})).await;
+    let card = r["data"]["approval_id"].as_str().unwrap().to_string();
+    let is_card = |f: &Value| f["type"] == "alert" && f["alert"]["tag"] == format!("approval:{card}");
+    let frames = frames_until(&mut admin, [frames, more].concat(), is_card).await;
+    let got = alerts(&frames);
+    assert_eq!(got.len(), 1, "只推需要我的：没有回复的通知 {got:?}");
+    assert_eq!(got[0]["kind"], "approval");
+    assert_eq!(got[0]["title"], "这条消息该交给谁？");
+    assert_eq!(got[0]["body"], "今天吃什么");
+
+    let frames = frames_until(&mut phone, Vec::new(), is_card).await;
+    let got = alerts(&frames);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[0]["kind"], "reply");
+    assert_eq!(got[0]["title"], "小宏 回复了");
+    assert_eq!(got[0]["body"], "CPI 同比上涨 0.3%");
+    assert_eq!(got[0]["role_id"], "macro");
+
+    // 在一处处理过，各处都收到撤掉的通知
+    let (resolved, frames) = request(
+        &mut admin,
+        4,
+        json!({"type": "resolve_approval", "approval_id": card, "choice": 0}),
+    )
+    .await;
+    assert_eq!(resolved["ok"], true);
+    let dismissed = |f: &Value| f["type"] == "dismiss" && f["tag"] == format!("approval:{card}");
+    frames_until(&mut admin, frames, dismissed).await;
+    frames_until(&mut phone, Vec::new(), dismissed).await;
+}
+
+/// 假的推送服务收到的一次推送：路径、请求头、正文。
+type Pushes = Arc<std::sync::Mutex<Vec<(String, axum::http::HeaderMap, Vec<u8>)>>>;
+
+/// 起一个假的推送服务：`/push/gone` 回 410，其余回 201。
+async fn fake_push_service() -> (std::net::SocketAddr, Pushes) {
+    let got: Pushes = Arc::default();
+    let seen = got.clone();
+    let app = axum::Router::new().route(
+        "/push/{id}",
+        axum::routing::post(
+            move |axum::extract::Path(id): axum::extract::Path<String>,
+                  headers: axum::http::HeaderMap,
+                  body: axum::body::Bytes| {
+                let seen = seen.clone();
+                async move {
+                    seen.lock().unwrap().push((id.clone(), headers, body.to_vec()));
+                    if id == "gone" {
+                        axum::http::StatusCode::GONE
+                    } else {
+                        axum::http::StatusCode::CREATED
+                    }
+                }
+            },
+        ),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (addr, got)
+}
+
+/// 等假推送服务收到满足条件的推送，返回它的请求头和正文。
+async fn wait_push(got: &Pushes, pick: impl Fn(&str, usize) -> bool) -> (axum::http::HeaderMap, Vec<u8>) {
+    for _ in 0..100 {
+        {
+            let list = got.lock().unwrap();
+            if let Some((_, h, b)) = list
+                .iter()
+                .enumerate()
+                .find(|(i, (id, _, _))| pick(id, *i))
+                .map(|(_, x)| x)
+            {
+                return (h.clone(), b.clone());
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("没等到推送");
+}
+
+/// Web Push（`docs/ip/m2-spec.md` D-33）：按设备的设置推、加密、签名，失效订阅删掉，前台时不推，处理过的盖掉。
+#[tokio::test]
+async fn web_push_reaches_subscribed_devices() {
+    use aws_lc_rs::agreement::{ECDH_P256, PrivateKey};
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let rules = "rules: [{ id: 数据点评, when: { any: [CPI, PPI] }, to: { role: macro } }]";
+    let s = start_with(None, Some(rules)).await;
+    s.app.push.allow_loopback_endpoints();
+    let (push_addr, got) = fake_push_service().await;
+    let mut admin = connect(s.addr, "").await.unwrap();
+    let (token, phone_id) = pair_device(&s, &mut admin, "手机").await;
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+
+    let (key, _) = request(&mut phone, 1, json!({"type": "push_key"})).await;
+    let server_key = key["data"]["public_key"].as_str().unwrap().to_string();
+    assert_eq!(b64.decode(&server_key).unwrap().len(), 65);
+    let ua = PrivateKey::generate(&ECDH_P256).unwrap();
+    let p256dh = b64.encode(ua.compute_public_key().unwrap().as_ref());
+    let auth = [3u8; 16];
+    for (n, path) in ["phone", "gone"].into_iter().enumerate() {
+        let (r, _) = request(
+            &mut phone,
+            2 + n as u64,
+            json!({"type": "subscribe_push", "endpoint": format!("http://{push_addr}/push/{path}"), "p256dh": p256dh, "auth": b64.encode(auth)}),
+        )
+        .await;
+        assert_eq!(r["ok"], true, "{r}");
+    }
+    let (r, _) = request(
+        &mut phone,
+        9,
+        json!({"type": "subscribe_push", "endpoint": "http://10.0.0.1/push", "p256dh": p256dh, "auth": b64.encode(auth)}),
+    )
+    .await;
+    assert_eq!(r["ok"], false, "内网地址登记不上");
+    assert_eq!(s.app.push.count(&phone_id), 2);
+
+    // 来了一张审批卡：推给手机（默认只推需要我的）
+    let (r, _) = request(&mut admin, 2, json!({"type": "send", "text": "今天吃什么"})).await;
+    let card = r["data"]["approval_id"].as_str().unwrap().to_string();
+    let (headers, body) = wait_push(&got, |id, _| id == "phone").await;
+    assert_eq!(headers["content-encoding"], "aes128gcm");
+    assert_eq!(headers["urgency"], "high");
+    assert_eq!(headers["ttl"], "86400");
+    assert_eq!(headers["topic"].len(), 32);
+    let vapid = headers["authorization"].to_str().unwrap();
+    assert!(
+        vapid.starts_with("vapid t=") && vapid.ends_with(&format!(", k={server_key}")),
+        "{vapid}"
+    );
+    let payload: Value = serde_json::from_slice(&crate::webpush::tests::decrypt(&body, &ua, &auth)).unwrap();
+    assert_eq!(payload["title"], "这条消息该交给谁？");
+    assert_eq!(payload["body"], "今天吃什么");
+    assert_eq!(payload["tag"], format!("approval:{card}"));
+    // 回 410 的订阅被删掉
+    for _ in 0..100 {
+        if s.app.push.count(&phone_id) == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(s.app.push.count(&phone_id), 1);
+
+    // 手机页面在前台：不推
+    let (r, _) = request(&mut phone, 10, json!({"type": "presence", "active": true})).await;
+    assert_eq!(r["ok"], true);
+    let before = got.lock().unwrap().len();
+    let (r, frames) = request(&mut admin, 3, json!({"type": "send", "text": "明天吃什么"})).await;
+    let second = r["data"]["approval_id"].as_str().unwrap().to_string();
+    frames_until(&mut admin, frames, |f| {
+        f["type"] == "alert" && f["alert"]["tag"] == format!("approval:{second}")
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(got.lock().unwrap().len(), before, "前台时不推");
+    request(&mut phone, 11, json!({"type": "presence", "active": false})).await;
+
+    // 第一张卡在控制台处理了：手机上那条被“已在别处处理”盖掉，不响铃
+    request(
+        &mut admin,
+        4,
+        json!({"type": "resolve_approval", "approval_id": card, "choice": 0}),
+    )
+    .await;
+    let (_, body) = wait_push(&got, |id, i| id == "phone" && i >= before).await;
+    let payload: Value = serde_json::from_slice(&crate::webpush::tests::decrypt(&body, &ua, &auth)).unwrap();
+    assert_eq!(payload["title"], "已在别处处理");
+    assert_eq!(payload["body"], "这条消息该交给谁？");
+    assert_eq!(payload["tag"], format!("approval:{card}"));
+    assert_eq!(payload["silent"], true);
 }
 
 #[tokio::test]
@@ -483,13 +1000,19 @@ async fn serves_embedded_console() {
         ("/", "200"),
         ("/assets/app.js", "200"),
         ("/assets/style.css", "200"),
+        ("/assets/markdown.js", "200"),
+        ("/assets/icon-192.png", "200"),
+        ("/manifest.webmanifest", "200"),
+        ("/sw.js", "200"),
         ("/assets/nope.js", "404"),
     ] {
         let mut stream = tokio::net::TcpStream::connect(s.addr).await.unwrap();
         let req = format!("GET {path} HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n");
         stream.write_all(req.as_bytes()).await.unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).await.unwrap();
+        // 图标是二进制，按字节读再转成文字看响应头。
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).await.unwrap();
+        let response = String::from_utf8_lossy(&raw);
         assert!(
             response.starts_with(&format!("HTTP/1.1 {expect}")),
             "{path}: {response}"
@@ -501,6 +1024,34 @@ async fn serves_embedded_console() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn lists_and_reads_reports() {
+    let s = start(None).await;
+    let mut ws = connect(s.addr, "").await.unwrap();
+    let (list, _) = request(&mut ws, 1, json!({"type": "list_reports", "agent_id": "macro-1"})).await;
+    assert_eq!(list["ok"], true, "{list}");
+    assert_eq!(list["data"][0]["path"], "reports/2026-11-16-cpi.md");
+    let (all, _) = request(&mut ws, 2, json!({"type": "list_reports"})).await;
+    assert_eq!(all["data"].as_array().unwrap().len(), 1);
+
+    let (report, _) = request(
+        &mut ws,
+        3,
+        json!({"type": "read_report", "agent_id": "macro-1", "path": "reports/2026-11-16-cpi.md"}),
+    )
+    .await;
+    assert_eq!(report["data"]["text"], "# CPI\n\n同比 2.9%");
+    assert_eq!(report["data"]["truncated"], false);
+
+    let (bad, _) = request(
+        &mut ws,
+        4,
+        json!({"type": "read_report", "agent_id": "macro-1", "path": "reports/../ip.db"}),
+    )
+    .await;
+    assert_eq!(bad["ok"], false);
 }
 
 #[tokio::test]
