@@ -12,6 +12,7 @@ use clap::{Args, ValueEnum};
 mod agents;
 mod events;
 mod notify;
+mod relay;
 mod store;
 use serde::Serialize;
 
@@ -48,6 +49,8 @@ enum Which {
     Events,
     /// 每个运行时事件过一遍通知规则的吞吐，以及通知预览的耗时。
     Notify,
+    /// 推送中转打开封条、拼好转给 APNs 的请求体的耗时。
+    Relay,
 }
 
 #[derive(Serialize)]
@@ -70,6 +73,7 @@ pub fn run(args: BenchArgs) -> anyhow::Result<()> {
         Which::Agents => agents::run(args.check),
         Which::Events => events::run(args.check),
         Which::Notify => notify::run(args.check),
+        Which::Relay => relay::run(args.check),
     }
 }
 
