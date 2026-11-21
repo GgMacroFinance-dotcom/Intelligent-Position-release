@@ -1,0 +1,75 @@
+// intelligent-position 的各平台 App（docs/ip/apps-plan.md 第 9 节）。
+
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
+import 'src/app_state.dart';
+import 'src/storage.dart';
+import 'src/ui/common.dart';
+import 'src/ui/connect_page.dart';
+import 'src/ui/home_page.dart';
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  final state = AppState(store: HostStore(SystemSecretStore()));
+  runApp(IpApp(state: state));
+  state.init();
+}
+
+/// 和网页控制台一样的主色。
+const _accent = Color(0xFF2F5BD3);
+
+class IpApp extends StatefulWidget {
+  const IpApp({super.key, required this.state});
+
+  final AppState state;
+
+  @override
+  State<IpApp> createState() => _IpAppState();
+}
+
+class _IpAppState extends State<IpApp> {
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    // 手机从后台回来时连接多半已经断了，不等退避马上重连。
+    _lifecycle = AppLifecycleListener(onResume: widget.state.resumed);
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppScope(
+      state: widget.state,
+      child: MaterialApp(
+        title: 'intelligent-position',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(colorSchemeSeed: _accent, useMaterial3: true),
+        darkTheme: ThemeData(colorSchemeSeed: _accent, brightness: Brightness.dark, useMaterial3: true),
+        locale: const Locale('zh', 'CN'),
+        supportedLocales: const [Locale('zh', 'CN')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: const _Root(),
+      ),
+    );
+  }
+}
+
+class _Root extends StatelessWidget {
+  const _Root();
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    if (!state.ready) return const Scaffold();
+    // 换了主机时主界面整个重建，不带着上一台主机的页面状态。
+    return state.host == null ? const ConnectPage() : HomePage(key: ValueKey(state.host!.address));
+  }
+}

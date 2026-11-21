@@ -1,0 +1,27 @@
+# 静态检查：Flutter 官方的推荐规则，外加几条。CI 跑 `flutter analyze`（有一条提示也算失败）。
+
+include: package:flutter_lints/flutter.yaml
+
+formatter:
+  # 和 rust/rustfmt.toml 的行宽一致。
+  page_width: 120
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-raw-types: true
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - windows/**
+    - macos/**
+    - linux/**
+
+linter:
+  rules:
+    - prefer_single_quotes
+    - unawaited_futures
+    - avoid_dynamic_calls
+    - cancel_subscriptions
+    - close_sinks

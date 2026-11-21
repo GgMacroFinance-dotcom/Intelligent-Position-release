@@ -1,0 +1,401 @@
+// 对话：对话列表、消息（员工回复按 Markdown，流式显示）、输入框。
+// 宽屏上列表和对话左右并排，窄屏上点开对话推进新的一屏。
+
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../app_state.dart';
+import '../protocol/client.dart';
+import '../protocol/models.dart';
+import 'common.dart';
+import 'home_page.dart' show ConnectionBanner;
+
+/// 列表和对话并排的最小宽度。
+const double kWideChat = 840;
+
+class ChatPage extends StatelessWidget {
+  const ChatPage({super.key, required this.onOpenThread, required this.onNewChat});
+
+  final void Function(String threadId) onOpenThread;
+  final VoidCallback onNewChat;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, box) {
+        if (box.maxWidth < kWideChat) return ThreadList(onOpen: onOpenThread, onNew: onNewChat);
+        return Row(
+          children: [
+            SizedBox(
+              width: 320,
+              child: ThreadList(onOpen: onOpenThread, onNew: onNewChat),
+            ),
+            const VerticalDivider(width: 1),
+            const Expanded(child: ThreadView()),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class ThreadList extends StatelessWidget {
+  const ThreadList({super.key, required this.onOpen, required this.onNew});
+
+  final void Function(String threadId) onOpen;
+  final VoidCallback onNew;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final theme = Theme.of(context);
+    return ListView.builder(
+      itemCount: state.threads.length + 1,
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          return ListTile(
+            leading: const Icon(Icons.add),
+            title: const Text('新对话'),
+            selected: state.threadId == null,
+            onTap: onNew,
+          );
+        }
+        final t = state.threads[i - 1];
+        return ListTile(
+          title: Text(t.preview ?? '（无文字）', maxLines: 2, overflow: TextOverflow.ellipsis),
+          subtitle: Text('${formatTime(t.lastAtMs)} · ${t.messageCount} 条', style: TextStyle(color: theme.hintColor)),
+          selected: t.threadId == state.threadId,
+          onTap: () => onOpen(t.threadId),
+        );
+      },
+    );
+  }
+}
+
+/// 窄屏上点开的一屏对话。
+class ThreadScreen extends StatelessWidget {
+  const ThreadScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final id = state.threadId;
+    final agent = id == null ? null : state.threadAgent[id];
+    return Scaffold(
+      appBar: AppBar(title: Text(id == null ? '新对话' : (agent == null ? '对话' : state.agentName(agent)))),
+      body: const SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            ConnectionBanner(),
+            Expanded(child: ThreadView()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ThreadView extends StatefulWidget {
+  const ThreadView({super.key});
+
+  @override
+  State<ThreadView> createState() => _ThreadViewState();
+}
+
+class _ThreadViewState extends State<ThreadView> {
+  final _scroll = ScrollController();
+
+  /// 渲染过的消息按 id 缓存：消息写进存储后不再变，流式输出时每来一段文字就重建一次，
+  /// 同一个 Widget 实例 Flutter 会跳过，不用把整段对话的 Markdown 重新解析（和网页控制台一样）。
+  final _cache = <String, Widget>{};
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Widget _message(AppState state, Message m) {
+    final who = switch (m.author) {
+      HumanAuthor(:final name) => name,
+      AgentAuthor(:final agentId) => state.agentName(agentId),
+      SystemAuthor() => '系统',
+    };
+    // 员工名单晚于消息加载时显示名会变，所以名字也算进缓存的键。
+    final key = '${m.id}\u0000$who';
+    if (_cache.length > 2000) _cache.clear();
+    return _cache[key] ??= MessageTile(key: ValueKey(m.id), message: m, who: who);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final id = state.threadId;
+    final items = <Widget>[
+      for (final m in state.messages) _message(state, m),
+      for (final MapEntry(key: agentId, value: text) in state.drafts.entries)
+        if (id == null || state.threadAgent[id] == null || state.threadAgent[id] == agentId)
+          _Bubble(who: state.agentName(agentId), note: '正在输入…', child: MessageMarkdown(text)),
+      if (id != null && state.turnNote[id] != null)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(state.turnNote[id]!, style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13)),
+        ),
+    ];
+    return Column(
+      children: [
+        Expanded(
+          child: items.isEmpty
+              ? EmptyHint(id == null ? (state.agents.isEmpty ? '主机上没有数字员工。' : '选一位员工，或者交给自动分派，开始新对话。') : '')
+              // 倒过来排：最新的在底部，来了新内容自动停在底部，往上翻时不会被拽下来。
+              : ListView.builder(
+                  controller: _scroll,
+                  reverse: true,
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                  itemCount: items.length,
+                  itemBuilder: (context, i) => items[items.length - 1 - i],
+                ),
+        ),
+        const Composer(),
+      ],
+    );
+  }
+}
+
+class MessageTile extends StatelessWidget {
+  const MessageTile({super.key, required this.message, required this.who});
+
+  final Message message;
+  final String who;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = message;
+    final time = formatTime(m.atMs);
+    return switch (m.body) {
+      // 人写的消息照原样显示；员工和系统的消息按 Markdown 渲染。
+      TextBody(:final text) => _Bubble(
+        who: who,
+        note: time,
+        human: m.author is HumanAuthor,
+        child: m.author is HumanAuthor ? SelectableText(text) : MessageMarkdown(text),
+      ),
+      ToolCallBody(:final name, :final input) => _Folded(title: '调用工具 $name', text: _pretty(input)),
+      ToolResultBody(:final ok, :final output) => _Folded(title: ok ? '工具结果' : '工具失败', text: output, failed: !ok),
+      SummaryBody(:final text) => _Folded(title: '较早的对话已压缩成摘要', text: text),
+      UnknownBody(:final kind) => _Folded(title: '（这个 App 还不认识的消息：$kind）', text: ''),
+    };
+  }
+
+  static String _pretty(Object? input) {
+    if (input is String) return input;
+    try {
+      return const JsonEncoder.withIndent('  ').convert(input);
+    } catch (_) {
+      return '$input';
+    }
+  }
+}
+
+class _Bubble extends StatelessWidget {
+  const _Bubble({required this.who, required this.note, required this.child, this.human = false});
+
+  final String who;
+  final String note;
+  final Widget child;
+  final bool human;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Align(
+      alignment: human ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+          decoration: BoxDecoration(
+            color: human ? scheme.primaryContainer : scheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: who,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    TextSpan(
+                      text: '  $note',
+                      style: TextStyle(color: theme.hintColor),
+                    ),
+                  ],
+                ),
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 4),
+              child,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Folded extends StatelessWidget {
+  const _Folded({required this.title, required this.text, this.failed = false});
+
+  final String title;
+  final String text;
+  final bool failed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: ExpansionTile(
+          dense: true,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+          childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+          expandedAlignment: Alignment.centerLeft,
+          title: Text(
+            title,
+            style: theme.textTheme.bodySmall?.copyWith(color: failed ? theme.colorScheme.error : theme.hintColor),
+          ),
+          children: [
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SelectableText(text, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 输入框和“发给谁”。输入框在重建时保留内容，事件推送不会冲掉正在打的字。
+class Composer extends StatefulWidget {
+  const Composer({super.key});
+
+  @override
+  State<Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<Composer> {
+  final _text = TextEditingController();
+  final _focus = FocusNode();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _text.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final text = _text.text.trim();
+    if (text.isEmpty || _sending) return;
+    final state = AppScope.read(context);
+    setState(() => _sending = true);
+    _text.clear();
+    try {
+      await state.send(text);
+    } on RequestError catch (e) {
+      _text.text = text;
+      if (mounted) showError(context, '发送失败：$e');
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  /// 桌面上 Enter 发送，Shift+Enter 换行；手机上点发送按钮。
+  KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    if (e is KeyDownEvent &&
+        e.logicalKey == LogicalKeyboardKey.enter &&
+        !HardwareKeyboard.instance.isShiftPressed &&
+        !_text.value.isComposingRangeValid) {
+      _send();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final theme = Theme.of(context);
+    final current = state.currentAgent;
+    // 当前选的员工不在名单里（名单还没加载）时先显示自动分派。
+    final value = state.agents.any((a) => a.id == current) ? current : null;
+    return Material(
+      color: theme.colorScheme.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            DropdownButtonHideUnderline(
+              child: DropdownButton<String?>(
+                isExpanded: true,
+                isDense: true,
+                value: value,
+                hint: const Text('自动分派（按路由规则）'),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('自动分派（按路由规则）')),
+                  for (final a in state.agents)
+                    DropdownMenuItem<String?>(value: a.id, child: Text('${a.name}（${a.role}）')),
+                ],
+                onChanged: state.connected ? state.chooseAgent : null,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Focus(
+                    onKeyEvent: _onKey,
+                    child: TextField(
+                      controller: _text,
+                      focusNode: _focus,
+                      minLines: 1,
+                      maxLines: 6,
+                      textInputAction: TextInputAction.newline,
+                      keyboardType: TextInputType.multiline,
+                      decoration: const InputDecoration(
+                        hintText: '写给员工……',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  tooltip: '发送',
+                  onPressed: state.connected && !_sending ? _send : null,
+                  icon: const Icon(Icons.send),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
