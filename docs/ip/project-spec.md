@@ -60,7 +60,7 @@ harness 从第一天就用 Rust 写，目的是充分利用硬件效率。代码
 
 - Finance Macro Data API 就是 which-api 仓库里的 `packages/macro-mcp`，一个 MCP 服务器，原有 12 个工具。数据来自纽约联储、FRED、美国财政部、TIC、Federal Register、SEC。已定。开源版放在本仓库的 `macro-mcp/`，现在 13 个工具（9 个美国、4 个中国国家统计局），FRED 经 WhichAPI 托管服务取（维护者 2026-11-13 定，见 backlog C-2）。
 - 测试部署在 Render 免费套餐上，闲置会休眠，休眠后第一次连接约等 1 分钟。
-- 中国数据：2026-11-15 加了国家统计局 4 个工具（搜指标、浏览目录、取数、CPI/PPI/PMI/M2 快捷入口），托管版见 which-api PR #14，开源版 `macro-mcp` 同步；`ip data pull` 不再拉统计局数据。境内网络真实跑通，境外网络能否访问没验（backlog E-2、A-2）。
+- 中国数据：2026-11-15 加了国家统计局 4 个工具（搜指标、浏览目录、取数、CPI/PPI/PMI/M2 快捷入口），托管版见 which-api PR #14，开源版 `macro-mcp` 同步；`ip data pull` 不再拉统计局数据。境内网络真实跑通；Render 上的托管版 2026-11-21 从境外真实取到数（`acceptance-2026-11-21-hosted-nbs.md`），境外主机本机启动开源版没测（backlog E-2、A-2）。
 - 已验证的范围：2026-11-11 的真实验收经 Render 上的测试部署取到了真实 FRED 数据；2026-11-14 起用本机启动的 `macro-mcp` 经 WhichAPI 托管服务取 FRED，配真实模型跑过评测（backlog A-1、C-2）。
 
 FRED 数据只留 Finance Macro Data API 这一个来源，`examples/public-data` 里重复的 FRED 序列删掉。已定。
@@ -140,6 +140,7 @@ FRED 数据只留 Finance Macro Data API 这一个来源，`examples/public-data
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-21 | “数据”一节：Render 托管版从境外访问国家统计局真实跑通（backlog E-2），没有新决定 |
 | 2026-11-21 | 维护者给了 Obsidian 图谱风格的样稿，定：App 里的 Bot 照这个风格展现，背景星空，图标用八大行星和知名恒星，幕僚长在中心用太阳，越紧急离太阳越近，越重要图标越大。协议里没有紧急度、重要度，Claude 按建议用待决定的提问、任务的截止时间和状态、失败和正在处理、工作量和岗位预算来算，理由照原样给人看（apps-plan 9.7，backlog F-22，已做） |
 | 2026-11-21 | 维护者定：各个平台都基于 Flutter 开发 App（Android、iOS、macOS、Windows、Linux）。Claude 按建议定的细节（维护者可改）：网页控制台和 PWA 保留给浏览器用户，Flutter 不出 Web 版；Tauri 桌面 App 在 Flutter 桌面版补齐托盘、通知、开机启动后删掉；协议仍只有 `/ws` 一套，服务端不用改。手机锁屏推送要只见密文的中转，和上不上商店一起列进待定。方案见 `apps-plan.md` 第 9 节，清单见 backlog F-13 起；F-13（工程骨架、连接主机、待办、对话）已做 |
 | 2026-11-16 | 维护者定：岗位记忆默认开（之前默认关）。`memory.enabled` 省略时是 `true`，对所有岗位生效；“员工照摘要做”仍没验证 |
