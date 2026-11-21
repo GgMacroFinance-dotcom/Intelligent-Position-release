@@ -18,6 +18,7 @@ pub use tokio_util::sync::CancellationToken;
 #[cfg(feature = "fake")]
 pub mod fake;
 pub mod slack;
+mod ws_proxy;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 

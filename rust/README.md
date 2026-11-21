@@ -170,7 +170,7 @@ docker compose up -d --build
 
 - [x] `ip-core` 新增两个字段：系统消息带类型 `notice`，外部渠道只转发“这轮失败”；人的消息可带来源渠道 `via`，路由规则 `from` 对渠道用户只按用户 id 匹配，改显示名冒用不了
 - [x] 通用渠道接口、绑定表、投递器、假渠道和渠道测试：`ip_server::channels::start` 把一个渠道接到服务上；收消息时去重、按名单准入、找或建会话绑定、分派，同一会话的追问粘住原来的员工；投递器从事件日志读，只发员工回复、“这轮失败”、卡片和卡片选定结果，失败重试、顺序不乱、重启不重发；卡片按 `approvers` 决定谁能点。用假渠道跑通了 T1–T11
-- [x] Slack 渠道（Socket Mode）：`ip.yaml` 的 `channels` 配置，主机不需要公网入口；在频道里 @机器人 或私信开启会话，回复和审批卡片都在同一个线程里，卡片用按钮选，选定后原卡片更新；应用清单在 `examples/slack/manifest.yaml`。用假 Slack 服务器跑通了，真实工作区待验收。收到的事件先存进数据库再向 Slack 确认，处理暂时失败时退避重试，进程在确认后退出也会在重启后接着处理；渠道去重改在处理成功之后（D-28，#69，只用假 Slack 测过）
+- [x] Slack 渠道（Socket Mode）：`ip.yaml` 的 `channels` 配置，主机不需要公网入口；在频道里 @机器人 或私信开启会话，回复和审批卡片都在同一个线程里，卡片用按钮选，选定后原卡片更新；应用清单在 `examples/slack/manifest.yaml`。用假 Slack 服务器跑通了，真实工作区待验收。收到的事件先存进数据库再向 Slack 确认，处理暂时失败时退避重试，进程在确认后退出也会在重启后接着处理；渠道去重改在处理成功之后（D-28，#69，只用假 Slack 测过）。主机只能经代理出网时，Socket Mode 按 `HTTPS_PROXY`/`NO_PROXY` 走代理的 CONNECT 隧道，代理地址可带用户名密码（D-37，backlog E-12，只用本地假代理和假 Slack 测过）
 - [x] MCP 服务端：组织工具开放给外部引擎，每轮一个令牌
 - [x] 引擎接口和 Codex 引擎（先只给运维测试岗位）：`ip.yaml` 的 `engines` 按岗位配置；每轮起一个 `codex exec --json` 进程，同一对话用 `resume` 续接、只交新消息；超时整组终止；用量计入岗位预算。用假 codex 跑通了；真实 Codex 的验收见下面“真实验收：Codex”一条
 - [x] Claude Code 引擎（backlog E-6，`docs/ip/m2-spec.md` D-36）：`engines` 里写 `kind: claude_code`。每轮起一个 `claude -p --bare --restricted --output-format stream-json` 进程，同一对话用 `--resume` 续接、只交新消息，系统提示词放文件传；文件工具只能动工作目录，要人批准的一律拒绝，`allowed_tools` 预先放行命令；组织工具经 `/mcp` 回调，令牌从环境变量展开、不进参数；按 `usage` 和价格记账（不用续接时累计的 `total_cost_usd`）。和 Codex 共用进程管理。用本机 Claude Code 2.1.330 连假的模型接口核对过参数和输出格式，`ip serve` 里派任务、经 `/mcp` 交回、续接、放行和拒绝命令都走通；没用真的 Claude 模型跑过
@@ -178,7 +178,7 @@ docker compose up -d --build
 - [x] Docker 部署的资源上限（backlog E-15 第一步）：`docker-compose.yml` 给容器整体设 `pids_limit`、`mem_limit`、`cpus`，可用 `.env` 覆盖；只用 `docker compose config` 校验过写法。这是容器整体的兜底
 - [ ] 每条 shell 命令的资源上限（backlog E-15 第二步）：`prlimit` 限内存、文件大小和进程数，`/tmp` 加 `--size`，`ip check` 报告是否生效
 - [x] 质量评测 `ip eval`（backlog B-1）：评测集 `evals/macro-smoke.yaml` 两个固定问题（有数据的、一半取不到的），检查项全由程序判定；2026-11-12 用 `gpt-6-luna` 真实跑两遍，都是 2/2 通过，每遍不到 0.01 美元，结果在 `docs/ip/evals/2026-11-12-luna/`
-- [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（容器只能经代理出网，backlog E-12）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
+- [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（当时容器只能经代理出网、Socket Mode 不走代理，backlog E-12；现在已能直接走代理，经真实代理没验）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
 - [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账 2026-11-16 修了（E-10，只用假 codex 测过）
 
 **M0 验收**：在云主机上用一个可执行文件启动；通过 WebSocket 和一个岗位对话，它能在沙箱里跑 shell 命令；中文能搜到历史消息；启动、内存、并发三项达到方案里的性能目标。

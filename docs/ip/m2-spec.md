@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.20（2026-11-21）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.22（2026-11-21）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -403,6 +403,20 @@ handle.attempts();                                                    // deliver
 - 第一版只支持一个 ip 进程连一个 Slack 应用（Q-08）。
 - 不用第三方 Slack SDK。用到的接口只有七八个，自己写一层薄封装：`tokio-tungstenite`（rustls）加现有的 `reqwest`。
 - 实现在 `ip-connectors/src/slack.rs`。每个信封先回 `envelope_id` 确认，再交给后台任务按顺序处理，处理慢的消息不会耽误确认。断线后按 1、2、4…… 秒退避重连，最多等 30 秒；收到 `disconnect` 立即重连。
+- 主机只能经代理出网时，WebSocket 连接按环境变量走代理，见 D-37。
+
+### D-37 Socket Mode 经 HTTP 代理连接 · 提议（backlog E-12）
+
+问题（2026-11-16 真实验收发现）：Web API 调用（`reqwest`）读 `HTTPS_PROXY`，Socket Mode 的 WebSocket（`tokio_tungstenite::connect_async`）不读。只能经代理出网的主机上 `ip check` 能过，`ip serve` 连不上 Slack。
+
+- **读哪些环境变量**：和 reqwest 用同一套规则，都由 hyper-util 的 `Matcher::from_env` 解析（reqwest 本来就依赖 hyper-util，没有新增 crate）。`wss://` 看 `HTTPS_PROXY`/`https_proxy`，`ws://` 看 `HTTP_PROXY`/`http_proxy`，都没设时用 `ALL_PROXY`/`all_proxy`；`NO_PROXY`/`no_proxy` 里的主机直连（规则同 curl：域名后缀、IP、CIDR、`*`）。进程启动、创建 Slack 渠道时读一次。`ip.yaml` 没有新配置项。
+- **怎么连**：要走代理时先连代理，发 `CONNECT <主机>:<端口> HTTP/1.1`，代理回 2xx 后在这条隧道上做 TLS 和 WebSocket 握手。TLS 是端到端的，代理只看到主机名和端口。连代理加等它回应最多 30 秒。
+- **认证**：代理地址里带用户名密码（`http://用户:密码@主机:端口`，特殊字符用百分号编码）时，用 `Proxy-Authorization: Basic …` 发给代理。日志和报错里只写代理的主机和端口，不写凭据。连上时的日志写明是直连还是经哪个代理。
+- **TLS 信任**：tokio-tungstenite（`rustls-tls-native-roots`）和 reqwest（rustls-platform-verifier）在 Linux 上都用 rustls-native-certs 读根证书，`SSL_CERT_FILE`、`SSL_CERT_DIR` 两边都认。容器用自定义 CA 时，设好这两个变量，Web API 和 WebSocket 一起生效。
+- **报错**：代理回 407 时，分“没给用户名密码”和“用户名密码不对”两种提示；回 403 时提示检查代理的放行名单；其他状态码原样带上；连不上代理、超时、代理地址是 `https://` 或 `socks5://`（暂不支持，只支持 `http://` 代理）都单独说明。这些都是连接失败，照常退避重连。
+- **本机转发器**：2026-11-16 验收时用的本机转发器不再是必须的，只作为代理不允许 `CONNECT` 时的退路。
+- 实现在 `ip-connectors/src/ws_proxy.rs`。
+- 测试：`ws_proxy` 的单元测试用本地假代理（接受 `CONNECT`、转发到本地假 WebSocket 服务器）测经代理连通、Basic 认证、`NO_PROXY` 直连、按协议选代理、407 和 403 的报错（不含凭据）、不支持的代理协议、代理连不上；Slack 测试 `socket_mode_connects_through_http_proxy` 经假代理连假 Slack，事件照常收到和确认。都是假代理、假 Slack；真实 Slack 经真实代理还没验。
 
 ### D-12 会话怎么划分 · 已实现（#25）
 
@@ -965,3 +979,4 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 | 2026-11-21 | v0.19 | 新增 D-35（提议，backlog F-21）：手机 App 的锁屏推送照 Web Push 发给项目运营的中转 `ip-relay`，中转转给 APNs、FCM；`ip.yaml` 加 `push.hosts`，推送负载上限降到 2800 字节。`/ws` 协议不变 |
 | 2026-11-21 | v0.20 | 修 Codex 续接会话时用量重复记账（backlog E-10，提议，等工程师审查）：D-23 的引擎会话表加四列累计用量，D-20 的 `TurnContext` 加 `session_usage`、`TurnReport` 加 `session_usage`；每轮只记和上一轮累计值的差。只用假 codex 测过，累计值的数字取自 2026-11-14 真实 Codex 的核对 |
 | 2026-11-21 | v0.21 | 新增 D-36（已实现，backlog E-6）：Claude Code 引擎（`kind: claude_code`），和 Codex 共用进程管理；第 6 节改名为“外部引擎” |
+| 2026-11-21 | v0.22 | 新增 D-37（提议，backlog E-12）：Socket Mode 的 WebSocket 按 `HTTPS_PROXY`/`NO_PROXY` 等环境变量经 HTTP 代理的 CONNECT 隧道连接，规则和 Web API 一致；支持代理 Basic 认证；D-11 加一句指向 D-37。只用本地假代理和假 Slack 测过 |

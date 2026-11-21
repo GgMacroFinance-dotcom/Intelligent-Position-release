@@ -31,7 +31,7 @@
 
 ## 发现的问题
 
-1. **Socket Mode 连接不走 HTTPS 代理。** Web API 调用（`reqwest`）会读 `HTTPS_PROXY`，`tokio_tungstenite::connect_async` 不会。只能经代理出网的主机上，`ip check` 的 Slack 一项能过（它只调 Web API），`ip serve` 却连不上 Socket Mode。记为 backlog E-12。
+1. **Socket Mode 连接不走 HTTPS 代理。** Web API 调用（`reqwest`）会读 `HTTPS_PROXY`，`tokio_tungstenite::connect_async` 不会。只能经代理出网的主机上，`ip check` 的 Slack 一项能过（它只调 Web API），`ip serve` 却连不上 Socket Mode。记为 backlog E-12。（2026-11-21 补记：代码已改为按 `HTTPS_PROXY`/`NO_PROXY` 走代理的 CONNECT 隧道，见 M2 规格 D-37；只用假代理测过。这次用的本机转发器以后只是代理不允许 `CONNECT` 时的退路。）
 2. **Slack 应用的事件订阅没开时，没有任何提示。** 这次的应用建好后 “Event Subscriptions” 是关的，权限也比清单少两项（`users:read`、`groups:history`）。结果是连接正常、心跳正常，但 Slack 一个事件都不推，服务这边完全安静；`ip check` 也查不出来。打开事件订阅、补上权限并重装应用后恢复。手册的排错表已加上这一条。
 3. **回复里的报告链接在 Slack 里点不开。** 研究员写的是工作目录里的相对路径（如 `reports/2026-11-16-….md`），在 Slack 里只是一段文字。记为 backlog E-13。
 4. 小事，没有处理：
