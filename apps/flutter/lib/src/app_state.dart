@@ -9,6 +9,7 @@ import 'notifications.dart';
 import 'pairing.dart';
 import 'protocol/client.dart';
 import 'protocol/models.dart';
+import 'qr/scanner.dart';
 import 'storage.dart';
 
 typedef ClientFactory = IpClient Function(HostAddress host, String token);
@@ -21,6 +22,7 @@ class AppState extends ChangeNotifier {
     Pairer? pairer,
     this.notifier = const SilentNotifier(),
     this.presenceEvery = const Duration(seconds: 20),
+    this.scanner,
   }) : _clientFactory = clientFactory ?? ((h, t) => IpClient(wsUri: h.wsUri, token: t)),
        _pairer = pairer ?? claimPairing;
 
@@ -31,6 +33,9 @@ class AppState extends ChangeNotifier {
 
   /// 在前台时多久报一次 `presence`（m2-spec D-33：主机 30 秒内没收到 `true` 就当不在前台）。
   final Duration presenceEvery;
+
+  /// 扫配对二维码用的相机（F-19）；这个平台不能扫码时为 null，连接页不显示“扫码”。
+  final QrScanner? scanner;
   final ClientFactory _clientFactory;
   final Pairer _pairer;
 

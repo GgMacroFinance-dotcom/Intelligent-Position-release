@@ -9,6 +9,7 @@ import 'src/app_state.dart';
 import 'src/desktop/autostart.dart';
 import 'src/desktop/shell.dart';
 import 'src/notifications.dart';
+import 'src/qr/scanner.dart';
 import 'src/storage.dart';
 import 'src/ui/common.dart';
 import 'src/ui/connect_page.dart';
@@ -16,7 +17,11 @@ import 'src/ui/home_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  final state = AppState(store: HostStore(SystemSecretStore()), notifier: LocalNotifier());
+  final state = AppState(
+    store: HostStore(SystemSecretStore()),
+    notifier: LocalNotifier(),
+    scanner: platformQrScanner(),
+  );
   runApp(IpApp(state: state));
   state.init();
   // 桌面：关窗口留在托盘、托盘显示待办数、开机启动（F-17）。

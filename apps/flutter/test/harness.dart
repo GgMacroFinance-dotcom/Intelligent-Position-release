@@ -9,17 +9,19 @@ import 'package:ip_app/src/notifications.dart';
 import 'package:ip_app/src/pairing.dart';
 import 'package:ip_app/src/protocol/client.dart';
 import 'package:ip_app/src/protocol/models.dart';
+import 'package:ip_app/src/qr/scanner.dart';
 import 'package:ip_app/src/storage.dart';
 import 'package:ip_app/src/ui/me_page.dart';
 
 import 'fake_host.dart';
 
 class Harness {
-  Harness() {
+  Harness({QrScanner? scanner}) {
     installDefaults(host);
     state = AppState(
       store: HostStore(secrets),
       notifier: notifier,
+      scanner: scanner,
       clientFactory: (h, token) => IpClient(wsUri: h.wsUri, token: token, connector: host.connect),
       pairer: (h, code) async {
         paired.add((h, code));
