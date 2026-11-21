@@ -939,7 +939,8 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
   - `POST /register {platform: "apns" | "fcm", token}`：`token` 是手机从 APNs 或 FCM 拿到的设备推送令牌。回 `{endpoint}`，地址是 `https://<中转>/w/<封条>`，封条是用中转自己的密钥（AES-256-GCM，从环境变量读）加密的 `{platform, token}`。中转不需要数据库，不存令牌。
   - `POST /w/<封条>`：照 Web Push 推送服务的样子收。请求体是 `aes128gcm` 的密文，原样转出去：APNs 用 `mutable-content` 的通知，由 iOS 的通知扩展（Notification Service Extension）解密后显示；FCM 用数据消息，由 Android App 的后台处理解密后弹通知。`Urgency: high` 的用高优先级，`Topic` 转成 APNs 的 `apns-collapse-id` 和 FCM 的 `collapse_key`，`TTL` 照转。成功回 201；APNs、FCM 说令牌失效时回 410，主机照 D-33 删掉这个订阅。
   - 只做转发：不解密、不记推送内容和令牌，日志只记次数和错误码。按来源地址和封条限流，单个请求体最多 3000 字节。
-  - 凭据：APNs 用 `.p8` 签名密钥（Team ID、Key ID、App 的 Bundle ID），FCM 用 HTTP v1 接口和服务账号。全部放在中转主机的环境变量里，不进仓库。换了中转的封条密钥，旧地址全部失效，App 下次打开时重新登记。
+  - 凭据：APNs 用 `.p8` 签名密钥（Team ID、Key ID、App 的 Bundle ID），FCM 用 HTTP v1 接口和服务账号。全部经环境变量给中转（`IP_RELAY_*`，清单在 `crates/ip-relay/src/main.rs` 开头），不进仓库。封条密钥用 `ip-relay keygen` 生成；换了它，旧地址全部失效，App 下次打开时重新登记。
+  - 基准 `ip bench relay`：打开封条、读请求头、拼好转给 APNs 的请求体，一条的中位数不超过 0.2 毫秒（不含网络往返）。
 - **主机**：
   - `webpush.rs` 的白名单多认中转的主机名。官方中转的域名定下来后写进默认名单；自己搭中转的人在 `ip.yaml` 里加 `push: { hosts: [push.example.com] }`。只写主机名，照样只认 `https://`、不带端口和用户名、不跟随跳转；不让 App 登记任意地址，免得把主机当跳板连内网（和 D-33 同一个理由）。
   - 负载上限从 3000 字节降到 2800：APNs 和 FCM 的消息上限都是 4 KB，密文转成 base64 再加上外层字段要放得下。

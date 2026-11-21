@@ -22,6 +22,7 @@ ip-connectors = { path = "crates/ip-connectors" }
 ip-engines = { path = "crates/ip-engines" }
 ip-server = { path = "crates/ip-server" }
 ip-data = { path = "crates/ip-data" }
+ip-relay = { path = "crates/ip-relay" }
 
 anyhow = "1"
 rmcp = { version = "3.9", default-features = false, features = [

@@ -97,6 +97,7 @@ docker compose up -d --build
 | `ip-browser` | 浏览器自动化、截图预处理 | M2 |
 | `ip-connectors` | 外部渠道的通用接口（`Channel`、`Hub`）和测试用的假渠道、假 Slack 服务器；Slack 渠道（Socket Mode）已接入，飞书、邮件以后接在这里 | M2 |
 | `ip-engines` | 外部引擎：把岗位的每一轮交给外部编程智能体；有 Codex（`codex exec --json`）和 Claude Code（`claude -p --output-format stream-json`，D-36），组织工具经 `/mcp` 回调 | M2 |
+| `ip-relay` | 手机 App 锁屏推送的中转（独立程序 `ip-relay`）：收主机发来的 Web Push 密文，原样转给 APNs、FCM；设备推送令牌封在订阅地址里，不用数据库（D-35） | App |
 
 ## M0 任务清单
 
@@ -138,6 +139,7 @@ docker compose up -d --build
 - [x] App 里“管理”权限的页（backlog F-18）：设备、定时任务、记忆、路由规则四页，从“我”页进去，日常权限看不到。只在假主机上测过
 - [x] App 扫码配对（backlog F-19）：Android、iOS、macOS 用摄像头扫配对二维码，扫到后照常先确认主机再配对；本机解码，不用谷歌 ML Kit。只在假相机上测，真相机没扫过
 - [x] App 的协议类型从 Rust 生成（backlog F-20）：`apps/flutter/tool/gen_protocol.dart` 从 `web/src/types/*.ts` 生成 `wire.dart`，flutter CI 检查生成结果已提交；App 解析回复、事件和发请求都经过生成的类型，Rust 改了协议字段 Dart 就编不过
+- [ ] 手机锁屏推送（backlog F-21，`docs/ip/m2-spec.md` D-35）：主机放行 `push.hosts` 里的推送服务，负载上限 2800 字节；推送中转 `ip-relay`（`POST /register` 换订阅地址，`POST /w/<封条>` 转给 APNs 或 FCM，令牌失效回 410，限流，`ip bench relay` 接入 CI）。只用假的 APNs、FCM 测过；还没部署、App 还没接
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片
 - [x] 路由 v2（二）：语义匹配（可选）：规则都没命中时请模型按岗位职责判断，把握够就分派，不够时把判断作为审批卡片的推荐项

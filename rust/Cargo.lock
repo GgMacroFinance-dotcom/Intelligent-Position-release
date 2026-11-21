@@ -1014,6 +1014,7 @@ dependencies = [
  "ip-core",
  "ip-data",
  "ip-models",
+ "ip-relay",
  "ip-runtime",
  "ip-server",
  "ip-store",
@@ -1115,6 +1116,22 @@ dependencies = [
  "tokio",
  "tracing",
  "ts-rs",
+]
+
+[[package]]
+name = "ip-relay"
+version = "0.8.0"
+dependencies = [
+ "anyhow",
+ "aws-lc-rs",
+ "axum",
+ "base64 0.22.1",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
