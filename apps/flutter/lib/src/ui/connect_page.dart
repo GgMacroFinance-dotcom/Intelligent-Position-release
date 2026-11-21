@@ -1,10 +1,12 @@
-// “连接主机”页：填主机地址和 6 位配对码，或者粘贴控制台给的配对链接（apps-plan 4.2、9.3）。
+// “连接主机”页：填主机地址和 6 位配对码，或者粘贴控制台给的配对链接（apps-plan 4.2、9.3），
+// 手机和 macOS 上还能扫配对二维码（F-19）。
 
 import 'package:flutter/material.dart';
 
 import '../host.dart';
 import '../pairing.dart';
 import 'common.dart';
+import 'scan_page.dart';
 
 class ConnectPage extends StatefulWidget {
   const ConnectPage({super.key});
@@ -33,6 +35,19 @@ class _ConnectPageState extends State<ConnectPage> {
     _address.text = link.host.text;
     _code.text = link.code;
     setState(() => _error = null);
+  }
+
+  /// 扫配对二维码：扫到后填好地址和配对码，照常先确认主机再配对。
+  Future<void> _scan() async {
+    final scanner = AppScope.read(context).scanner;
+    if (scanner == null) return;
+    final link = await Navigator.of(context)
+        .push<PairingLink>(MaterialPageRoute(builder: (_) => ScanPage(scanner: scanner)));
+    if (link == null || !mounted) return;
+    _address.text = link.host.text;
+    _code.text = link.code;
+    setState(() => _error = null);
+    await _submit();
   }
 
   Future<void> _submit() async {
@@ -110,6 +125,7 @@ class _ConnectPageState extends State<ConnectPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final canScan = AppScope.of(context).scanner != null;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -167,6 +183,14 @@ class _ConnectPageState extends State<ConnectPage> {
                           ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
                           : const Text('配对并连接'),
                     ),
+                    if (canScan) ...[
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _scan,
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('扫配对二维码'),
+                      ),
+                    ],
                   ],
                 ),
               ),

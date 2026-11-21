@@ -31,6 +31,13 @@ dependencies:
   tray_manager: ^0.5.2
   # 桌面窗口（F-17）：拦下关窗口改成藏到托盘、从托盘叫出来。MIT。和 tray_manager 一样先用 0.5.x。
   window_manager: ^0.5.1
+  # 扫配对二维码（F-19）：Android、iOS 的相机。官方插件，BSD-3-Clause；Android 走 CameraX（Apache-2.0）。
+  # 不用 mobile_scanner：它在 Android 上带谷歌的 ML Kit（闭源、另有条款）。
+  camera: ^0.12.2
+  # macOS 的相机（官方 camera 插件不支持 macOS）。MIT。
+  camera_macos: ^0.1.1
+  # 从相机画面解二维码，纯 Dart（ZXing 的移植）。BSD-3-Clause。
+  zxing2: ^0.2.4
 dev_dependencies:
   flutter_test:
     sdk: flutter
