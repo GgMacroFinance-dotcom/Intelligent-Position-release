@@ -183,7 +183,7 @@ void main() {
 
     // 收尾：忘掉主机，回到“连接主机”。主机那边的设备记录要在控制台“设备”页吊销。
     await backIfPushed(tester);
-    await tester.tap(find.text('我').last);
+    await tester.tap(find.byTooltip('我'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('断开并忘掉这台主机'));
     await tester.pumpAndSettle();

@@ -50,6 +50,9 @@ class AppState extends ChangeNotifier {
   /// 员工写的报告，新改的在前。
   List<ReportInfo> reports = [];
 
+  /// 今天的模型费用；还没拉到时为空。
+  SpendToday? spend;
+
   /// 有路由规则时，新对话默认自动分派。
   bool hasRules = false;
 
@@ -170,6 +173,7 @@ class AppState extends ChangeNotifier {
     approvals = [];
     tasks = [];
     reports = [];
+    spend = null;
     hasRules = false;
     threadId = null;
     messages = [];
@@ -211,6 +215,7 @@ class AppState extends ChangeNotifier {
         c.listApprovals(),
         c.listTasks(),
         c.listReports(),
+        c.spendToday(),
       ]);
       if (_client != c) return;
       roles = r[0] as List<Role>;
@@ -220,6 +225,7 @@ class AppState extends ChangeNotifier {
       approvals = r[4] as List<Approval>;
       tasks = r[5] as List<Task>;
       reports = r[6] as List<ReportInfo>;
+      spend = r[7] as SpendToday;
       if (!_agentForNewChosen) agentForNew = hasRules || agents.isEmpty ? null : agents.first.id;
       loadError = null;
       notifyListeners();
@@ -310,6 +316,16 @@ class AppState extends ChangeNotifier {
     approvals = [a, ...approvals.where((x) => x.id != a.id)]..sort((x, y) => y.createdAtMs.compareTo(x.createdAtMs));
   }
 
+  /// 新建任务，指定负责人时主机另开一个对话交给他。
+  Future<Task> createTask(String title, {String? description, String? assignee, int? dueMs}) async {
+    final c = _client;
+    if (c == null) throw const RequestError('尚未连接');
+    final t = await c.createTask(title, description: description, assignee: assignee, dueMs: dueMs);
+    tasks = [t, ...tasks.where((x) => x.id != t.id)];
+    notifyListeners();
+    return t;
+  }
+
   /// 改任务的状态（待办里受阻的任务、完成的任务）。
   Future<void> updateTask(Task t, String status) async {
     final c = _client;
@@ -344,6 +360,22 @@ class AppState extends ChangeNotifier {
   }
 
   Timer? _reportsTimer;
+  Timer? _spendTimer;
+
+  /// 一轮结束后刷新今天的费用（合并短时间内的多次）。
+  void _refreshSpendSoon() {
+    _spendTimer?.cancel();
+    _spendTimer = Timer(const Duration(milliseconds: 500), () async {
+      final c = _client;
+      if (c == null || !connected) return;
+      try {
+        spend = await c.spendToday();
+        notifyListeners();
+      } on RequestError {
+        // 断线重连后会整个重新拉。
+      }
+    });
+  }
 
   /// 一轮结束后员工可能写了新报告，刷新列表（合并短时间内的多次）。
   void _refreshReportsSoon() {
@@ -393,6 +425,7 @@ class AppState extends ChangeNotifier {
         turnNote[threadId] = '${agentName(agentId)} 开始处理…';
       case TurnFinished():
         _refreshReportsSoon();
+        _refreshSpendSoon();
         drafts.remove(e.agentId);
         agentsWorking.remove(e.agentId);
         agentFailures.remove(e.agentId);
@@ -403,6 +436,7 @@ class AppState extends ChangeNotifier {
             '${agentName(e.agentId)} 完成：${e.steps} 步，${(e.elapsedMs / 1000).toStringAsFixed(1)} 秒，'
             '${u.promptTokens + u.completionTokens} tokens（缓存命中 $cached%）$cost';
       case TurnFailed(:final agentId, :final threadId, :final error):
+        _refreshSpendSoon();
         drafts.remove(agentId);
         agentsWorking.remove(agentId);
         agentFailures[agentId] = error.split('\n').first;
@@ -421,6 +455,7 @@ class AppState extends ChangeNotifier {
   void dispose() {
     _threadsTimer?.cancel();
     _reportsTimer?.cancel();
+    _spendTimer?.cancel();
     unawaited(_disconnect());
     super.dispose();
   }

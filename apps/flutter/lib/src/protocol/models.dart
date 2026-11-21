@@ -297,14 +297,29 @@ class ThreadSummary {
 // ---------- 岗位和员工 ----------
 
 class Role {
-  const Role({required this.id, this.name, required this.description, this.budgetPerDayUsd});
+  const Role({
+    required this.id,
+    this.name,
+    required this.description,
+    this.budgetPerDayUsd,
+    this.model = '',
+    this.escalateModel,
+  });
 
   factory Role.fromJson(Json j) => Role(
     id: j['id'] as String,
     name: _str(j['name']),
     description: _str(j['description']) ?? '',
     budgetPerDayUsd: (j['budget_per_day_usd'] as num?)?.toDouble(),
+    model: _str((j['model'] as Json?)?['default']) ?? '',
+    escalateModel: _str((j['model'] as Json?)?['escalate']),
   );
+
+  /// 岗位用的模型，`<端点>/<模型>`。
+  final String model;
+
+  /// 高难度或高风险任务升级到的模型；没设时为空。
+  final String? escalateModel;
 
   final String id;
   final String? name;
@@ -629,4 +644,54 @@ class ReportText {
 
   /// 文件超过 1 MB 时只给了前 1 MB。
   final bool truncated;
+}
+
+// ---------- 花费 ----------
+
+/// `spend_today` 的回复：今天（UTC 自然日）的模型费用。
+class SpendToday {
+  const SpendToday({
+    required this.date,
+    required this.roles,
+    required this.routingUsd,
+    required this.tokens,
+    required this.routingTokens,
+  });
+
+  factory SpendToday.fromJson(Json j) => SpendToday(
+    date: j['date'] as String,
+    roles: {for (final MapEntry(:key, :value) in (j['roles'] as Json? ?? const {}).entries) key: _double(value)},
+    routingUsd: _double(j['routing_usd']),
+    tokens: {
+      for (final MapEntry(:key, :value) in (j['tokens'] as Json? ?? const {}).entries)
+        key: Usage.fromJson(value as Json),
+    },
+    routingTokens: j['routing_tokens'] == null ? const Usage() : Usage.fromJson(j['routing_tokens'] as Json),
+  );
+
+  /// `YYYY-MM-DD`。
+  final String date;
+
+  /// 岗位 id → 美元。今天还没花钱的岗位不在里面。
+  final Map<String, double> roles;
+
+  /// 语义分派调用模型花的美元，不占岗位预算。
+  final double routingUsd;
+
+  /// 岗位 id → 今天的 token 用量。
+  final Map<String, Usage> tokens;
+  final Usage routingTokens;
+
+  double get totalUsd => roles.values.fold(routingUsd, (a, b) => a + b);
+
+  /// 全部岗位加自动分派合计的提示词缓存命中率；还没调过模型时为空。
+  double? get cacheHitRate {
+    var input = routingTokens.promptTokens;
+    var cached = routingTokens.cachedTokens;
+    for (final u in tokens.values) {
+      input += u.promptTokens;
+      cached += u.cachedTokens;
+    }
+    return input == 0 ? null : cached / input;
+  }
 }

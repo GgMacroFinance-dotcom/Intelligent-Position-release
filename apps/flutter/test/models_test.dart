@@ -127,6 +127,36 @@ void main() {
     expect(t.isOpen, isFalse);
   });
 
+  test('今天的花费：合计、缓存命中率；岗位的模型', () {
+    final spend = SpendToday.fromJson({
+      'date': '2026-11-21',
+      'roles': {'macro': 0.5, 'ops': 0.25},
+      'routing_usd': 0.25,
+      'tokens': {
+        'macro': {'prompt_tokens': 900, 'completion_tokens': 10, 'cached_tokens': 600, 'cache_write_tokens': 0},
+      },
+      'routing_tokens': {'prompt_tokens': 100, 'completion_tokens': 1, 'cached_tokens': 0, 'cache_write_tokens': 0},
+    });
+    expect(spend.totalUsd, 1.0);
+    expect(spend.cacheHitRate, closeTo(0.6, 1e-9));
+    expect(
+      SpendToday.fromJson({'date': 'd', 'roles': <String, Object>{}, 'routing_usd': 0, 'tokens': <String, Object>{}})
+          .cacheHitRate,
+      isNull,
+    );
+    final role = Role.fromJson({
+      'id': 'macro',
+      'name': null,
+      'description': 'd',
+      'model': {'default': 'openai/gpt-6-luna', 'escalate': 'openai/gpt-6-astra'},
+      'budget_per_day_usd': 2,
+    });
+    expect(role.model, 'openai/gpt-6-luna');
+    expect(role.escalateModel, 'openai/gpt-6-astra');
+    expect(role.budgetPerDayUsd, 2.0);
+    expect(role.displayName, 'macro');
+  });
+
   test('认不出的事件和帧不抛错', () {
     expect(RuntimeEvent.fromJson({'type': 'brand_new'}), isA<UnknownEvent>());
     expect(ServerFrame.fromJson({'type': 'brand_new'}), isA<UnknownFrame>());
