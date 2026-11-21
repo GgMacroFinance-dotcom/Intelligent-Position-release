@@ -131,6 +131,7 @@ docker compose up -d --build
 - [x] 桌面 App（backlog F-11，`apps/desktop/`，`docs/ip/m2-spec.md` D-34）：Tauri 2 壳里自带一份控制台，填主机地址和配对码连上，令牌放系统钥匙串；关窗口留在托盘、托盘显示待办数、系统通知、开机启动。`/ws` 在配了令牌时接受桌面 App 的来源。真的 App 只在 Linux 虚拟屏幕上跑过配对和连主机，托盘、通知和 macOS、Windows 没验过，见 `apps/desktop/README.md`
 - [x] 各平台 App（backlog F-13，`apps/flutter/`，`docs/ip/apps-plan.md` 第 9 节）：2026-11-21 维护者定改用 Flutter，一份代码出 Android、iOS、macOS、Windows、Linux。第一步：连接主机（地址加配对码或粘贴配对链接，设备令牌放系统安全存储）、待办（员工提问、审批卡、受阻的任务）、对话（流式回复、Markdown）；`/ws` 客户端照控制台的做法断线补发。服务端没改，原生 App 不带 `Origin`。真的 Linux 版连本机 `ip serve` 跑通过端到端测试（模型是假的）；Android、iOS、macOS、Windows 没编过，见 `apps/flutter/README.md`
 - [x] App 的 Bot 星图（backlog F-22，`docs/ip/apps-plan.md` 9.7）：照维护者给的 Obsidian 图谱样稿，背景星空；幕僚长是中心的太阳，其他员工是八大行星和知名恒星，离太阳越近越紧急，图标越大越重要，理由在点开的气泡里给人看。真的 Linux 版连本机 `ip serve` 核对过（模型是假的），真手机没试过。桌面窗口恢复、会话断点和星图手势的验证见 [Flutter App](../apps/flutter/README.md#桌面交互验证)
+- [x] App 的待办补齐和看报告（backlog F-14）：受阻的任务能直接改状态，“最近 7 天”列完成的任务和新报告；消息、任务结果、报告里提到的 `reports/<文件名>.md` 能点开看。真的 Linux 版连本机 `ip serve` 点过（模型是假的，报告是手写的），真手机没试过
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片
 - [x] 路由 v2（二）：语义匹配（可选）：规则都没命中时请模型按岗位职责判断，把握够就分派，不够时把判断作为审批卡片的推荐项

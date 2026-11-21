@@ -313,6 +313,20 @@ extension IpRequests on IpClient {
     await request({'type': 'resolve_approval', 'approval_id': approvalId, 'choice': choice}) as Json,
   );
 
+  /// 改任务的状态（`open`、`in_progress`、`blocked`、`done`、`cancelled`），回复改完的任务。
+  /// 用设备令牌连上时主机按设备名署名。
+  Future<Task> updateTask(String taskId, {String? status, String? result}) async => Task.fromJson(
+    await request({'type': 'update_task', 'task_id': taskId, 'status': ?status, 'result': ?result}) as Json,
+  );
+
+  /// 员工写的报告，新改的在前。省略 `agentId` 时列所有员工的。
+  Future<List<ReportInfo>> listReports({String? agentId, int limit = 200}) =>
+      _list({'type': 'list_reports', 'agent_id': ?agentId, 'limit': limit}, ReportInfo.fromJson);
+
+  /// 读一份报告；`path` 是 `list_reports` 给的 `reports/<文件名>.md`。
+  Future<ReportText> readReport(String agentId, String path) async =>
+      ReportText.fromJson(await request({'type': 'read_report', 'agent_id': agentId, 'path': path}) as Json);
+
   /// 省略 `agentId` 时由路由规则决定；省略 `threadId` 时开一个新对话。
   /// 用设备令牌连上时，主机按设备名署名，不用带 `author`（apps-plan 4.4）。
   Future<SendResult> send(String text, {String? agentId, String? threadId}) async => SendResult.fromJson(
