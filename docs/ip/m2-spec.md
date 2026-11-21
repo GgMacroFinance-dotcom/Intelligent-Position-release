@@ -802,6 +802,21 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 - 通知：桌面 App 不订 Web Push（D-33），关窗口后常驻托盘、连接不断，照 D-32 的 `alert` 弹系统通知，窗口在前台时不弹。点通知现在只能把窗口叫出来。
 - 测试：来源检查加了一条（配了令牌时接受这三个来源，没配时不接受，相近的写法不接受）；壳的主机地址规整有单元测试。真的 App 在 Linux（Xvfb、GNOME 钥匙串）上跑过配对、存令牌、连上、重开读回令牌；其余用 Playwright 加假的壳核对。macOS、Windows 没跑过。
 
+### D-35 手机 App 的锁屏推送 · 提议（backlog F-21）
+
+背景：Flutter 手机 App（`apps-plan.md` 第 9 节）开着、在后台还没被系统杀掉时，照 D-32 的 `alert` 弹本地通知（F-16）；锁屏久了、App 被杀以后，连接断了就收不到。原生 App 订不了浏览器的 Web Push（D-33），要走系统的推送通道。
+
+思路：**主机这边照旧发 Web Push**（RFC 8291 加密、RFC 8292 的 VAPID），只是多认几个“推送服务”。手机 App 自己生成 Web Push 的密钥对，从推送通道拿到一个订阅地址，用 D-33 已有的 `subscribe_push` 登记。推送通道和中转只见密文，解密在手机上做。主机不用新的密码学代码，也不用新的请求。
+
+- **Android 先做 UnifiedPush**（开放协议，<https://unifiedpush.org>）。人在手机上装一个“分发器”（ntfy 等），App 向分发器要订阅地址；分发器本身就按 Web Push 的格式收推送，转给 App。项目方不运营任何服务；不依赖谷歌的闭源组件（和 F-19 不用 ML Kit 同一个考虑）。Flutter 用 `unifiedpush`（Apache-2.0），它生成密钥、保存私钥、收到后解密。手机上没装分发器时，“我”页说明装哪个、去哪下载。
+- **iPhone 和不想装分发器的 Android 走中转**（APNs、FCM），等维护者定谁运营中转、用哪个开发者账号签名（`apps-plan.md` Q-11、Q-12）。中转只做一件事：把收到的 Web Push 密文原样塞进 APNs 或 FCM 的数据消息转给手机，手机上的通知扩展（iOS 的 Notification Service Extension）或后台处理解密后显示。中转不存不记：订阅地址里带着用中转自己的密钥加密过的设备推送令牌，中转不需要数据库。中转的代码和部署方式到时单独写一条。
+- **主机放行的推送服务**（`webpush.rs` 的白名单）：在 D-33 的四家之外，默认加上 `ntfy.sh`（UnifiedPush 最常用的公共分发器）。自己搭分发器或中转的，在 `ip.yaml` 里加 `push: { hosts: [ntfy.example.com, push.example.com] }`；只写主机名，照样只认 `https://`、不带端口和用户名、不跟随跳转。不让 App 登记任意地址，免得把主机当跳板连内网（和 D-33 同一个理由）。
+- **负载不变**：`{title, body, tag, thread_id?, silent?}`，已按这台设备的设置筛过。App 收到后按 F-16 的规则弹通知：同标签替换；`silent` 的“已在别处处理”直接按标签撤掉原来那条，不再弹一条新的（原生 App 能做到，浏览器做不到）。点通知去那个对话，没有对话的去“待办”。
+- **不重复打扰**：App 已经按 D-33 报 `presence`（F-16），在前台时主机不推，App 自己照 `alert` 弹。App 在后台但连接还在时，`alert` 和推送都会到，App 按标签去重：同一个标签 10 分钟内只弹一次。
+- **订阅的生命周期**：连上主机、要到系统通知权限、拿到订阅地址后登记；订阅地址变了再登记一次（`subscribe_push` 同一台设备同一个地址替换）；在“我”页关掉锁屏推送、断开主机时 `unsubscribe_push`；设备被吊销时主机已经会删它的订阅（D-33）。私钥只在手机上（UnifiedPush 库自己存在应用私有存储里），不上传。
+- **协议不变**：不加请求、不改帧。`push_key` 照样给 VAPID 公钥，分发器用不用随它。
+- 测试：主机加白名单的单元测试（默认的 `ntfy.sh`、`push.hosts` 里的、相近的写法不认）和配置检查；`/ws` 集成测试用假推送服务走一遍 App 式的订阅（App 生成的密钥）。App 用假的推送通道测登记、换地址、关掉、收到后弹通知和撤销。没有在真的 ntfy、APNs、FCM 和真手机上跑过之前，不写“可用”。
+
 ---
 
 ## 修订记录
@@ -826,3 +841,4 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 | 2026-11-16 | v0.16 | 新增 D-32（提议，backlog F-9）：通知规则、每台设备的通知设置、`alert` 和 `dismiss` 两种服务端帧 |
 | 2026-11-16 | v0.17 | 新增 D-33（提议，backlog F-10）：Web Push、`push_key`、`subscribe_push`、`unsubscribe_push`、`presence` 四个请求，`ip.yaml` 的 `push.contact` |
 | 2026-11-16 | v0.18 | 新增 D-34（提议，backlog F-11）：配了令牌时 `/ws` 和 `/pair` 接受桌面 App 的来源 |
+| 2026-11-21 | v0.19 | 新增 D-35（提议，backlog F-21）：手机 App 的锁屏推送照 Web Push 发，Android 先走 UnifiedPush；`webpush.rs` 默认多认 `ntfy.sh`，`ip.yaml` 加 `push.hosts`。协议不变 |
