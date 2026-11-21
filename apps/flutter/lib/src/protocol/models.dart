@@ -1,35 +1,34 @@
-// `/ws` 协议里 App 用到的类型。字段名和 Rust 导出的 TypeScript 类型（rust/web/src/types/）一致，
-// 先手写，以后改成从 Rust 生成（backlog F-20）。
+// `/ws` 协议里 App 用到的类型：给界面用的样子（整数、默认值、方便的 getter）。
+// JSON 的解析交给从 Rust 生成的 `wire.dart`（backlog F-20），这里只从生成的类型转过来，
+// 所以 Rust 那边改了字段、重新生成后，这里用到的地方会编不过。
 //
-// 解析时宽进：认不出的事件、帧和消息内容给一个 Unknown，不抛错。协议只有不兼容的改动才升版本号，
+// 认不出的事件、帧和消息内容给一个 Unknown，不抛错（生成的类型已经这样做）。协议只有不兼容的改动才升版本号，
 // 服务端新加的事件类型不该让旧 App 断线。
+
+import 'wire.dart' as w;
 
 typedef Json = Map<String, dynamic>;
 
-int _int(Object? v) => (v as num).toInt();
-int? _intOrNull(Object? v) => v == null ? null : (v as num).toInt();
-double _double(Object? v) => v == null ? 0 : (v as num).toDouble();
-String? _str(Object? v) => v as String?;
-List<T> _list<T>(Object? v, T Function(Json) f) => [for (final e in (v as List? ?? const [])) f(e as Json)];
+int? _intOrNull(num? v) => v?.toInt();
 
 // ---------- 服务端发来的帧 ----------
 
 sealed class ServerFrame {
   const ServerFrame();
 
-  factory ServerFrame.fromJson(Json j) => switch (j['type']) {
-    'hello' => HelloFrame(
-      protocol: _int(j['protocol']),
-      epoch: j['epoch'] as String,
-      seq: _int(j['seq']),
-      resumed: j['resumed'] as bool,
+  factory ServerFrame.fromJson(Json j) => switch (w.ServerFrame.fromJson(j)) {
+    w.ServerFrameHello f => HelloFrame(
+      protocol: f.protocol.toInt(),
+      epoch: f.epoch,
+      seq: f.seq.toInt(),
+      resumed: f.resumed,
     ),
-    'reply' => ReplyFrame(id: j['id'], ok: j['ok'] as bool, data: j['data'], error: _str(j['error'])),
-    'event' => EventFrame(seq: _int(j['seq']), event: RuntimeEvent.fromJson(j['event'] as Json)),
-    'lagged' => LaggedFrame(skipped: _int(j['skipped'])),
-    'alert' => AlertFrame(Alert.fromJson(j['alert'] as Json)),
-    'dismiss' => DismissFrame(j['tag'] as String),
-    final t => UnknownFrame('$t'),
+    w.ServerFrameReply f => ReplyFrame(id: f.id, ok: f.ok, data: f.data, error: f.error),
+    w.ServerFrameEvent f => EventFrame(seq: f.seq.toInt(), event: RuntimeEvent.fromWire(f.event)),
+    w.ServerFrameLagged f => LaggedFrame(skipped: f.skipped.toInt()),
+    w.ServerFrameAlert f => AlertFrame(Alert.fromWire(f.alert)),
+    w.ServerFrameDismiss f => DismissFrame(f.tag),
+    w.ServerFrameUnknown() => UnknownFrame('${j['type']}'),
   };
 }
 
@@ -83,22 +82,24 @@ class UnknownFrame extends ServerFrame {
 sealed class RuntimeEvent {
   const RuntimeEvent();
 
-  factory RuntimeEvent.fromJson(Json j) => switch (j['type']) {
-    'turn_started' => TurnStarted(j['agent_id'] as String, j['thread_id'] as String),
-    'delta' => Delta(j['agent_id'] as String, j['thread_id'] as String, j['text'] as String),
-    'message' => MessageEvent(Message.fromJson(j['message'] as Json)),
-    'turn_finished' => TurnFinished(
-      agentId: j['agent_id'] as String,
-      threadId: j['thread_id'] as String,
-      steps: _int(j['steps']),
-      usage: Usage.fromJson(j['usage'] as Json),
-      costUsd: _double(j['cost_usd']),
-      elapsedMs: _int(j['elapsed_ms']),
+  factory RuntimeEvent.fromJson(Json j) => RuntimeEvent.fromWire(w.RuntimeEvent.fromJson(j));
+
+  factory RuntimeEvent.fromWire(w.RuntimeEvent e) => switch (e) {
+    w.RuntimeEventTurnStarted e => TurnStarted(e.agentId, e.threadId),
+    w.RuntimeEventDelta e => Delta(e.agentId, e.threadId, e.text),
+    w.RuntimeEventMessage e => MessageEvent(Message.fromWire(e.message)),
+    w.RuntimeEventTurnFinished e => TurnFinished(
+      agentId: e.agentId,
+      threadId: e.threadId,
+      steps: e.steps.toInt(),
+      usage: Usage.fromWire(e.usage),
+      costUsd: e.costUsd.toDouble(),
+      elapsedMs: e.elapsedMs.toInt(),
     ),
-    'turn_failed' => TurnFailed(j['agent_id'] as String, j['thread_id'] as String, j['error'] as String),
-    'task_changed' => TaskChanged(Task.fromJson(j['task'] as Json)),
-    'approval_changed' => ApprovalChanged(Approval.fromJson(j['approval'] as Json)),
-    final t => UnknownEvent('$t'),
+    w.RuntimeEventTurnFailed e => TurnFailed(e.agentId, e.threadId, e.error),
+    w.RuntimeEventTaskChanged e => TaskChanged(Task.fromWire(e.task)),
+    w.RuntimeEventApprovalChanged e => ApprovalChanged(Approval.fromWire(e.approval)),
+    w.RuntimeEventUnknown e => UnknownEvent('${(e.json as Map?)?['type']}'),
   };
 }
 
@@ -163,11 +164,13 @@ class UnknownEvent extends RuntimeEvent {
 class Usage {
   const Usage({this.promptTokens = 0, this.completionTokens = 0, this.cachedTokens = 0, this.cacheWriteTokens = 0});
 
-  factory Usage.fromJson(Json j) => Usage(
-    promptTokens: _intOrNull(j['prompt_tokens']) ?? 0,
-    completionTokens: _intOrNull(j['completion_tokens']) ?? 0,
-    cachedTokens: _intOrNull(j['cached_tokens']) ?? 0,
-    cacheWriteTokens: _intOrNull(j['cache_write_tokens']) ?? 0,
+  factory Usage.fromJson(Json j) => Usage.fromWire(w.Usage.fromJson(j));
+
+  factory Usage.fromWire(w.Usage u) => Usage(
+    promptTokens: u.promptTokens.toInt(),
+    completionTokens: u.completionTokens.toInt(),
+    cachedTokens: u.cachedTokens.toInt(),
+    cacheWriteTokens: u.cacheWriteTokens.toInt(),
   );
 
   final int promptTokens;
@@ -188,13 +191,15 @@ class Message {
     this.notice,
   });
 
-  factory Message.fromJson(Json j) => Message(
-    id: j['id'] as String,
-    threadId: j['thread_id'] as String,
-    atMs: _int(j['at_ms']),
-    author: Author.fromJson(j['author'] as Json),
-    body: Body.fromJson(j['body'] as Json),
-    notice: _str(j['notice']),
+  factory Message.fromJson(Json j) => Message.fromWire(w.Message.fromJson(j));
+
+  factory Message.fromWire(w.Message m) => Message(
+    id: m.id,
+    threadId: m.threadId,
+    atMs: m.atMs.toInt(),
+    author: Author.fromWire(m.author),
+    body: Body.fromWire(m.body),
+    notice: m.notice?.wire,
   );
 
   final String id;
@@ -210,10 +215,12 @@ class Message {
 sealed class Author {
   const Author();
 
-  factory Author.fromJson(Json j) => switch (j['kind']) {
-    'human' => HumanAuthor(j['name'] as String, channel: _str((j['via'] as Json?)?['channel'])),
-    'agent' => AgentAuthor(j['agent_id'] as String),
-    _ => const SystemAuthor(),
+  factory Author.fromJson(Json j) => Author.fromWire(w.Author.fromJson(j));
+
+  factory Author.fromWire(w.Author a) => switch (a) {
+    w.AuthorHuman a => HumanAuthor(a.name, channel: a.via?.channel),
+    w.AuthorAgent a => AgentAuthor(a.agentId),
+    w.AuthorSystem() || w.AuthorUnknown() => const SystemAuthor(),
   };
 }
 
@@ -237,12 +244,14 @@ class SystemAuthor extends Author {
 sealed class Body {
   const Body();
 
-  factory Body.fromJson(Json j) => switch (j['kind']) {
-    'text' => TextBody(j['text'] as String),
-    'tool_call' => ToolCallBody(j['call_id'] as String, j['name'] as String, j['input']),
-    'tool_result' => ToolResultBody(j['call_id'] as String, j['ok'] as bool, j['output'] as String),
-    'summary' => SummaryBody(j['text'] as String),
-    final k => UnknownBody('$k'),
+  factory Body.fromJson(Json j) => Body.fromWire(w.Body.fromJson(j));
+
+  factory Body.fromWire(w.Body b) => switch (b) {
+    w.BodyText b => TextBody(b.text),
+    w.BodyToolCall b => ToolCallBody(b.callId, b.name, b.input),
+    w.BodyToolResult b => ToolResultBody(b.callId, b.ok, b.output),
+    w.BodySummary b => SummaryBody(b.text),
+    w.BodyUnknown b => UnknownBody('${(b.json as Map?)?['kind']}'),
   };
 }
 
@@ -279,12 +288,15 @@ class UnknownBody extends Body {
 class ThreadSummary {
   const ThreadSummary({required this.threadId, required this.lastAtMs, required this.messageCount, this.preview});
 
-  factory ThreadSummary.fromJson(Json j) => ThreadSummary(
-    threadId: j['thread_id'] as String,
-    lastAtMs: _int(j['last_at_ms']),
-    messageCount: _int(j['message_count']),
-    preview: _str(j['preview']),
-  );
+  factory ThreadSummary.fromJson(Json j) {
+    final t = w.ThreadSummary.fromJson(j);
+    return ThreadSummary(
+      threadId: t.threadId,
+      lastAtMs: t.lastAtMs.toInt(),
+      messageCount: t.messageCount.toInt(),
+      preview: t.preview,
+    );
+  }
 
   final String threadId;
   final int lastAtMs;
@@ -306,14 +318,17 @@ class Role {
     this.escalateModel,
   });
 
-  factory Role.fromJson(Json j) => Role(
-    id: j['id'] as String,
-    name: _str(j['name']),
-    description: _str(j['description']) ?? '',
-    budgetPerDayUsd: (j['budget_per_day_usd'] as num?)?.toDouble(),
-    model: _str((j['model'] as Json?)?['default']) ?? '',
-    escalateModel: _str((j['model'] as Json?)?['escalate']),
-  );
+  factory Role.fromJson(Json j) {
+    final r = w.Role.fromJson(j);
+    return Role(
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      budgetPerDayUsd: r.budgetPerDayUsd?.toDouble(),
+      model: r.model.defaultValue,
+      escalateModel: r.model.escalate,
+    );
+  }
 
   /// 岗位用的模型，`<端点>/<模型>`。
   final String model;
@@ -334,7 +349,10 @@ class Role {
 class Agent {
   const Agent({required this.id, required this.role, required this.name});
 
-  factory Agent.fromJson(Json j) => Agent(id: j['id'] as String, role: j['role'] as String, name: j['name'] as String);
+  factory Agent.fromJson(Json j) {
+    final a = w.Agent.fromJson(j);
+    return Agent(id: a.id, role: a.role, name: a.name);
+  }
 
   final String id;
   final String role;
@@ -346,7 +364,7 @@ class Agent {
 class ApprovalOption {
   const ApprovalOption(this.label, this.consequence);
 
-  factory ApprovalOption.fromJson(Json j) => ApprovalOption(j['label'] as String, _str(j['consequence']) ?? '');
+  factory ApprovalOption.fromWire(w.ApprovalOption o) => ApprovalOption(o.label, o.consequence);
 
   final String label;
 
@@ -368,22 +386,29 @@ class Approval {
     required this.createdAtMs,
   });
 
-  factory Approval.fromJson(Json j) {
-    final subject = j['subject'] as Json;
-    final state = j['state'] as Json;
+  factory Approval.fromJson(Json j) => Approval.fromWire(w.Approval.fromJson(j));
+
+  factory Approval.fromWire(w.Approval a) {
+    final (kind, threadId, agentId) = switch (a.subject) {
+      w.ApprovalSubjectRouteMessage s => ('route_message', s.threadId, null),
+      w.ApprovalSubjectAgentQuestion s => ('agent_question', s.threadId, s.agentId),
+      w.ApprovalSubjectQuestion() => ('question', null, null),
+      w.ApprovalSubjectUnknown s => ('${(s.json as Map?)?['kind']}', null, null),
+    };
     return Approval(
-      id: j['id'] as String,
-      question: j['question'] as String,
-      options: _list(j['options'], ApprovalOption.fromJson),
-      recommended: _intOrNull(j['recommended']),
-      reason: _str(j['reason']) ?? '',
-      subjectKind: subject['kind'] as String,
-      subjectThreadId: _str(subject['thread_id']),
-      subjectAgentId: _str(subject['agent_id']),
-      resolution: state['state'] == 'resolved'
-          ? Resolution(choice: _int(state['choice']), by: state['by'] as String, atMs: _int(state['at_ms']))
-          : null,
-      createdAtMs: _int(j['created_at_ms']),
+      id: a.id,
+      question: a.question,
+      options: [for (final o in a.options) ApprovalOption.fromWire(o)],
+      recommended: _intOrNull(a.recommended),
+      reason: a.reason,
+      subjectKind: kind,
+      subjectThreadId: threadId,
+      subjectAgentId: agentId,
+      resolution: switch (a.state) {
+        w.ApprovalStateResolved s => Resolution(choice: s.choice.toInt(), by: s.by, atMs: s.atMs.toInt()),
+        _ => null,
+      },
+      createdAtMs: a.createdAtMs.toInt(),
     );
   }
 
@@ -435,34 +460,36 @@ class Task {
     required this.updatedAtMs,
   });
 
-  factory Task.fromJson(Json j) => Task(
-    id: j['id'] as String,
-    title: j['title'] as String,
-    description: _str(j['description']) ?? '',
-    status: j['status'] as String,
-    role: _str(j['role']),
-    assignee: _str(j['assignee']),
-    threadId: _str(j['thread_id']),
-    result: _str(j['result']),
-    createdByAgent: switch (j['created_by']) {
-      {'kind': 'agent', 'agent_id': final String id} => id,
+  factory Task.fromJson(Json j) => Task.fromWire(w.Task.fromJson(j));
+
+  factory Task.fromWire(w.Task t) => Task(
+    id: t.id,
+    title: t.title,
+    description: t.description,
+    status: t.status.wire,
+    role: t.role,
+    assignee: t.assignee,
+    threadId: t.threadId,
+    result: t.result,
+    createdByAgent: switch (t.createdBy) {
+      w.AuthorAgent a => a.agentId,
       _ => null,
     },
-    createdByName: switch (j['created_by']) {
-      {'kind': 'human', 'name': final String name} => name,
+    createdByName: switch (t.createdBy) {
+      w.AuthorHuman a => a.name,
       _ => null,
     },
-    originThreadId: _str(j['origin_thread_id']),
-    dueMs: _intOrNull(j['due_ms']),
-    createdAtMs: _int(j['created_at_ms']),
-    updatedAtMs: _int(j['updated_at_ms']),
+    originThreadId: t.originThreadId,
+    dueMs: _intOrNull(t.dueMs),
+    createdAtMs: t.createdAtMs.toInt(),
+    updatedAtMs: t.updatedAtMs.toInt(),
   );
 
   final String id;
   final String title;
   final String description;
 
-  /// `open`、`in_progress`、`blocked`、`done`、`cancelled`。
+  /// `open`、`in_progress`、`blocked`、`done`、`cancelled`；这个版本不认识的状态是空字符串。
   final String status;
   final String? role;
   final String? assignee;
@@ -495,12 +522,15 @@ class SendResult {
   const SendResult({required this.message, this.agentId, this.routedReason, this.approvalId});
 
   factory SendResult.fromJson(Json j) {
-    final decision = j['decision'] as Json?;
+    final r = w.SendResult.fromJson(j);
     return SendResult(
-      message: Message.fromJson(j['message'] as Json),
-      agentId: _str(j['agent_id']),
-      routedReason: decision?['kind'] == 'routed' ? _str(decision?['reason']) : null,
-      approvalId: _str(j['approval_id']),
+      message: Message.fromWire(r.message),
+      agentId: r.agentId,
+      routedReason: switch (r.decision) {
+        w.DecisionRouted d => d.reason,
+        _ => null,
+      },
+      approvalId: r.approvalId,
     );
   }
 
@@ -524,6 +554,10 @@ enum Scope {
 
   static Scope parse(Object? v) => v == 'admin' ? Scope.admin : Scope.daily;
 
+  static Scope fromWire(w.Scope s) => s == w.Scope.admin ? Scope.admin : Scope.daily;
+
+  w.Scope toWire() => this == Scope.admin ? w.Scope.admin : w.Scope.daily;
+
   String get label => this == Scope.admin ? '管理' : '日常';
 }
 
@@ -537,20 +571,22 @@ class DeviceInfo {
     this.online = false,
   });
 
-  factory DeviceInfo.fromJson(Json j) => DeviceInfo(
-    id: j['id'] as String,
-    name: j['name'] as String,
-    scope: Scope.parse(j['scope']),
-    pairedAtMs: _intOrNull(j['paired_at_ms']),
-    lastSeenMs: _intOrNull(j['last_seen_ms']),
-    online: j['online'] as bool? ?? false,
+  factory DeviceInfo.fromJson(Json j) => DeviceInfo.fromWire(w.DeviceInfo.fromJson(j));
+
+  factory DeviceInfo.fromWire(w.DeviceInfo d) => DeviceInfo(
+    id: d.id,
+    name: d.name,
+    scope: Scope.fromWire(d.scope),
+    pairedAtMs: d.pairedAtMs.toInt(),
+    lastSeenMs: d.lastSeenMs.toInt(),
+    online: d.online,
   );
 
   final String id;
   final String name;
   final Scope scope;
 
-  /// 配对、最后在线的时间；配对的回复（`Claimed`）里没有。
+  /// 配对、最后在线的时间。主机总会给；可空只是为了测试里少写几个字段。
   final int? pairedAtMs;
   final int? lastSeenMs;
 
@@ -561,13 +597,18 @@ class DeviceInfo {
 // ---------- 记忆（“管理”权限，F-18） ----------
 
 /// 人能直接改的两层：决策者笔记、岗位记忆摘要。
-enum MemoryLayer { notes, summary }
+enum MemoryLayer {
+  notes,
+  summary;
+
+  w.MemoryLayer toWire() => this == notes ? w.MemoryLayer.notes : w.MemoryLayer.summary;
+}
 
 /// 一段记忆文字和最后改动时间。
 class MemoryText {
   const MemoryText({required this.text, required this.updatedMs});
 
-  factory MemoryText.fromJson(Json j) => MemoryText(text: _str(j['text']) ?? '', updatedMs: _int(j['updated_ms']));
+  factory MemoryText.fromWire(w.MemoryText m) => MemoryText(text: m.text, updatedMs: m.updatedMs.toInt());
 
   final String text;
   final int updatedMs;
@@ -584,13 +625,13 @@ class ThreadMemory {
     this.lastUsageMs,
   });
 
-  factory ThreadMemory.fromJson(Json j) => ThreadMemory(
-    threadId: j['thread_id'] as String,
-    title: _str(j['title']),
-    summary: _str(j['summary']) ?? '',
-    generatedMs: _int(j['generated_ms']),
-    usageCount: _intOrNull(j['usage_count']) ?? 0,
-    lastUsageMs: _intOrNull(j['last_usage_ms']),
+  factory ThreadMemory.fromWire(w.ThreadMemoryView t) => ThreadMemory(
+    threadId: t.threadId,
+    title: t.title,
+    summary: t.summary,
+    generatedMs: t.generatedMs.toInt(),
+    usageCount: t.usageCount.toInt(),
+    lastUsageMs: _intOrNull(t.lastUsageMs),
   );
 
   final String threadId;
@@ -613,12 +654,12 @@ class MemoryCorrection {
     this.appliedMs,
   });
 
-  factory MemoryCorrection.fromJson(Json j) => MemoryCorrection(
-    noteId: _int(j['note_id']),
-    text: _str(j['text']) ?? '',
-    createdMs: _int(j['created_ms']),
-    threadId: _str(j['thread_id']),
-    appliedMs: _intOrNull(j['applied_ms']),
+  factory MemoryCorrection.fromWire(w.CorrectionView c) => MemoryCorrection(
+    noteId: c.noteId.toInt(),
+    text: c.text,
+    createdMs: c.createdMs.toInt(),
+    threadId: c.threadId,
+    appliedMs: _intOrNull(c.appliedMs),
   );
 
   final int noteId;
@@ -642,15 +683,18 @@ class MemoryView {
     required this.corrections,
   });
 
-  factory MemoryView.fromJson(Json j) => MemoryView(
-    roleId: j['role_id'] as String,
-    enabled: j['enabled'] as bool? ?? false,
-    notes: j['notes'] == null ? null : MemoryText.fromJson(j['notes'] as Json),
-    summary: j['summary'] == null ? null : MemoryText.fromJson(j['summary'] as Json),
-    summaryFromThreads: _intOrNull(j['summary_from_threads']) ?? 0,
-    threads: _list(j['threads'], ThreadMemory.fromJson),
-    corrections: _list(j['corrections'], MemoryCorrection.fromJson),
-  );
+  factory MemoryView.fromJson(Json j) {
+    final m = w.MemoryView.fromJson(j);
+    return MemoryView(
+      roleId: m.roleId,
+      enabled: m.enabled,
+      notes: m.notes == null ? null : MemoryText.fromWire(m.notes!),
+      summary: m.summary == null ? null : MemoryText.fromWire(m.summary!),
+      summaryFromThreads: m.summaryFromThreads.toInt(),
+      threads: [for (final t in m.threads) ThreadMemory.fromWire(t)],
+      corrections: [for (final c in m.corrections) MemoryCorrection.fromWire(c)],
+    );
+  }
 
   final String roleId;
 
@@ -675,8 +719,7 @@ class MemoryView {
 class ScheduleTarget {
   const ScheduleTarget({required this.role, this.agent, this.escalate = false});
 
-  factory ScheduleTarget.fromJson(Json j) =>
-      ScheduleTarget(role: j['role'] as String, agent: _str(j['agent']), escalate: j['escalate'] as bool? ?? false);
+  factory ScheduleTarget.fromWire(w.Target t) => ScheduleTarget(role: t.role, agent: t.agent, escalate: t.escalate);
 
   final String role;
 
@@ -702,18 +745,18 @@ class Schedule {
   });
 
   factory Schedule.fromJson(Json j) {
-    final spec = j['spec'] as Json;
-    final last = j['last_run'] as Json?;
+    final v = w.ScheduleView.fromJson(j);
+    final spec = v.spec;
     return Schedule(
-      id: spec['id'] as String,
-      description: _str(spec['description']) ?? '',
-      cron: spec['cron'] as String,
-      utcOffset: _str(spec['utc_offset']) ?? '+00:00',
-      to: spec['to'] == null ? null : ScheduleTarget.fromJson(spec['to'] as Json),
-      text: _str(spec['text']) ?? '',
-      enabled: spec['enabled'] as bool? ?? true,
-      nextRunMs: _intOrNull(j['next_run_ms']),
-      lastRun: last == null ? null : LastRun.fromJson(last),
+      id: spec.id,
+      description: spec.description,
+      cron: spec.cron,
+      utcOffset: spec.utcOffset,
+      to: spec.to == null ? null : ScheduleTarget.fromWire(spec.to!),
+      text: spec.text,
+      enabled: spec.enabled,
+      nextRunMs: _intOrNull(v.nextRunMs),
+      lastRun: v.lastRun == null ? null : LastRun.fromWire(v.lastRun!),
     );
   }
 
@@ -742,12 +785,8 @@ class Schedule {
 class LastRun {
   const LastRun({required this.atMs, required this.ok, required this.detail, this.threadId});
 
-  factory LastRun.fromJson(Json j) => LastRun(
-    atMs: _int(j['at_ms']),
-    ok: j['ok'] as bool,
-    detail: _str(j['detail']) ?? '',
-    threadId: _str(j['thread_id']),
-  );
+  factory LastRun.fromWire(w.LastRun l) =>
+      LastRun(atMs: l.atMs.toInt(), ok: l.ok, detail: l.detail, threadId: l.threadId);
 
   final int atMs;
   final bool ok;
@@ -761,13 +800,10 @@ class LastRun {
 class NewPairing {
   const NewPairing({required this.code, required this.name, required this.expiresMs, this.link, this.qr});
 
-  factory NewPairing.fromJson(Json j) => NewPairing(
-    code: j['code'] as String,
-    name: j['name'] as String,
-    expiresMs: _int(j['expires_ms']),
-    link: _str(j['link']),
-    qr: (j['qr'] as List?)?.cast<String>(),
-  );
+  factory NewPairing.fromJson(Json j) {
+    final p = w.NewPairing.fromJson(j);
+    return NewPairing(code: p.code, name: p.name, expiresMs: p.expiresMs.toInt(), link: p.link, qr: p.qr);
+  }
 
   /// 6 位数字。
   final String code;
@@ -785,7 +821,10 @@ class NewPairing {
 class Claimed {
   const Claimed(this.token, this.device);
 
-  factory Claimed.fromJson(Json j) => Claimed(j['token'] as String, DeviceInfo.fromJson(j['device'] as Json));
+  factory Claimed.fromJson(Json j) {
+    final c = w.Claimed.fromJson(j);
+    return Claimed(c.token, DeviceInfo.fromWire(c.device));
+  }
 
   final String token;
   final DeviceInfo device;
@@ -795,10 +834,10 @@ class Claimed {
 class WhoAmI {
   const WhoAmI({this.device, required this.scope});
 
-  factory WhoAmI.fromJson(Json j) => WhoAmI(
-    device: j['device'] == null ? null : DeviceInfo.fromJson(j['device'] as Json),
-    scope: Scope.parse(j['scope']),
-  );
+  factory WhoAmI.fromJson(Json j) {
+    final me = w.WhoAmI.fromJson(j);
+    return WhoAmI(device: me.device == null ? null : DeviceInfo.fromWire(me.device!), scope: Scope.fromWire(me.scope));
+  }
 
   /// 用设备令牌连上时是这台设备。
   final DeviceInfo? device;
@@ -820,15 +859,17 @@ class Alert {
     required this.atMs,
   });
 
-  factory Alert.fromJson(Json j) => Alert(
-    kind: j['kind'] as String,
-    level: j['level'] as String,
-    title: j['title'] as String,
-    body: _str(j['body']) ?? '',
-    tag: j['tag'] as String,
-    threadId: _str(j['thread_id']),
-    roleId: _str(j['role_id']),
-    atMs: _int(j['at_ms']),
+  factory Alert.fromJson(Json j) => Alert.fromWire(w.Alert.fromJson(j));
+
+  factory Alert.fromWire(w.Alert a) => Alert(
+    kind: a.kind.wire,
+    level: a.level.wire,
+    title: a.title,
+    body: a.body,
+    tag: a.tag,
+    threadId: a.threadId,
+    roleId: a.roleId,
+    atMs: a.atMs.toInt(),
   );
 
   final String kind;
@@ -854,6 +895,8 @@ enum NotifyLevel {
   final String label;
 
   static NotifyLevel parse(Object? v) => values.firstWhere((l) => l.wire == v, orElse: () => needsMe);
+
+  w.NotifyLevel toWire() => w.NotifyLevel.fromJson(wire);
 }
 
 /// 这台设备的通知设置（m2-spec D-32 的 `NotifySettings`），服务端按它筛 `alert`。
@@ -865,12 +908,15 @@ class NotifySettings {
     this.preview = true,
   });
 
-  factory NotifySettings.fromJson(Json j) => NotifySettings(
-    level: NotifyLevel.parse(j['level']),
-    mutedRoles: [for (final r in (j['muted_roles'] as List? ?? const [])) r as String],
-    muteUntilMs: _intOrNull(j['mute_until_ms']),
-    preview: j['preview'] as bool? ?? true,
-  );
+  factory NotifySettings.fromJson(Json j) {
+    final n = w.NotifySettings.fromJson(j);
+    return NotifySettings(
+      level: NotifyLevel.parse(n.level.wire),
+      mutedRoles: n.mutedRoles,
+      muteUntilMs: _intOrNull(n.muteUntilMs),
+      preview: n.preview,
+    );
+  }
 
   final NotifyLevel level;
 
@@ -897,7 +943,10 @@ class NotifySettings {
     preview: preview ?? this.preview,
   );
 
-  Json toJson() => {'level': level.wire, 'muted_roles': mutedRoles, 'mute_until_ms': muteUntilMs, 'preview': preview};
+  w.NotifySettings toWire() =>
+      w.NotifySettings(level: level.toWire(), mutedRoles: mutedRoles, muteUntilMs: muteUntilMs, preview: preview);
+
+  Json toJson() => toWire().toJson();
 }
 
 // ---------- 报告 ----------
@@ -906,12 +955,10 @@ class NotifySettings {
 class ReportInfo {
   const ReportInfo({required this.agentId, required this.path, required this.bytes, required this.modifiedMs});
 
-  factory ReportInfo.fromJson(Json j) => ReportInfo(
-    agentId: j['agent_id'] as String,
-    path: j['path'] as String,
-    bytes: _int(j['bytes']),
-    modifiedMs: _int(j['modified_ms']),
-  );
+  factory ReportInfo.fromJson(Json j) {
+    final r = w.ReportInfo.fromJson(j);
+    return ReportInfo(agentId: r.agentId, path: r.path, bytes: r.bytes.toInt(), modifiedMs: r.modifiedMs.toInt());
+  }
 
   final String agentId;
 
@@ -934,13 +981,16 @@ class ReportText {
     required this.truncated,
   });
 
-  factory ReportText.fromJson(Json j) => ReportText(
-    agentId: j['agent_id'] as String,
-    path: j['path'] as String,
-    text: j['text'] as String,
-    modifiedMs: _int(j['modified_ms']),
-    truncated: j['truncated'] as bool? ?? false,
-  );
+  factory ReportText.fromJson(Json j) {
+    final r = w.ReportText.fromJson(j);
+    return ReportText(
+      agentId: r.agentId,
+      path: r.path,
+      text: r.text,
+      modifiedMs: r.modifiedMs.toInt(),
+      truncated: r.truncated,
+    );
+  }
 
   final String agentId;
   final String path;
@@ -963,16 +1013,16 @@ class SpendToday {
     required this.routingTokens,
   });
 
-  factory SpendToday.fromJson(Json j) => SpendToday(
-    date: j['date'] as String,
-    roles: {for (final MapEntry(:key, :value) in (j['roles'] as Json? ?? const {}).entries) key: _double(value)},
-    routingUsd: _double(j['routing_usd']),
-    tokens: {
-      for (final MapEntry(:key, :value) in (j['tokens'] as Json? ?? const {}).entries)
-        key: Usage.fromJson(value as Json),
-    },
-    routingTokens: j['routing_tokens'] == null ? const Usage() : Usage.fromJson(j['routing_tokens'] as Json),
-  );
+  factory SpendToday.fromJson(Json j) {
+    final s = w.SpendToday.fromJson(j);
+    return SpendToday(
+      date: s.date,
+      roles: s.roles.map((k, v) => MapEntry(k, v.toDouble())),
+      routingUsd: s.routingUsd.toDouble(),
+      tokens: s.tokens.map((k, v) => MapEntry(k, Usage.fromWire(v))),
+      routingTokens: Usage.fromWire(s.routingTokens),
+    );
+  }
 
   /// `YYYY-MM-DD`。
   final String date;

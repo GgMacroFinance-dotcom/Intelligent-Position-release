@@ -28,7 +28,14 @@ class Harness {
         if (code != '123456') throw const PairingError('配对码不对、过期了或者已经用过');
         return Claimed.fromJson({
           'token': 'ipd_abc',
-          'device': {'id': 'd1', 'name': '张三的手机', 'scope': 'daily'},
+          'device': {
+            'id': 'd1',
+            'name': '张三的手机',
+            'scope': 'daily',
+            'paired_at_ms': 1,
+            'last_seen_ms': 1,
+            'online': true,
+          },
         });
       },
     );
