@@ -45,7 +45,7 @@ M2-1 和 M2-3 改的文件基本不重叠，可以同时做。
 
 - 飞书、邮件：通用接口留出位置，等有真实用户再接。
 - `ip-browser` 自研版：需要浏览器的岗位先在 `mcp_servers` 里配 Playwright MCP。注意 MCP 子进程不在沙箱里。
-- Claude Code 引擎：以后套用第 6 节的同一个 `Engine` 接口。
+- Claude Code 引擎：原来不在本阶段，2026-11-21 做了，套用第 6 节的同一个 `Engine` 接口（D-36，backlog E-6）。
 - Slack 里逐字输出：第一版回复写完一次发出，见 Q-07。
 
 ---
@@ -536,7 +536,7 @@ channels:
 
 ---
 
-## 6. Codex 引擎（`ip-engines`）
+## 6. 外部引擎：Codex、Claude Code（`ip-engines`）
 
 ### D-20 引擎接口 · 已实现（#22）
 
@@ -687,6 +687,107 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
   - 异常退出时，失败原因带上 stderr。
   - 假 codex 用 curl 调 `/mcp` 的 `update_task` 交回任务：任务完成，结果回到派活的对话。
   - `engines` 配置的解析和各项校验。
+
+
+### D-36 Claude Code 引擎 · 已实现（backlog E-6）
+
+和 Codex 一样套 D-20 的 `Engine` 接口，每轮起一个进程，跑完就退出。排队、超时整组终止、收 stderr 这些和 Codex 共用一份（`ip-engines/src/process.rs`），只是参数和输出格式不同。参数和输出格式按 Claude Code 2.1.330 写成，用它连假的模型接口核对过（见本节最后）；换版本时要重新核对。
+
+```yaml
+engines:
+  ops-tester:
+    kind: claude_code
+    command: claude                # 可执行文件，默认 claude
+    model: <模型名>                # 传给 --model；省略时用 Claude Code 的默认模型
+    api_key_env: ANTHROPIC_API_KEY # 必填：--bare 只认 API key，不读登录状态和钥匙串
+    # base_url: https://...        # 兼容 Anthropic 接口的网关，以 ANTHROPIC_BASE_URL 交给 Claude Code
+    access: workspace-write        # read-only | workspace-write
+    allowed_tools: ["Bash(cargo test:*)"]   # 预先放行的权限规则，原样交给 --allowedTools
+    turn_timeout_secs: 1800
+    max_concurrency: 4
+    price: { input: 0, cached_input: 0, cache_write: 0, output: 0 }   # 美元 / 百万 token
+```
+
+配置校验：D-21 的几条照样适用。另外，`model` 和 `allowed_tools` 里的每一条不能为空、不能以 `-` 开头、不能含控制字符，否则会被当成别的参数；`base_url` 要以 `https://` 或 `http://` 开头。
+
+**每轮的参数**
+
+- `-p --bare --restricted --output-format stream-json --verbose`。
+  - `--bare`：不读 CLAUDE.md、钩子、插件、自动记忆，认证只认 `ANTHROPIC_API_KEY`。
+  - `--restricted`：不读用户、项目、本地的设置文件，文件工具只能动工作目录，Bash 要在 `--tools` 里点名才有。
+- `--permission-mode acceptEdits --permission-prompts none`：工作目录里的改动自动接受；要人批准的一律拒绝，因为没有人能回答。
+- `--tools Bash,Edit,Read`，`access: read-only` 时只有 `Read`。`--bare` 下内置工具只有这三个，`--tools` 写别的也不会有。
+- `--strict-mcp-config`：不读工作目录里的 `.mcp.json`。有 `/mcp` 时再加：
+  - `--mcp-config '{"mcpServers":{"ip":{"type":"http","url":"<地址>","headers":{"Authorization":"Bearer ${IP_MCP_TOKEN}"}}}}'`。令牌不写进参数（`ps` 看得到），由 Claude Code 从环境变量展开。
+  - `--allowedTools mcp__ip`：组织工具已经由本轮令牌限定范围，一律放行。
+- `allowed_tools` 里的每一条：`--allowedTools <规则>`。
+- `--append-system-prompt-file <data_dir>/engines/<员工 id>/prompts/<对话 id>.md`：每轮把系统提示词写进这个文件，一轮结束后删掉。续接时也给，因为 Claude Code 记下第一轮的提示词后会沿用，压缩上下文后才重新生成。
+- `--model <model>`（配置了时）。
+- 之后几轮：`--resume <会话 id>`，会话 id 取自 `system`/`init` 事件。
+
+和 Codex 不同，系统提示词不进标准输入，标准输入里只有上一轮之后的新消息，第一轮也一样。
+
+环境变量全部清空，只给这几个：
+
+- `PATH`。
+- `HOME`：`data_dir/engines/<员工 id>`。
+- `CLAUDE_CONFIG_DIR`：`HOME` 下面的 `claude`，会话记录也在里面。
+- `ANTHROPIC_API_KEY`，以及配了时的 `ANTHROPIC_BASE_URL`。
+- `IP_MCP_TOKEN`。
+- `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`：不自动升级，不发遥测和错误报告。
+
+**输出怎么记进对话**
+
+| stream-json 事件 | 怎么处理 |
+| --- | --- |
+| `system`，subtype `init` | 记下 `session_id`。`mcp_servers` 里没连上的记成警告，这一轮没正常结束时附在失败原因里 |
+| `assistant` 的 `text` 块 | 写成 `Body::Text` |
+| `assistant` 的 `tool_use` 块 | 写成工具调用。内置工具记成 `claude.<工具>`（如 `claude.Bash`），MCP 工具照原名 `mcp__ip__<工具>` |
+| `user` 的 `tool_result` 块 | 写成工具结果，`is_error` 为真算失败，输出截断到 16 KB。被拒绝的调用也在这里，原因写在结果里 |
+| `thinking` 块 | 不记 |
+| 带 `parent_tool_use_id` 的消息（子智能体内部） | 不记 |
+| `result` | 用量按 `usage` 和 `price` 折算，全部输入是 `input_tokens` 加上 `cache_read_input_tokens` 和 `cache_creation_input_tokens`。`is_error` 为真或 subtype 以 `error` 开头就是失败：原因取 `result`，没有就取 subtype；非零退出时附上 stderr 最后一行 |
+| 没有 `result`，以及超时 | 和 Codex 一样（D-24） |
+
+不用 `total_cost_usd` 记账：续接时它是整个会话的累计，每轮都记会重复。`usage` 只算这一次进程，直接计费；引擎会话表里的累计用量（D-23）在上一轮的基础上加上它。Codex 续接时报的用量本身就是累计值，那边按上一轮存下的累计值做差（backlog E-10）。
+
+**能做什么**
+
+Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限规则：
+
+- 工作目录外的读写、没放行的命令都会被拒绝。核对过 `touch /tmp/…`、`python3 -c …`、读 `/etc/hostname` 三种。
+- Claude Code 认为安全的简单命令（如 `echo hi > a.txt && cat a.txt`）在 `acceptEdits` 下自动放行。
+- `allowed_tools` 放行的命令不受工作目录限制，还能执行工作目录里的代码。比如 `Bash(cargo test:*)` 会跑项目里的测试代码，等于放行了这个项目能做的任何事。只在可信的项目上放行；要隔离，就把 ip 跑在容器里（`docs/ip/deploy-docker.md`）。
+- Claude Code 自带的沙箱（Linux 上用 bubblewrap）第一版不用：要另外装，云主机上也没验过。
+- 和 Codex 一样，不带 harness 的代理变量，只能经代理出网的主机上连不上 Anthropic。
+- 续接时找不到会话（比如删了 `data_dir/engines`），这个对话之后每轮都会失败，原因写在“这轮失败”里。Codex 也一样。
+
+**怎么核对的（2026-11-21）**
+
+用本机的 Claude Code 2.1.330，连一个假的 Anthropic 消息接口（本机的 Python 脚本，按触发词回固定内容，不调真模型）：
+
+- 单独跑 `claude`，核对了这些：
+  - 上面的参数都能用，`${IP_MCP_TOKEN}` 会被展开，`--append-system-prompt-file` 生效；
+  - 工作目录里 `.claude/settings.json` 写的钩子和放行规则都不生效；
+  - 越界的命令和读取被拒绝；
+  - 接口报错、续接时找不到会话时的输出；
+  - 续接时 `usage` 和 `total_cost_usd` 的差别。
+- 再用 `ip serve` 配 `claude_code` 引擎，从 `/ws` 操作：
+  - 派任务后，员工经 `/mcp` 的 `update_task` 交回了任务。这一步是真的 Claude Code 作为 MCP 客户端连 ip 的 `/mcp`。
+  - 新对话里跑了简单命令，也跑了放行的 `sh test.sh`。续接同一对话时，模型收到了前几轮的消息。
+  - 没放行的命令被拒绝。
+
+没用真的 Claude 模型跑过，也没在真实项目上跑过。
+
+**测试**
+
+- 单元测试（`ip-engines/src/claude_code.rs`）：配置默认值和校验；首轮、续接、只读时的参数；stream-json 各类事件的解析，样例取自 2.1.330 的真实输出。
+- 端到端测试（`ip-server/src/engine_tests.rs`，和 Codex 共用假引擎脚本）：
+  - 首轮和续接的参数、标准输入、提示词文件、环境变量、工作目录；
+  - 输出记进对话；
+  - 按价格计费，不按累计的 `total_cost_usd`；
+  - 接口报错、缺少 `result`、找不到会话三种失败的原因；
+  - 照 `--mcp-config` 用 curl 调 `/mcp` 的 `update_task` 交回任务。
 
 ---
 
@@ -863,3 +964,4 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 | 2026-11-16 | v0.18 | 新增 D-34（提议，backlog F-11）：配了令牌时 `/ws` 和 `/pair` 接受桌面 App 的来源 |
 | 2026-11-21 | v0.19 | 新增 D-35（提议，backlog F-21）：手机 App 的锁屏推送照 Web Push 发给项目运营的中转 `ip-relay`，中转转给 APNs、FCM；`ip.yaml` 加 `push.hosts`，推送负载上限降到 2800 字节。`/ws` 协议不变 |
 | 2026-11-21 | v0.20 | 修 Codex 续接会话时用量重复记账（backlog E-10，提议，等工程师审查）：D-23 的引擎会话表加四列累计用量，D-20 的 `TurnContext` 加 `session_usage`、`TurnReport` 加 `session_usage`；每轮只记和上一轮累计值的差。只用假 codex 测过，累计值的数字取自 2026-11-14 真实 Codex 的核对 |
+| 2026-11-21 | v0.21 | 新增 D-36（已实现，backlog E-6）：Claude Code 引擎（`kind: claude_code`），和 Codex 共用进程管理；第 6 节改名为“外部引擎” |

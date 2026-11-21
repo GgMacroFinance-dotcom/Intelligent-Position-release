@@ -294,6 +294,8 @@ pub enum ConfigError {
     BudgetWithoutPrice(String, String),
     #[error("engines 里的岗位 `{0}` 不存在")]
     EngineRole(String),
+    #[error("岗位 `{0}` 的引擎配置不对：{1}")]
+    BadEngine(String, String),
     #[error("memory.roles 里的岗位 `{0}` 不存在")]
     MemoryRole(String),
     #[error("memory 里的模型 `{0}` 的端点没有定义，或缺少 `<端点>/` 前缀")]
@@ -405,6 +407,7 @@ impl Config {
             let Some(r) = org.role(&RoleId::from(role.as_str())) else {
                 return Err(ConfigError::EngineRole(role.clone()));
             };
+            engine.validate().map_err(|e| ConfigError::BadEngine(role.clone(), e))?;
             match engine.price() {
                 Some(p) if !p.valid() => return Err(ConfigError::BadEnginePrice(role.clone())),
                 None if r.budget_per_day_usd.is_some() => {
