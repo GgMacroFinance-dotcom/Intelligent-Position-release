@@ -54,6 +54,9 @@ jobs:
       - name: Unit-test web console
         working-directory: rust/web
         run: node --test test/*.test.mjs
+      - name: Ops gateway drill
+        # 运维测试岗位的中转站巡检脚本：对着假中转站逐个注入故障（examples/ops-gateway/drill.sh）。
+        run: sh examples/ops-gateway/drill.sh
 
   bench:
     runs-on: ubuntu-latest

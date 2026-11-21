@@ -1,0 +1,7 @@
+#!/bin/sh
+# 假的 systemctl：只认 is-active，FAKE_INACTIVE 里列的服务报 failed。
+[ "$1" = is-active ] || exit 1
+for s in ${FAKE_INACTIVE:-}; do
+  if [ "$s" = "$2" ]; then echo failed; exit 3; fi
+done
+echo active

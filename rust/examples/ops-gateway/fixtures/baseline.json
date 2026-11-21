@@ -1,0 +1,26 @@
+{
+  "image-1": {
+    "cache_ratio": null,
+    "completion_ratio": 0,
+    "create_cache_ratio": null,
+    "model_price": 0.04,
+    "model_ratio": 0,
+    "quota_type": 1
+  },
+  "model-a": {
+    "cache_ratio": null,
+    "completion_ratio": 8,
+    "create_cache_ratio": null,
+    "model_price": 0,
+    "model_ratio": 1.25,
+    "quota_type": 0
+  },
+  "model-b": {
+    "cache_ratio": null,
+    "completion_ratio": 4,
+    "create_cache_ratio": null,
+    "model_price": 0,
+    "model_ratio": 0.5,
+    "quota_type": 0
+  }
+}

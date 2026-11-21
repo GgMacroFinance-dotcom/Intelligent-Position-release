@@ -1,0 +1,12 @@
+#!/bin/sh
+# 假的 docker，只给演练用：照 FAKE_UNHEALTHY、FAKE_EXITED 打印 compose 项目里三个容器的状态。
+for c in new-api postgres redis; do
+  name="new-api-$c-1"
+  if [ "${FAKE_EXITED:-}" = "$c" ]; then
+    printf '%s\tExited (137) 5 minutes ago\n' "$name"
+  elif [ "${FAKE_UNHEALTHY:-}" = "$c" ]; then
+    printf '%s\tUp 2 hours (unhealthy)\n' "$name"
+  else
+    printf '%s\tUp 3 days (healthy)\n' "$name"
+  fi
+done
