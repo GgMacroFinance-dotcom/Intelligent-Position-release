@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ip_app/src/ui/admin/devices_page.dart';
+import 'package:ip_app/src/ui/admin/memory_page.dart';
 import 'package:ip_app/src/ui/admin/schedules_page.dart';
 
 import 'fake_host.dart';
@@ -209,6 +210,131 @@ void main() {
     await h.start(tester);
     await openAdmin(tester, h, '定时任务');
     expect(find.textContaining('ip.yaml'), findsOneWidget);
+    await h.stop(tester);
+  });
+
+  testWidgets('记忆页：改笔记和摘要、删更正、抹掉对话记忆、关掉和重新打开、清空', (tester) async {
+    final h = adminHarness();
+    var notes = '写清楚数据来源';
+    var summary = '用户关心 CPI 和 PMI。';
+    var corrections = [
+      {'note_id': 7, 'text': '以后别用“环比”', 'created_ms': 1000, 'thread_id': 't1', 'applied_ms': null},
+    ];
+    var threads = [
+      {
+        'thread_id': 't1',
+        'title': 'CPI 讨论',
+        'summary': '9 月 CPI 同比 0.4%',
+        'generated_ms': 1000,
+        'usage_count': 3,
+        'last_usage_ms': 2000,
+      },
+    ];
+    var off = <String>[];
+    Json view() => {
+      'role_id': 'macro',
+      'enabled': true,
+      'notes': notes.isEmpty ? null : {'text': notes, 'updated_ms': 1000},
+      'summary': summary.isEmpty ? null : {'text': summary, 'updated_ms': 1000},
+      'summary_from_threads': 2,
+      'threads': threads,
+      'corrections': corrections,
+    };
+    h.host.handlers.addAll({
+      'get_memory': (_) => view(),
+      'list_memory_off_threads': (_) => off,
+      'save_memory_text': (req) {
+        if (req['layer'] == 'notes') notes = req['text'] as String;
+        if (req['layer'] == 'summary') summary = req['text'] as String;
+        return view();
+      },
+      'delete_memory_note': (req) {
+        corrections = corrections.where((n) => n['note_id'] != req['note_id']).toList();
+        return view();
+      },
+      'forget_thread_memory': (req) {
+        threads = threads.where((t) => t['thread_id'] != req['thread_id']).toList();
+        return view();
+      },
+      'set_thread_memory': (req) {
+        final id = req['thread_id'] as String;
+        if (req['enabled'] == true) {
+          off = off.where((x) => x != id).toList();
+        } else {
+          off = [...off, id];
+          threads = threads.where((t) => t['thread_id'] != id).toList();
+        }
+        return off;
+      },
+      'clear_memory': (_) {
+        summary = '';
+        threads = [];
+        corrections = [];
+        return view();
+      },
+    });
+    await h.savePaired();
+    await h.start(tester, size: const Size(1280, 2400));
+    await openAdmin(tester, h, '记忆');
+    expect(find.byType(MemoryPage), findsOneWidget);
+    expect(find.text('写清楚数据来源'), findsOneWidget);
+    expect(find.textContaining('这一版基于 2 份对话记忆'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const ValueKey('memory-notes')), '写清楚数据来源，数字保留一位小数');
+    await tester.tap(find.text('保存决策者笔记'));
+    await tester.pumpAndSettle();
+    final save = h.host.requests.lastWhere((r) => r['type'] == 'save_memory_text');
+    expect((save['role_id'], save['layer'], save['text']), ('macro', 'notes', '写清楚数据来源，数字保留一位小数'));
+
+    expect(find.text('以后别用“环比”'), findsOneWidget);
+    expect(find.textContaining('等下次合并'), findsOneWidget);
+    await tester.tap(find.byTooltip('删除这条更正'));
+    await tester.pumpAndSettle();
+    expect(find.text('以后别用“环比”'), findsNothing);
+    expect(find.text('人要求的更正（0）'), findsOneWidget);
+
+    expect(find.textContaining('被员工读过 3 次'), findsOneWidget);
+    await tester.tap(find.text('抹掉并关掉记忆'));
+    await tester.pumpAndSettle();
+    expect(find.text('各对话的记忆（0）'), findsOneWidget);
+    expect(find.text('关掉了记忆的对话（1）'), findsOneWidget);
+    // 关掉的对话按对话列表里的预览显示。
+    expect(find.text('最近 CPI 怎么样'), findsOneWidget);
+    await tester.tap(find.text('重新打开'));
+    await tester.pumpAndSettle();
+    expect(find.text('关掉了记忆的对话（0）'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '清空'));
+    await tester.pumpAndSettle();
+    expect(find.text('清空「宏观研究」的全部记忆？'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '清空'));
+    await tester.pumpAndSettle();
+    expect(h.host.requests.any((r) => r['type'] == 'clear_memory'), isTrue);
+    // 摘要的输入框跟着清空，笔记的还在。
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('memory-summary'))).controller!.text, isEmpty);
+    expect(find.text('写清楚数据来源，数字保留一位小数'), findsOneWidget);
+    await h.stop(tester);
+  });
+
+  testWidgets('记忆页：岗位没开记忆时提示', (tester) async {
+    final h = adminHarness();
+    h.host.handlers.addAll({
+      'get_memory': (_) => {
+        'role_id': 'macro',
+        'enabled': false,
+        'notes': null,
+        'summary': null,
+        'summary_from_threads': 0,
+        'threads': <Object>[],
+        'corrections': <Object>[],
+      },
+      'list_memory_off_threads': (_) => <Object>[],
+    });
+    await h.savePaired();
+    await h.start(tester);
+    await openAdmin(tester, h, '记忆');
+    expect(find.textContaining('这个岗位没开记忆'), findsOneWidget);
+    expect(find.text('还没有内容'), findsNWidgets(2));
     await h.stop(tester);
   });
 }

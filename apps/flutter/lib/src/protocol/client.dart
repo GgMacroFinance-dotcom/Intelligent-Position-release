@@ -334,6 +334,40 @@ extension IpRequests on IpClient {
         }) as Json,
       );
 
+  // ---------- 记忆（“管理”权限，F-18） ----------
+
+  Future<MemoryView> _memory(Json req) async => MemoryView.fromJson(await request(req) as Json);
+
+  Future<MemoryView> getMemory(String roleId) => _memory({'type': 'get_memory', 'role_id': roleId});
+
+  /// 整体改写决策者笔记或岗位记忆摘要，空文本等于清空这一层。
+  Future<MemoryView> saveMemoryText(String roleId, MemoryLayer layer, String text) =>
+      _memory({'type': 'save_memory_text', 'role_id': roleId, 'layer': layer.name, 'text': text});
+
+  /// 抹掉一个对话在这个岗位下的记忆。
+  Future<MemoryView> forgetThreadMemory(String roleId, String threadId) =>
+      _memory({'type': 'forget_thread_memory', 'role_id': roleId, 'thread_id': threadId});
+
+  /// 删一条人要求的更正。
+  Future<MemoryView> deleteMemoryNote(String roleId, int noteId) =>
+      _memory({'type': 'delete_memory_note', 'role_id': roleId, 'note_id': noteId});
+
+  /// 清空一个岗位的记忆（摘要、各对话的记忆、更正；决策者笔记不动）。
+  Future<MemoryView> clearMemory(String roleId) => _memory({'type': 'clear_memory', 'role_id': roleId});
+
+  /// 关掉了记忆的对话。
+  Future<List<String>> listMemoryOffThreads() async => [
+    for (final id in (await request({'type': 'list_memory_off_threads'}) as List? ?? const [])) id as String,
+  ];
+
+  /// 关掉或重新打开一个对话的记忆，回复改完后关掉了记忆的对话。
+  Future<List<String>> setThreadMemory(String threadId, {required bool enabled}) async => [
+    for (final id
+        in (await request({'type': 'set_thread_memory', 'thread_id': threadId, 'enabled': enabled}) as List? ??
+            const []))
+      id as String,
+  ];
+
   // ---------- 定时任务（“管理”权限，F-18） ----------
 
   Future<List<Schedule>> listSchedules() => _list({'type': 'list_schedules'}, Schedule.fromJson);

@@ -6,6 +6,7 @@ import '../app_state.dart';
 import '../protocol/client.dart';
 import '../protocol/models.dart';
 import 'admin/devices_page.dart';
+import 'admin/memory_page.dart';
 import 'admin/schedules_page.dart';
 import 'common.dart';
 
@@ -219,6 +220,13 @@ class AdminSection extends StatelessWidget {
           subtitle: const Text('看下次和上次运行，立即运行一次'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _push(context, '定时任务', const SchedulesPage()),
+        ),
+        ListTile(
+          leading: const Icon(Icons.psychology_outlined),
+          title: const Text('记忆'),
+          subtitle: const Text('决策者笔记、岗位记忆摘要、更正、各对话的记忆'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _push(context, '记忆', const MemoryPage()),
         ),
       ],
     );
