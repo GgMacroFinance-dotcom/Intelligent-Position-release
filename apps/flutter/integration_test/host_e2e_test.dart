@@ -146,13 +146,13 @@ void main() {
       await tester.tap(find.text('待办').last);
       await tester.pumpAndSettle();
       await shot('inbox-card');
-      // 卡片按发起时间新的在前，最上面那张就是这次的。选第二个选项。
+      // 待办里员工提问排在决策卡前面，主机上也可能还有别的卡：滚到这句话的那张卡（新的在前，第一张就是这次的），选第二个选项。
       final ours = state.pendingApprovals.firstWhere(mine);
-      expect(state.pendingApprovals.first.id, ours.id);
-      final option = ours.options[1].label;
-      await tester.tap(
-        find.descendant(of: find.byType(ApprovalCard).first, matching: find.textContaining(option)).first,
-      );
+      final question = find.textContaining(unrouted);
+      await tester.scrollUntilVisible(question, 300, scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
+      final card = find.ancestor(of: question.first, matching: find.byType(ApprovalCard));
+      await tester.tap(find.descendant(of: card, matching: find.textContaining(ours.options[1].label)).first);
       await pumpUntil(tester, () => !state.pendingApprovals.any((a) => a.id == ours.id), '选了没生效');
       await pumpUntil(
         tester,
@@ -166,6 +166,20 @@ void main() {
       await tester.pumpAndSettle();
       await shot('routed-thread');
     }
+
+    // 星图：幕僚长在中心，每位员工一颗天体。星图一直在动，不能 pumpAndSettle。
+    await backIfPushed(tester);
+    await tester.tap(find.text('星图').last);
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('智能岗位 · Bot 星图'), findsOneWidget);
+    for (final a in state.agents) {
+      expect(find.byKey(ValueKey('star-${a.id}')), findsOneWidget, reason: '${a.name} 应该在星图上');
+    }
+    await shot('star-map');
+    await tester.tap(find.text('待办').last);
+    await tester.pumpAndSettle();
 
     // 收尾：忘掉主机，回到“连接主机”。主机那边的设备记录要在控制台“设备”页吊销。
     await backIfPushed(tester);

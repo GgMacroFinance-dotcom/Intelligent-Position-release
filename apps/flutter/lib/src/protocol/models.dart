@@ -297,14 +297,21 @@ class ThreadSummary {
 // ---------- 岗位和员工 ----------
 
 class Role {
-  const Role({required this.id, this.name, required this.description});
+  const Role({required this.id, this.name, required this.description, this.budgetPerDayUsd});
 
-  factory Role.fromJson(Json j) =>
-      Role(id: j['id'] as String, name: _str(j['name']), description: _str(j['description']) ?? '');
+  factory Role.fromJson(Json j) => Role(
+    id: j['id'] as String,
+    name: _str(j['name']),
+    description: _str(j['description']) ?? '',
+    budgetPerDayUsd: (j['budget_per_day_usd'] as num?)?.toDouble(),
+  );
 
   final String id;
   final String? name;
   final String description;
+
+  /// 每日模型费用上限（美元）；没设时为空。
+  final double? budgetPerDayUsd;
 
   String get displayName => name ?? id;
 }
@@ -405,6 +412,8 @@ class Task {
     this.assignee,
     this.threadId,
     this.result,
+    this.createdByAgent,
+    this.dueMs,
     required this.createdAtMs,
     required this.updatedAtMs,
   });
@@ -418,6 +427,11 @@ class Task {
     assignee: _str(j['assignee']),
     threadId: _str(j['thread_id']),
     result: _str(j['result']),
+    createdByAgent: switch (j['created_by']) {
+      {'kind': 'agent', 'agent_id': final String id} => id,
+      _ => null,
+    },
+    dueMs: _intOrNull(j['due_ms']),
     createdAtMs: _int(j['created_at_ms']),
     updatedAtMs: _int(j['updated_at_ms']),
   );
@@ -434,8 +448,17 @@ class Task {
 
   /// 交回的结果或受阻原因。
   final String? result;
+
+  /// 员工派给员工的任务才有：派活的员工。人派的任务为空。
+  final String? createdByAgent;
+
+  /// 截止时间；没设时为空。
+  final int? dueMs;
   final int createdAtMs;
   final int updatedAtMs;
+
+  /// 还没结束（没完成也没取消）。
+  bool get isOpen => status != 'done' && status != 'cancelled';
 }
 
 // ---------- 发消息 ----------

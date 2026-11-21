@@ -65,6 +65,12 @@ class AppState extends ChangeNotifier {
   /// 每个对话底部的一行说明：谁开始处理、完成用了多少、失败原因、分派理由。
   final turnNote = <String, String>{};
 
+  /// 正在处理一轮的员工。
+  final agentsWorking = <String>{};
+
+  /// 上一轮失败的员工 → 错误的第一行；之后成功跑完一轮就清掉。
+  final agentFailures = <String, String>{};
+
   /// 新对话发给谁；null 是“自动分派”。
   String? agentForNew;
   bool _agentForNewChosen = false;
@@ -166,6 +172,8 @@ class AppState extends ChangeNotifier {
     drafts.clear();
     threadAgent.clear();
     turnNote.clear();
+    agentsWorking.clear();
+    agentFailures.clear();
     agentForNew = null;
     _agentForNewChosen = false;
     loadError = null;
@@ -325,9 +333,12 @@ class AppState extends ChangeNotifier {
         }
         _refreshThreadsSoon();
       case TurnStarted(:final agentId, :final threadId):
+        agentsWorking.add(agentId);
         turnNote[threadId] = '${agentName(agentId)} 开始处理…';
       case TurnFinished():
         drafts.remove(e.agentId);
+        agentsWorking.remove(e.agentId);
+        agentFailures.remove(e.agentId);
         final u = e.usage;
         final cached = u.promptTokens > 0 ? (100 * u.cachedTokens / u.promptTokens).round() : 0;
         final cost = e.costUsd > 0 ? '，约 \$${e.costUsd.toStringAsFixed(4)}' : '';
@@ -336,6 +347,8 @@ class AppState extends ChangeNotifier {
             '${u.promptTokens + u.completionTokens} tokens（缓存命中 $cached%）$cost';
       case TurnFailed(:final agentId, :final threadId, :final error):
         drafts.remove(agentId);
+        agentsWorking.remove(agentId);
+        agentFailures[agentId] = error.split('\n').first;
         turnNote[threadId] = '${agentName(agentId)} 这轮失败：$error';
       case TaskChanged(:final task):
         tasks = [task, ...tasks.where((t) => t.id != task.id)]..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));

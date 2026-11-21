@@ -1,4 +1,4 @@
-// 连上主机后的主界面：待办、对话、我。窄屏导航在底部，宽屏在左边。
+// 连上主机后的主界面：待办、星图、对话、我。窄屏导航在底部，宽屏在左边。
 
 import 'package:flutter/material.dart';
 
@@ -7,9 +7,13 @@ import 'chat_page.dart';
 import 'common.dart';
 import 'inbox_page.dart';
 import 'me_page.dart';
+import 'star_map_page.dart';
 
 /// 导航挪到左边的最小宽度，和网页控制台的窄屏断点一样。
 const double kWideNav = 720;
+
+/// 各页在导航里的位置。
+const int kTabInbox = 0, kTabStars = 1, kTabChat = 2, kTabMe = 3;
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -19,15 +23,20 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  /// 0 待办（手机首页，apps-plan Q-6），1 对话，2 我。
-  int _tab = 0;
+  /// 先打开待办（手机首页，apps-plan Q-6）。
+  int _tab = kTabInbox;
 
   bool _narrowChat(BuildContext context) => MediaQuery.sizeOf(context).width < kWideChat;
 
   void _openThread(String threadId) {
     final state = AppScope.read(context);
     state.openThread(threadId);
-    setState(() => _tab = 1);
+    _showChat();
+  }
+
+  /// 去对话页看现在打开着的对话（星图气泡里点“在对话页打开”）。
+  void _showChat() {
+    setState(() => _tab = kTabChat);
     if (_narrowChat(context)) _pushThread();
   }
 
@@ -46,15 +55,26 @@ class _HomePageState extends State<HomePage> {
     Widget inboxIcon(IconData icon) => Badge(isLabelVisible: badge > 0, label: Text('$badge'), child: Icon(icon));
     final pages = [
       InboxPage(onOpenThread: _openThread),
+      StarMapPage(onOpenChat: _showChat),
       ChatPage(onOpenThread: _openThread, onNewChat: _newChat),
       const MePage(),
     ];
-    const titles = ['待办', '对话', '我'];
+    const titles = ['待办', '星图', '对话', '我'];
+    final icons = [
+      (inboxIcon(Icons.inbox_outlined), inboxIcon(Icons.inbox)),
+      (const Icon(Icons.auto_awesome_outlined), const Icon(Icons.auto_awesome)),
+      (const Icon(Icons.chat_bubble_outline), const Icon(Icons.chat_bubble)),
+      (const Icon(Icons.person_outline), const Icon(Icons.person)),
+    ];
     final body = Column(
       children: [
         const ConnectionBanner(),
         Expanded(
-          child: IndexedStack(index: _tab, children: pages),
+          child: IndexedStack(
+            index: _tab,
+            // 看不见的页不跑动画：星图的星星不闪、不公转，也不耗电。
+            children: [for (final (i, p) in pages.indexed) TickerMode(enabled: i == _tab, child: p)],
+          ),
         ),
       ],
     );
@@ -68,21 +88,8 @@ class _HomePageState extends State<HomePage> {
                 labelType: NavigationRailLabelType.all,
                 onDestinationSelected: (i) => setState(() => _tab = i),
                 destinations: [
-                  NavigationRailDestination(
-                    icon: inboxIcon(Icons.inbox_outlined),
-                    selectedIcon: inboxIcon(Icons.inbox),
-                    label: Text(titles[0]),
-                  ),
-                  NavigationRailDestination(
-                    icon: const Icon(Icons.chat_bubble_outline),
-                    selectedIcon: const Icon(Icons.chat_bubble),
-                    label: Text(titles[1]),
-                  ),
-                  NavigationRailDestination(
-                    icon: const Icon(Icons.person_outline),
-                    selectedIcon: const Icon(Icons.person),
-                    label: Text(titles[2]),
-                  ),
+                  for (final (i, (icon, selected)) in icons.indexed)
+                    NavigationRailDestination(icon: icon, selectedIcon: selected, label: Text(titles[i])),
                 ],
               ),
               const VerticalDivider(width: 1),
@@ -93,30 +100,18 @@ class _HomePageState extends State<HomePage> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: Text(titles[_tab])),
-      body: body,
-      floatingActionButton: _tab == 1
+      // 星图自己有标题卡片，满屏显示。
+      appBar: _tab == kTabStars ? null : AppBar(title: Text(titles[_tab])),
+      body: _tab == kTabStars ? SafeArea(bottom: false, child: body) : body,
+      floatingActionButton: _tab == kTabChat
           ? FloatingActionButton(tooltip: '新对话', onPressed: _newChat, child: const Icon(Icons.edit))
           : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
         destinations: [
-          NavigationDestination(
-            icon: inboxIcon(Icons.inbox_outlined),
-            selectedIcon: inboxIcon(Icons.inbox),
-            label: titles[0],
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.chat_bubble_outline),
-            selectedIcon: const Icon(Icons.chat_bubble),
-            label: titles[1],
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.person_outline),
-            selectedIcon: const Icon(Icons.person),
-            label: titles[2],
-          ),
+          for (final (i, (icon, selected)) in icons.indexed)
+            NavigationDestination(icon: icon, selectedIcon: selected, label: titles[i]),
         ],
       ),
     );
