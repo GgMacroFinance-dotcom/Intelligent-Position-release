@@ -1,10 +1,9 @@
-// 路由规则的类型（F-18），字段名和 rust/web/src/types/ 的 RouterSpec、Rule、Condition、Target、Fallback、
-// SemanticSpec、RulesView、RuleDraft、Decision 一致。规则页要整套改完再存回去，所以这几个类型是可改的，
-// 并且能原样转回 JSON（`toJson`）。
+// 路由规则的类型（F-18）。规则页要整套改完再存回去，所以这几个类型是可改的。
+// JSON 进出都经过从 Rust 生成的类型（`wire.dart`，F-20）：RouterSpec、Rule、Condition、Target、Fallback、
+// SemanticSpec、RulesView、RuleDraft、Decision。
 
 import 'models.dart' show Json;
-
-List<String> _strings(Object? v) => [for (final e in (v as List? ?? const [])) e as String];
+import 'wire.dart' as w;
 
 /// 匹配条件：各项同时满足才算命中；关键词不区分英文大小写。
 class Condition {
@@ -14,13 +13,8 @@ class Condition {
       none = none ?? [],
       from = from ?? [];
 
-  factory Condition.fromJson(Json j) => Condition(
-    any: _strings(j['any']),
-    all: _strings(j['all']),
-    none: _strings(j['none']),
-    regex: j['regex'] as String?,
-    from: _strings(j['from']),
-  );
+  factory Condition.fromWire(w.Condition c) =>
+      Condition(any: [...c.any], all: [...c.all], none: [...c.none], regex: c.regex, from: [...c.from]);
 
   /// 含其中任意一个。
   List<String> any;
@@ -37,13 +31,8 @@ class Condition {
   /// 发送人是其中之一（控制台用户写名字，渠道用户写 `<渠道>:<用户 id>`）。
   List<String> from;
 
-  Json toJson() => {
-    'any': any,
-    'all': all,
-    'none': none,
-    if (regex != null && regex!.isNotEmpty) 'regex': regex,
-    'from': from,
-  };
+  w.Condition toWire() =>
+      w.Condition(any: any, all: all, none: none, regex: regex == null || regex!.isEmpty ? null : regex, from: from);
 
   /// 写给人看的一行，和控制台的 describeCondition 一样。
   String describe() => [
@@ -59,8 +48,7 @@ class Condition {
 class RouteTarget {
   RouteTarget({required this.role, this.agent, this.escalate = false});
 
-  factory RouteTarget.fromJson(Json j) =>
-      RouteTarget(role: j['role'] as String, agent: j['agent'] as String?, escalate: j['escalate'] as bool? ?? false);
+  factory RouteTarget.fromWire(w.Target t) => RouteTarget(role: t.role, agent: t.agent, escalate: t.escalate);
 
   String role;
 
@@ -70,37 +58,35 @@ class RouteTarget {
   /// 用岗位配置里的升级模型处理。
   bool escalate;
 
-  Json toJson() => {'role': role, 'agent': ?agent, 'escalate': escalate};
+  w.Target toWire() => w.Target(role: role, agent: agent, escalate: escalate);
 }
 
 /// 一条路由规则：满足 `when` 就交给 `to`。
 class Rule {
   Rule({required this.id, this.description = '', Condition? when, required this.to}) : when = when ?? Condition();
 
-  factory Rule.fromJson(Json j) => Rule(
-    id: j['id'] as String,
-    description: j['description'] as String? ?? '',
-    when: Condition.fromJson(j['when'] as Json? ?? const {}),
-    to: RouteTarget.fromJson(j['to'] as Json),
-  );
+  factory Rule.fromJson(Json j) => Rule.fromWire(w.Rule.fromJson(j));
+
+  factory Rule.fromWire(w.Rule r) =>
+      Rule(id: r.id, description: r.description, when: Condition.fromWire(r.when), to: RouteTarget.fromWire(r.to));
 
   String id;
   String description;
   Condition when;
   RouteTarget to;
 
-  Json toJson() => {'id': id, 'description': description, 'when': when.toJson(), 'to': to.toJson()};
+  w.Rule toWire() => w.Rule(id: id, description: description, when: when.toWire(), to: to.toWire());
 
   /// 深拷贝：编辑时改的是副本，取消就丢掉。
-  Rule copy() => Rule.fromJson(toJson());
+  Rule copy() => Rule.fromWire(toWire());
 }
 
 /// 规则都没命中时用模型做语义匹配。
 class SemanticSpec {
   SemanticSpec({required this.model, this.minConfidence = 0.7});
 
-  factory SemanticSpec.fromJson(Json j) =>
-      SemanticSpec(model: j['model'] as String, minConfidence: (j['min_confidence'] as num? ?? 0.7).toDouble());
+  factory SemanticSpec.fromWire(w.SemanticSpec s) =>
+      SemanticSpec(model: s.model, minConfidence: s.minConfidence.toDouble());
 
   /// `<端点>/<模型>`。
   String model;
@@ -108,41 +94,47 @@ class SemanticSpec {
   /// 把握不低于这个值才直接分派，否则交给人并给出推荐。
   double minConfidence;
 
-  Json toJson() => {'model': model, 'min_confidence': minConfidence};
+  w.SemanticSpec toWire() => w.SemanticSpec(model: model, minConfidence: minConfidence);
 }
 
 /// 一整套路由规则。`fallbackRole` 为空时兜底是“交给人决定”（`"ask"`）。
 class RouterSpec {
   RouterSpec({List<Rule>? rules, this.fallbackRole, this.semantic}) : rules = rules ?? [];
 
-  factory RouterSpec.fromJson(Json j) {
-    final fb = j['fallback'];
-    return RouterSpec(
-      rules: [for (final r in (j['rules'] as List? ?? const [])) Rule.fromJson(r as Json)],
-      fallbackRole: fb is Map ? fb['role'] as String? : null,
-      semantic: j['semantic'] == null ? null : SemanticSpec.fromJson(j['semantic'] as Json),
-    );
-  }
+  factory RouterSpec.fromJson(Json j) => RouterSpec.fromWire(w.RouterSpec.fromJson(j));
+
+  factory RouterSpec.fromWire(w.RouterSpec s) => RouterSpec(
+    rules: [for (final r in s.rules) Rule.fromWire(r)],
+    fallbackRole: switch (s.fallback) {
+      w.FallbackRole f => f.role,
+      _ => null,
+    },
+    semantic: s.semantic == null ? null : SemanticSpec.fromWire(s.semantic!),
+  );
 
   List<Rule> rules;
   String? fallbackRole;
   SemanticSpec? semantic;
 
-  Json toJson() => {
-    'rules': [for (final r in rules) r.toJson()],
-    'fallback': fallbackRole == null ? 'ask' : {'role': fallbackRole},
-    if (semantic != null) 'semantic': semantic!.toJson(),
-  };
+  w.RouterSpec toWire() => w.RouterSpec(
+    rules: [for (final r in rules) r.toWire()],
+    fallback: fallbackRole == null ? const w.FallbackAsk() : w.FallbackRole(role: fallbackRole!),
+    semantic: semantic?.toWire(),
+  );
 
-  RouterSpec copy() => RouterSpec.fromJson(toJson());
+  Json toJson() => toWire().toJson();
+
+  RouterSpec copy() => RouterSpec.fromWire(toWire());
 }
 
 /// `list_rules` 的回复。
 class RulesView {
   const RulesView({required this.spec, required this.fromConsole});
 
-  factory RulesView.fromJson(Json j) =>
-      RulesView(spec: RouterSpec.fromJson(j['spec'] as Json), fromConsole: j['from_console'] as bool? ?? false);
+  factory RulesView.fromJson(Json j) {
+    final v = w.RulesView.fromJson(j);
+    return RulesView(spec: RouterSpec.fromWire(v.spec), fromConsole: v.fromConsole);
+  }
 
   final RouterSpec spec;
 
@@ -154,12 +146,10 @@ class RulesView {
 class RuleDraft {
   const RuleDraft({required this.id, required this.rule, required this.source, required this.createdAtMs});
 
-  factory RuleDraft.fromJson(Json j) => RuleDraft(
-    id: j['id'] as String,
-    rule: Rule.fromJson(j['rule'] as Json),
-    source: j['source'] as String? ?? '',
-    createdAtMs: (j['created_at_ms'] as num? ?? 0).toInt(),
-  );
+  factory RuleDraft.fromJson(Json j) {
+    final d = w.RuleDraft.fromJson(j);
+    return RuleDraft(id: d.id, rule: Rule.fromWire(d.rule), source: d.source, createdAtMs: d.createdAtMs.toInt());
+  }
 
   final String id;
   final Rule rule;
@@ -180,14 +170,17 @@ class RouteDecision {
     this.suggested,
   });
 
-  factory RouteDecision.fromJson(Json j) => RouteDecision(
-    routed: j['kind'] == 'routed',
-    reason: j['reason'] as String? ?? '',
-    role: j['role'] as String?,
-    agent: j['agent'] as String?,
-    escalate: j['escalate'] as bool? ?? false,
-    suggested: j['suggested'] as String?,
-  );
+  factory RouteDecision.fromJson(Json j) => switch (w.Decision.fromJson(j)) {
+    w.DecisionRouted d => RouteDecision(
+      routed: true,
+      reason: d.reason,
+      role: d.role,
+      agent: d.agent,
+      escalate: d.escalate,
+    ),
+    w.DecisionNeedsHuman d => RouteDecision(routed: false, reason: d.reason, suggested: d.suggested),
+    w.DecisionUnknown() => const RouteDecision(routed: false, reason: '这个版本不认识主机给的路由结果'),
+  };
 
   /// false 时是“交给人决定”。
   final bool routed;
