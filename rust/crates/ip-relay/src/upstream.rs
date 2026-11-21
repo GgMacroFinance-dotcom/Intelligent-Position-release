@@ -135,6 +135,11 @@ impl Apns {
         Ok(t)
     }
 
+    /// 自检：用配好的密钥签一个 APNs 令牌，不发网络请求（`ip-relay check`）。
+    pub fn self_check(&self) -> Result<(), String> {
+        self.token(now_s()).map(|_| ())
+    }
+
     /// 苹果那边要的请求体：一条可以被通知扩展改写的通知，密文放在 `ip` 里。
     pub fn body(push: &Push) -> serde_json::Value {
         json!({
@@ -234,16 +239,9 @@ impl Fcm {
         })
     }
 
-    /// 用服务账号签一个 JWT 换访问令牌（OAuth 2.0 的 JWT bearer 授权），过期前一直用同一个。
-    async fn access_token(&self) -> Result<String, String> {
-        let mut cached = self.access.lock().await;
-        let now = now_s();
-        if let Some((t, exp)) = cached.as_ref()
-            && now + OAUTH_MARGIN_SECS < *exp
-        {
-            return Ok(t.clone());
-        }
-        let assertion = jwt(
+    /// 换访问令牌用的 JWT（RS256，服务账号的私钥签）。
+    fn assertion(&self, now: i64) -> Result<String, String> {
+        jwt(
             &json!({"alg": "RS256", "typ": "JWT"}),
             &json!({
                 "iss": self.account.client_email,
@@ -259,7 +257,29 @@ impl Fcm {
                     .map_err(|_| "服务账号签名失败".to_string())?;
                 Ok(sig)
             },
-        )?;
+        )
+    }
+
+    /// 自检：用服务账号的私钥签一个换令牌用的 JWT，不发网络请求（`ip-relay check`）。
+    pub fn self_check(&self) -> Result<(), String> {
+        self.assertion(now_s()).map(|_| ())
+    }
+
+    /// 在线自检：真的向 Google 换一次访问令牌（`ip-relay check --online`），不发推送。
+    pub async fn check_online(&self) -> Result<(), String> {
+        self.access_token().await.map(|_| ())
+    }
+
+    /// 用服务账号签一个 JWT 换访问令牌（OAuth 2.0 的 JWT bearer 授权），过期前一直用同一个。
+    async fn access_token(&self) -> Result<String, String> {
+        let mut cached = self.access.lock().await;
+        let now = now_s();
+        if let Some((t, exp)) = cached.as_ref()
+            && now + OAUTH_MARGIN_SECS < *exp
+        {
+            return Ok(t.clone());
+        }
+        let assertion = self.assertion(now)?;
         // JWT 只有 base64url 字符和点，不用再转义。
         let form = format!("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={assertion}");
         let resp = self

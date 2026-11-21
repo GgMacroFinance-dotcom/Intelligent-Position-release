@@ -145,13 +145,17 @@ async fn setup() -> Setup {
     )
     .unwrap();
     let sealer = Sealer::new(&[9u8; 32]).unwrap();
-    let relay = Arc::new(Relay::new(
-        sealer,
-        "http://placeholder/",
-        Some(apns_client),
-        Some(fcm_client),
-        false,
-    ));
+    let relay = Arc::new(
+        Relay::new(
+            sealer,
+            "http://placeholder/",
+            Some(apns_client),
+            Some(fcm_client),
+            false,
+        )
+        .with_stats_token(Some(STATS_TOKEN.into()))
+        .unwrap(),
+    );
     let relay_addr = serve(router(relay)).await;
     Setup {
         relay: relay_addr,
@@ -160,6 +164,16 @@ async fn setup() -> Setup {
         apns_public,
         rsa_public,
     }
+}
+
+const STATS_TOKEN: &str = "stats-token-0123456789";
+
+async fn stats(s: &Setup, token: Option<&str>) -> reqwest::Response {
+    let mut req = http().get(format!("http://{}/stats", s.relay));
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    req.send().await.unwrap()
 }
 
 fn http() -> reqwest::Client {
@@ -363,4 +377,59 @@ fn limiter_resets_each_window() {
 fn forwarding_is_timed() {
     let t = time_forward(10).unwrap();
     assert_eq!(t.len(), 10);
+}
+
+#[tokio::test]
+async fn stats_count_outcomes_without_tokens() {
+    let s = setup().await;
+    let device = "0f".repeat(32);
+    let apns = endpoint(&s, "apns", &device).await;
+    assert_eq!(push_to(&apns, b"x", &[]).await.status(), 201);
+    s.apns.fail_next(410, json!({"reason": "Unregistered"}));
+    assert_eq!(push_to(&apns, b"x", &[]).await.status(), 410);
+    s.apns.fail_next(503, json!({"reason": "ServiceUnavailable"}));
+    assert_eq!(push_to(&apns, b"x", &[]).await.status(), 502);
+    let base = apns.rsplit_once('/').unwrap().0;
+    assert_eq!(push_to(&format!("{base}/AAAA"), b"x", &[]).await.status(), 404);
+    let fcm = endpoint(&s, "fcm", "fcm-token-0123456789abcdef").await;
+    assert_eq!(push_to(&fcm, b"x", &[]).await.status(), 201);
+
+    // 没带令牌、令牌不对
+    assert_eq!(stats(&s, None).await.status(), 401);
+    assert_eq!(stats(&s, Some("stats-token-wrong-wrong")).await.status(), 401);
+
+    let r = stats(&s, Some(STATS_TOKEN)).await;
+    assert_eq!(r.status(), 200);
+    let text = r.text().await.unwrap();
+    assert!(!text.contains(&device), "统计里不能有设备令牌：{text}");
+    assert!(!text.contains("/w/"), "统计里不能有订阅地址：{text}");
+    let v: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(v["platforms"], json!({"apns": true, "fcm": true}));
+    assert_eq!(v["registered"], 2);
+    assert_eq!(v["not_found"], 1);
+    assert_eq!(v["apns"]["sent"], 1);
+    assert_eq!(v["apns"]["gone"], 1);
+    assert_eq!(v["apns"]["failed"], 1);
+    assert_eq!(v["fcm"]["sent"], 1);
+    assert!(v["apns"]["last_sent_s"].as_u64().unwrap() > 0);
+    assert!(v["apns"]["last_failed_s"].as_u64().unwrap() > 0);
+    assert_eq!(v["fcm"]["last_failed_s"], 0);
+    assert_eq!(v["last_error"]["reason"], "APNs 回 503 ServiceUnavailable");
+}
+
+#[tokio::test]
+async fn stats_are_off_without_a_token() {
+    let sealer = Sealer::new(&[7u8; 32]).unwrap();
+    let relay = Arc::new(Relay::new(sealer, "https://push.example.com", None, None, false));
+    let addr = serve(router(relay)).await;
+    let r = http().get(format!("http://{addr}/stats")).send().await.unwrap();
+    assert_eq!(r.status(), 404);
+    // 太短的令牌不收
+    let sealer = Sealer::new(&[7u8; 32]).unwrap();
+    assert!(
+        Relay::new(sealer, "https://push.example.com", None, None, false)
+            .with_stats_token(Some("short".into()))
+            .is_err()
+    );
 }

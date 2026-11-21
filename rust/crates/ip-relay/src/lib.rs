@@ -77,13 +77,74 @@ impl Limiter {
     }
 }
 
-/// 只记次数。
+/// 一个平台（APNs 或 FCM）的转发结果计数，和最近一次成功、失败的时间（Unix 秒，0 表示还没有过）。
+#[derive(Default)]
+pub struct PlatformStats {
+    pub sent: AtomicU64,
+    pub gone: AtomicU64,
+    pub too_large: AtomicU64,
+    pub failed: AtomicU64,
+    pub last_sent_s: AtomicU64,
+    pub last_failed_s: AtomicU64,
+}
+
+impl PlatformStats {
+    fn record(&self, outcome: &Outcome, now_s: u64) {
+        let counter = match outcome {
+            Outcome::Sent => {
+                self.last_sent_s.store(now_s, Ordering::Relaxed);
+                &self.sent
+            }
+            Outcome::Gone => &self.gone,
+            Outcome::TooLarge => &self.too_large,
+            Outcome::Failed(_) => {
+                self.last_failed_s.store(now_s, Ordering::Relaxed);
+                &self.failed
+            }
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn view(&self) -> serde_json::Value {
+        let get = |c: &AtomicU64| c.load(Ordering::Relaxed);
+        serde_json::json!({
+            "sent": get(&self.sent),
+            "gone": get(&self.gone),
+            "too_large": get(&self.too_large),
+            "failed": get(&self.failed),
+            "last_sent_s": get(&self.last_sent_s),
+            "last_failed_s": get(&self.last_failed_s),
+        })
+    }
+}
+
+/// 只记次数和时间，不记令牌、封条和推送内容。`GET /stats` 原样给出（见 [`Relay::stats_view`]）。
 #[derive(Default)]
 pub struct Stats {
     pub registered: AtomicU64,
-    pub sent: AtomicU64,
-    pub gone: AtomicU64,
-    pub failed: AtomicU64,
+    /// 被限流拒掉的登记和推送。
+    pub rate_limited: AtomicU64,
+    /// 封条打不开（地址不对，或换过封条密钥）。
+    pub not_found: AtomicU64,
+    /// 请求本身不合格（不是 aes128gcm、太大、令牌格式不对、平台没配）。
+    pub bad_request: AtomicU64,
+    pub apns: PlatformStats,
+    pub fcm: PlatformStats,
+    /// 最近一次转发失败的原因（只有上游的状态码或连不上，不含令牌）。
+    last_error: Mutex<Option<(u64, String)>>,
+}
+
+impl Stats {
+    fn platform(&self, p: Platform) -> &PlatformStats {
+        match p {
+            Platform::Apns => &self.apns,
+            Platform::Fcm => &self.fcm,
+        }
+    }
+
+    fn bump(c: &AtomicU64) {
+        c.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 pub struct Relay {
@@ -96,6 +157,9 @@ pub struct Relay {
     trust_proxy: bool,
     register_limit: Limiter,
     push_limit: Limiter,
+    /// 看 `GET /stats` 要带的令牌。没配时 `/stats` 回 404。
+    stats_token: Option<String>,
+    started_s: u64,
     pub stats: Stats,
 }
 
@@ -109,8 +173,61 @@ impl Relay {
             trust_proxy,
             register_limit: Limiter::new(REGISTER_PER_WINDOW, 10 * 60 * 1000),
             push_limit: Limiter::new(PUSH_PER_WINDOW, 60 * 1000),
+            stats_token: None,
+            started_s: now_ms() / 1000,
             stats: Stats::default(),
         }
+    }
+
+    /// 打开 `GET /stats`：请求要带 `Authorization: Bearer <令牌>`。令牌太短（少于 16 个字符）时不打开。
+    pub fn with_stats_token(mut self, token: Option<String>) -> Result<Self, String> {
+        if let Some(t) = &token
+            && t.len() < 16
+        {
+            return Err("IP_RELAY_STATS_TOKEN 至少要 16 个字符".into());
+        }
+        self.stats_token = token;
+        Ok(self)
+    }
+
+    /// `GET /stats` 的内容：版本、启动时间、配了哪些平台、各项计数。
+    pub fn stats_view(&self) -> serde_json::Value {
+        let get = |c: &AtomicU64| c.load(Ordering::Relaxed);
+        let s = &self.stats;
+        let last_error = s
+            .last_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .map(|(at, why)| serde_json::json!({ "at_s": at, "reason": why }));
+        let now = now_ms() / 1000;
+        serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "started_s": self.started_s,
+            "uptime_s": now.saturating_sub(self.started_s),
+            "now_s": now,
+            "platforms": {
+                "apns": self.apns.is_some(),
+                "fcm": self.fcm.is_some(),
+            },
+            "registered": get(&s.registered),
+            "rate_limited": get(&s.rate_limited),
+            "not_found": get(&s.not_found),
+            "bad_request": get(&s.bad_request),
+            "apns": s.apns.view(),
+            "fcm": s.fcm.view(),
+            "last_error": last_error,
+        })
+    }
+
+    fn stats_allowed(&self, headers: &HeaderMap) -> Option<bool> {
+        let want = self.stats_token.as_deref()?;
+        let got = headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .unwrap_or("");
+        Some(aws_lc_rs::constant_time::verify_slices_are_equal(got.as_bytes(), want.as_bytes()).is_ok())
     }
 
     fn serves(&self, p: Platform) -> bool {
@@ -136,6 +253,7 @@ impl Relay {
 pub fn router(relay: Arc<Relay>) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .route("/stats", get(stats))
         .route("/register", post(register))
         .route("/w/{sealed}", post(push))
         .with_state(relay)
@@ -151,6 +269,14 @@ fn error(status: StatusCode, msg: &str) -> Response {
     (status, Json(serde_json::json!({ "error": msg }))).into_response()
 }
 
+async fn stats(State(relay): State<Arc<Relay>>, headers: HeaderMap) -> Response {
+    match relay.stats_allowed(&headers) {
+        None => StatusCode::NOT_FOUND.into_response(),
+        Some(false) => error(StatusCode::UNAUTHORIZED, "令牌不对"),
+        Some(true) => Json(relay.stats_view()).into_response(),
+    }
+}
+
 #[derive(Deserialize)]
 struct RegisterReq {
     platform: Platform,
@@ -164,9 +290,11 @@ async fn register(
     Json(req): Json<RegisterReq>,
 ) -> Response {
     if !relay.register_limit.allow(&relay.client_ip(peer, &headers), now_ms()) {
+        Stats::bump(&relay.stats.rate_limited);
         return error(StatusCode::TOO_MANY_REQUESTS, "登记得太频繁，过一会儿再试");
     }
     if !relay.serves(req.platform) {
+        Stats::bump(&relay.stats.bad_request);
         return error(StatusCode::BAD_REQUEST, "这个中转没有配这个平台");
     }
     let target = Target {
@@ -174,6 +302,7 @@ async fn register(
         token: req.token,
     };
     if let Err(e) = target.check() {
+        Stats::bump(&relay.stats.bad_request);
         return error(StatusCode::BAD_REQUEST, e);
     }
     match relay.sealer.seal(&target) {
@@ -215,15 +344,19 @@ async fn push(
 ) -> Response {
     let encoding = headers.get("content-encoding").and_then(|v| v.to_str().ok());
     if !encoding.is_some_and(|e| e.eq_ignore_ascii_case("aes128gcm")) {
+        Stats::bump(&relay.stats.bad_request);
         return error(StatusCode::BAD_REQUEST, "只收 aes128gcm 加密的 Web Push");
     }
     if body.is_empty() || body.len() > MAX_BODY {
+        Stats::bump(&relay.stats.bad_request);
         return error(StatusCode::PAYLOAD_TOO_LARGE, "推送太大");
     }
     let Some(target) = relay.sealer.open(&sealed) else {
+        Stats::bump(&relay.stats.not_found);
         return error(StatusCode::NOT_FOUND, "没有这个订阅");
     };
     if !relay.push_limit.allow(&sealed, now_ms()) {
+        Stats::bump(&relay.stats.rate_limited);
         return error(StatusCode::TOO_MANY_REQUESTS, "推得太频繁");
     }
     let p = parse_push(&headers, &body);
@@ -233,19 +366,23 @@ async fn push(
         // 中转换了配置、不再管这个平台：当成订阅失效，主机会删掉它，App 下次打开时重新登记。
         _ => Outcome::Gone,
     };
+    let now_s = now_ms() / 1000;
+    relay.stats.platform(target.platform).record(&outcome, now_s);
     match outcome {
-        Outcome::Sent => {
-            relay.stats.sent.fetch_add(1, Ordering::Relaxed);
-            StatusCode::CREATED.into_response()
-        }
-        Outcome::Gone => {
-            relay.stats.gone.fetch_add(1, Ordering::Relaxed);
-            error(StatusCode::GONE, "订阅已失效")
-        }
+        Outcome::Sent => StatusCode::CREATED.into_response(),
+        Outcome::Gone => error(StatusCode::GONE, "订阅已失效"),
         Outcome::TooLarge => error(StatusCode::PAYLOAD_TOO_LARGE, "推送太大"),
         Outcome::Failed(why) => {
-            relay.stats.failed.fetch_add(1, Ordering::Relaxed);
-            tracing::warn!("转发失败：{why}");
+            let platform = match target.platform {
+                Platform::Apns => "APNs",
+                Platform::Fcm => "FCM",
+            };
+            tracing::warn!("{platform} 转发失败：{why}");
+            *relay
+                .stats
+                .last_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((now_s, why));
             error(StatusCode::BAD_GATEWAY, "转发失败")
         }
     }
