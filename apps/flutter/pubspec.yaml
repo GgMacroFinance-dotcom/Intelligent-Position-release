@@ -1,0 +1,35 @@
+name: ip_app
+description: "intelligent-position 的各平台 App（Android、iOS、macOS、Windows、Linux）"
+publish_to: 'none'
+
+# 和仓库的版本号一致（rust/Cargo.toml、apps/desktop）。+ 后面是安装包的构建号。
+version: 0.8.0+1
+
+environment:
+  sdk: ^3.13.7
+
+# 只用和 Apache-2.0 兼容的许可（BSD、MIT、Apache-2.0），CI 用 tool/check_licenses.dart 检查。
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  # 令牌和主机列表放系统的安全存储（钥匙串、Keystore、凭据管理、Secret Service）。BSD-3-Clause。
+  flutter_secure_storage: ^11.2.0
+  # 员工回复按 Markdown 渲染。BSD-3-Clause。
+  flutter_markdown_plus: ^1.0.12
+  # 链接用系统浏览器打开，只认 http、https、mailto。BSD-3-Clause。
+  url_launcher: ^6.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  # 连真主机的端到端测试（integration_test/，不在 CI 跑）。
+  integration_test:
+    sdk: flutter
+  # 测试里快进时间（重连退避）。flutter_test 本来就带着它。Apache-2.0。
+  fake_async: ^1.3.3
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

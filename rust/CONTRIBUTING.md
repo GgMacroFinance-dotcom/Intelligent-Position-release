@@ -14,7 +14,7 @@
 | 类别 | 路径 |
 | --- | --- |
 | 工具和沙箱 | `crates/ip-tools/` |
-| 令牌与鉴权 | `crates/ip-server/src/ws.rs`、`crates/ip-server/src/origin.rs`、`crates/ip-server/src/mcp.rs`、`crates/ip-runtime/src/gateway.rs`，以及 `crates/ip-server/src/app.rs`、`config.rs` 里读密钥和校验令牌的部分；桌面 App 存令牌、开原生接口的 `apps/desktop/src-tauri/` |
+| 令牌与鉴权 | `crates/ip-server/src/ws.rs`、`crates/ip-server/src/origin.rs`、`crates/ip-server/src/mcp.rs`、`crates/ip-runtime/src/gateway.rs`，以及 `crates/ip-server/src/app.rs`、`config.rs` 里读密钥和校验令牌的部分；桌面 App 存令牌、开原生接口的 `apps/desktop/src-tauri/`；Flutter App 配对、存令牌、带令牌连主机的 `apps/flutter/lib/src/pairing.dart`、`storage.dart`、`host.dart`、`protocol/client.dart` |
 | MCP | `crates/ip-mcp/` |
 | 外部渠道 | `crates/ip-connectors/`、`crates/ip-server/src/channels.rs` |
 | 外部引擎 | `crates/ip-engines/`、`crates/ip-runtime/src/engine.rs` |
