@@ -333,10 +333,10 @@ impl App {
             .await
             .map_err(anyhow::Error::msg)
             .context("读通知设置")?;
-        app.push = Arc::new(crate::webpush::WebPush::new(
-            app.runtime.store().clone(),
-            config.push.contact.clone(),
-        ));
+        app.push = Arc::new(
+            crate::webpush::WebPush::new(app.runtime.store().clone(), config.push.contact.clone())
+                .with_hosts(&config.push.hosts),
+        );
         app.push
             .load()
             .await

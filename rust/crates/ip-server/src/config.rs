@@ -5,6 +5,7 @@
 //! auth_token_env: IP_TOKEN         # 访问令牌所在的环境变量；监听非本机地址时必填
 //! allowed_origins: [https://ip.example.com]  # 反向代理改写了 Host 时，控制台对外的地址
 //! push: { contact: mailto:ops@example.com }   # Web Push 的联系方式，推送服务有问题时找谁；Safari 要有
+//!                                  # hosts: [push.example.com] 另外放行的推送服务（手机 App 的推送中转）
 //! utc_offset: "+08:00"             # 员工看到的消息时间按这个时区显示；省略时是 UTC
 //! org_prompt: |
 //!   你在一家 AI 原生的研究机构工作。结论先行，引用数据注明来源。
@@ -91,6 +92,27 @@ pub struct PushConfig {
     /// VAPID 的 `sub`：`mailto:` 或 `https://` 开头。推送服务有问题时联系谁；Safari 没有它会拒收。
     #[serde(default)]
     pub contact: Option<String>,
+    /// 另外放行的推送服务主机名，比如手机 App 的推送中转（m2-spec D-35）。只写主机名，不带 `https://` 和端口。
+    #[serde(default)]
+    pub hosts: Vec<String>,
+}
+
+/// `push.hosts` 的一项要是一个普通的域名：至少两段，每段是字母、数字和 `-`，最后一段不是纯数字（挡掉 IP）。
+fn push_host_ok(host: &str) -> bool {
+    let labels: Vec<&str> = host.split('.').collect();
+    let label_ok = |l: &&str| {
+        !l.is_empty()
+            && l.len() <= 63
+            && !l.starts_with('-')
+            && !l.ends_with('-')
+            && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    };
+    host.len() <= 253
+        && labels.len() >= 2
+        && labels.iter().all(label_ok)
+        && !labels.last().is_some_and(|l| l.chars().all(|c| c.is_ascii_digit()))
+        && !host.eq_ignore_ascii_case("localhost")
+        && !labels.last().is_some_and(|l| l.eq_ignore_ascii_case("localhost"))
 }
 
 fn default_data_dir() -> PathBuf {
@@ -246,6 +268,10 @@ pub enum ConfigError {
     BadOrigin(String),
     #[error("push.contact `{0}` 要以 mailto: 或 https:// 开头")]
     BadPushContact(String),
+    #[error(
+        "push.hosts 里的 `{0}` 要是一个域名，比如 push.example.com（不带 https://、端口和路径，不能是 IP 或 localhost）"
+    )]
+    BadPushHost(String),
     #[error("数字员工 id `{0}` 重复")]
     DuplicateAgent(String),
     #[error("数字员工 `{0}` 的岗位 `{1}` 不存在")]
@@ -413,6 +439,9 @@ impl Config {
             && !(contact.starts_with("mailto:") || contact.starts_with("https://"))
         {
             return Err(ConfigError::BadPushContact(contact.clone()));
+        }
+        if let Some(host) = self.push.hosts.iter().find(|h| !push_host_ok(h)) {
+            return Err(ConfigError::BadPushHost(host.clone()));
         }
         if let Some(sem) = &self.router.semantic
             && !known_model(&sem.model)

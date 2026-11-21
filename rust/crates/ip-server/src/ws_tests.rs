@@ -813,6 +813,27 @@ async fn allowed_origins_from_config() {
     assert!(err.contains("allowed_origins"), "{err}");
 }
 
+#[test]
+fn push_hosts_from_config() {
+    let with = |hosts: &str| EXAMPLE.replacen("org_prompt:", &format!("push: {{ hosts: {hosts} }}\norg_prompt:",), 1);
+    let c = Config::from_yaml(&with("[push.example.com, relay.ip-demo.org]")).unwrap();
+    assert_eq!(c.push.hosts, ["push.example.com", "relay.ip-demo.org"]);
+    for bad in [
+        "[https://push.example.com]",
+        "[push.example.com:8443]",
+        "[push.example.com/w]",
+        "[localhost]",
+        "[relay.localhost]",
+        "[10.0.0.1]",
+        "[intranet]",
+        "[-bad.example.com]",
+        "[user@push.example.com]",
+    ] {
+        let err = Config::from_yaml(&with(bad)).unwrap_err().to_string();
+        assert!(err.contains("push.hosts"), "{bad}: {err}");
+    }
+}
+
 #[tokio::test]
 async fn close_disconnects_sessions() {
     let s = start(None).await;
