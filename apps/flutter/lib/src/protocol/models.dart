@@ -558,6 +558,119 @@ class DeviceInfo {
   final bool online;
 }
 
+// ---------- 记忆（“管理”权限，F-18） ----------
+
+/// 人能直接改的两层：决策者笔记、岗位记忆摘要。
+enum MemoryLayer { notes, summary }
+
+/// 一段记忆文字和最后改动时间。
+class MemoryText {
+  const MemoryText({required this.text, required this.updatedMs});
+
+  factory MemoryText.fromJson(Json j) => MemoryText(text: _str(j['text']) ?? '', updatedMs: _int(j['updated_ms']));
+
+  final String text;
+  final int updatedMs;
+}
+
+/// 一个对话提炼出的记忆（`ThreadMemoryView`）。
+class ThreadMemory {
+  const ThreadMemory({
+    required this.threadId,
+    this.title,
+    required this.summary,
+    required this.generatedMs,
+    required this.usageCount,
+    this.lastUsageMs,
+  });
+
+  factory ThreadMemory.fromJson(Json j) => ThreadMemory(
+    threadId: j['thread_id'] as String,
+    title: _str(j['title']),
+    summary: _str(j['summary']) ?? '',
+    generatedMs: _int(j['generated_ms']),
+    usageCount: _intOrNull(j['usage_count']) ?? 0,
+    lastUsageMs: _intOrNull(j['last_usage_ms']),
+  );
+
+  final String threadId;
+  final String? title;
+  final String summary;
+  final int generatedMs;
+
+  /// 被员工读过几次。
+  final int usageCount;
+  final int? lastUsageMs;
+}
+
+/// 人要求的一条更正（`CorrectionView`）。
+class MemoryCorrection {
+  const MemoryCorrection({
+    required this.noteId,
+    required this.text,
+    required this.createdMs,
+    this.threadId,
+    this.appliedMs,
+  });
+
+  factory MemoryCorrection.fromJson(Json j) => MemoryCorrection(
+    noteId: _int(j['note_id']),
+    text: _str(j['text']) ?? '',
+    createdMs: _int(j['created_ms']),
+    threadId: _str(j['thread_id']),
+    appliedMs: _intOrNull(j['applied_ms']),
+  );
+
+  final int noteId;
+  final String text;
+  final int createdMs;
+  final String? threadId;
+
+  /// 哪次合并用上了它；还没用上为空。
+  final int? appliedMs;
+}
+
+/// `get_memory` 等请求的回复：一个岗位的记忆全貌（`MemoryView`）。
+class MemoryView {
+  const MemoryView({
+    required this.roleId,
+    required this.enabled,
+    this.notes,
+    this.summary,
+    required this.summaryFromThreads,
+    required this.threads,
+    required this.corrections,
+  });
+
+  factory MemoryView.fromJson(Json j) => MemoryView(
+    roleId: j['role_id'] as String,
+    enabled: j['enabled'] as bool? ?? false,
+    notes: j['notes'] == null ? null : MemoryText.fromJson(j['notes'] as Json),
+    summary: j['summary'] == null ? null : MemoryText.fromJson(j['summary'] as Json),
+    summaryFromThreads: _intOrNull(j['summary_from_threads']) ?? 0,
+    threads: _list(j['threads'], ThreadMemory.fromJson),
+    corrections: _list(j['corrections'], MemoryCorrection.fromJson),
+  );
+
+  final String roleId;
+
+  /// 这个岗位开没开记忆。没开时摘要不进提示词，也不提炼。
+  final bool enabled;
+  final MemoryText? notes;
+  final MemoryText? summary;
+
+  /// 岗位记忆摘要这一版由多少份对话摘要合并而成；人手写的是 0。
+  final int summaryFromThreads;
+
+  /// 各对话的记忆，最近生成的在前。
+  final List<ThreadMemory> threads;
+
+  /// 人要求的更正，旧的在前。
+  final List<MemoryCorrection> corrections;
+
+  MemoryText? layer(MemoryLayer l) => l == MemoryLayer.notes ? notes : summary;
+}
+
 /// 定时任务发给谁（`Target`）。
 class ScheduleTarget {
   const ScheduleTarget({required this.role, this.agent, this.escalate = false});
