@@ -106,6 +106,51 @@ void main() {
     await c.dispose();
   });
 
+  test('关闭时不等对方回关闭帧', () async {
+    final h = FakeHost();
+    final c = clientFor(h)..connect();
+    await pumpEventQueue();
+    // 假连接的 close() 永远不完成，像一台不回关闭帧的主机。
+    final never = Completer<void>();
+    final socket = h.last;
+    h.closeHook = () => never.future;
+    await c.close().timeout(const Duration(seconds: 1));
+    expect(c.status, ConnStatus.closed);
+    expect(socket.closeCalled, isTrue);
+    await c.dispose();
+  });
+
+  test('新建任务、今天的花费的请求', () async {
+    final h = FakeHost()
+      ..handlers.addAll({
+        'create_task': (req) => {
+          'id': 'k9',
+          'title': req['title'],
+          'description': req['description'] ?? '',
+          'status': 'open',
+          'assignee': req['assignee'],
+          'due_ms': req['due_ms'],
+          'created_by': {'kind': 'human', 'name': '张三的手机'},
+          'created_at_ms': 1,
+          'updated_at_ms': 1,
+        },
+        'spend_today': (_) => {
+          'date': '2026-11-21',
+          'roles': <String, Object>{},
+          'routing_usd': 0,
+          'tokens': <String, Object>{},
+          'routing_tokens': {'prompt_tokens': 0, 'completion_tokens': 0, 'cached_tokens': 0},
+        },
+      });
+    final c = clientFor(h)..connect();
+    await pumpEventQueue();
+    final t = await c.createTask('写周报', assignee: 'macro-1', dueMs: 99);
+    expect(t.dueMs, 99);
+    expect(h.requests.last, {'id': 1, 'type': 'create_task', 'title': '写周报', 'assignee': 'macro-1', 'due_ms': 99});
+    expect((await c.spendToday()).date, '2026-11-21');
+    await c.dispose();
+  });
+
   test('事件按序号记下，断开后带 since 和 epoch 重连', () async {
     final h = FakeHost();
     final c = clientFor(h)..connect();

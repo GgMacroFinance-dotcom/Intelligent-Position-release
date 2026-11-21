@@ -1,4 +1,5 @@
-// 连上主机后的主界面：待办、星图、对话、我。窄屏导航在底部，宽屏在左边。
+// 连上主机后的主界面：待办、星图、对话、任务、岗位，“我”放在顶栏右上角（宽屏在导航栏底部）。
+// 窄屏导航在底部，宽屏在左边。
 
 import 'package:flutter/material.dart';
 
@@ -7,13 +8,15 @@ import 'chat_page.dart';
 import 'common.dart';
 import 'inbox_page.dart';
 import 'me_page.dart';
+import 'roles_page.dart';
 import 'star_map_page.dart';
+import 'tasks_page.dart';
 
 /// 导航挪到左边的最小宽度，和网页控制台的窄屏断点一样。
 const double kWideNav = 720;
 
-/// 各页在导航里的位置。
-const int kTabInbox = 0, kTabStars = 1, kTabChat = 2, kTabMe = 3;
+/// 各页在导航里的位置。底部导航最多放 5 个，“我”用得少，放到顶栏。
+const int kTabInbox = 0, kTabStars = 1, kTabChat = 2, kTabTasks = 3, kTabRoles = 4;
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -47,6 +50,23 @@ class _HomePageState extends State<HomePage> {
     _showChat();
   }
 
+  /// 岗位页点“和 X 对话”：开一个发给这位员工的新对话。
+  void _chatWith(String agentId) {
+    final state = AppScope.read(context);
+    state.startNewChat();
+    state.chooseAgent(agentId);
+    _showChat();
+  }
+
+  void _openMe() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('我')),
+        body: const MePage(),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
@@ -64,15 +84,18 @@ class _HomePageState extends State<HomePage> {
         onShowDetail: _showChat,
         onBack: () => setState(() => _threadOpen = false),
       ),
-      const MePage(),
+      TasksPage(onOpenThread: _openThread),
+      RolesPage(onChat: _chatWith),
     ];
-    const titles = ['待办', '星图', '对话', '我'];
+    const titles = ['待办', '星图', '对话', '任务', '岗位'];
     final icons = [
       (inboxIcon(Icons.inbox_outlined), inboxIcon(Icons.inbox)),
       (const Icon(Icons.auto_awesome_outlined), const Icon(Icons.auto_awesome)),
       (const Icon(Icons.chat_bubble_outline), const Icon(Icons.chat_bubble)),
-      (const Icon(Icons.person_outline), const Icon(Icons.person)),
+      (const Icon(Icons.task_alt_outlined), const Icon(Icons.task_alt)),
+      (const Icon(Icons.groups_outlined), const Icon(Icons.groups)),
     ];
+    final me = IconButton(tooltip: '我', onPressed: _openMe, icon: const Icon(Icons.account_circle_outlined));
     final body = Column(
       children: [
         const ConnectionBanner(),
@@ -87,7 +110,7 @@ class _HomePageState extends State<HomePage> {
     );
     final phoneDetail = !wide && _tab == kTabChat && _threadOpen;
     return Scaffold(
-      appBar: wide || _tab == kTabStars || phoneDetail ? null : AppBar(title: Text(titles[_tab])),
+      appBar: wide || _tab == kTabStars || phoneDetail ? null : AppBar(title: Text(titles[_tab]), actions: [me]),
       body: SafeArea(
         bottom: wide || phoneDetail,
         child: Row(
@@ -97,6 +120,12 @@ class _HomePageState extends State<HomePage> {
                 selectedIndex: _tab,
                 labelType: NavigationRailLabelType.all,
                 onDestinationSelected: (i) => setState(() => _tab = i),
+                trailing: Expanded(
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(padding: const EdgeInsets.only(bottom: 12), child: me),
+                  ),
+                ),
                 destinations: [
                   for (final (i, (icon, selected)) in icons.indexed)
                     NavigationRailDestination(icon: icon, selectedIcon: selected, label: Text(titles[i])),

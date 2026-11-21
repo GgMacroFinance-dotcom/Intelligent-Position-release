@@ -271,7 +271,8 @@ class IpClient {
     _sub = null;
     _failPending('连接已关闭');
     _setStatus(ConnStatus.closed);
-    await socket?.close();
+    // 不等对方回关闭帧：主机不回的话会一直卡在这里，“断开并忘掉”也就卡住了。
+    unawaited(socket?.close());
   }
 
   Future<void> dispose() async {
@@ -318,6 +319,23 @@ extension IpRequests on IpClient {
   Future<Task> updateTask(String taskId, {String? status, String? result}) async => Task.fromJson(
     await request({'type': 'update_task', 'task_id': taskId, 'status': ?status, 'result': ?result}) as Json,
   );
+
+  /// 新建任务。指定负责人时主机另开一个对话把任务交给他；都不指定时留给人分配。
+  /// 用设备令牌连上时主机按设备名署名。
+  Future<Task> createTask(String title, {String? description, String? assignee, String? role, int? dueMs}) async =>
+      Task.fromJson(
+        await request({
+          'type': 'create_task',
+          'title': title,
+          'description': ?description,
+          'assignee': ?assignee,
+          'role': ?role,
+          'due_ms': ?dueMs,
+        }) as Json,
+      );
+
+  /// 今天（UTC）各岗位和语义分派的模型费用。
+  Future<SpendToday> spendToday() async => SpendToday.fromJson(await request({'type': 'spend_today'}) as Json);
 
   /// 员工写的报告，新改的在前。省略 `agentId` 时列所有员工的。
   Future<List<ReportInfo>> listReports({String? agentId, int limit = 200}) =>

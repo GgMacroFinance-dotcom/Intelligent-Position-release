@@ -62,14 +62,29 @@ class _IpAppState extends State<IpApp> {
   }
 }
 
-class _Root extends StatelessWidget {
+class _Root extends StatefulWidget {
   const _Root();
+
+  @override
+  State<_Root> createState() => _RootState();
+}
+
+class _RootState extends State<_Root> {
+  bool _hadHost = false;
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     if (!state.ready) return const Scaffold();
+    final hasHost = state.host != null;
+    // 忘掉主机（“我”页、顶上的“重新配对”）时，推进去的页面（“我”、对话、报告）一起关掉，回到“连接主机”。
+    if (_hadHost && !hasHost) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+      });
+    }
+    _hadHost = hasHost;
     // 换了主机时主界面整个重建，不带着上一台主机的页面状态。
-    return state.host == null ? const ConnectPage() : HomePage(key: ValueKey(state.host!.address));
+    return hasHost ? HomePage(key: ValueKey(state.host!.address)) : const ConnectPage();
   }
 }
