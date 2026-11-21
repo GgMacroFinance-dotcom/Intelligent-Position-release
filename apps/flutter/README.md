@@ -18,7 +18,7 @@ intelligent-position 的 App，一份 Dart 代码出 Android、iOS、macOS、Win
 - **扫码配对**（F-19，Android、iOS、macOS）：“连接主机”页点“扫配对二维码”，扫控制台或 App“设备”页上的码，扫到后和手填一样先确认主机再配对。相机画面在本机解码（纯 Dart 的 zxing2），不用谷歌的 ML Kit。第一次扫时系统会要相机权限。
 - 断线自动重连（500 毫秒起翻倍，最多 8 秒），带上次的事件序号让主机补发断开期间的事件；补不上就整个重新拉。App 从后台回到前台时马上重连。主机吊销了这台设备（401）时不再重连，提示重新配对。
 
-还没有的（按顺序做，见 backlog）：发请求改用从 Rust 生成的协议类型（F-20 的第三步）、手机锁屏推送（F-21）。
+还没有的（按顺序做，见 backlog）：手机锁屏推送（F-21）。
 
 ## 协议类型从 Rust 生成（F-20）
 
@@ -29,7 +29,7 @@ cd rust && cargo test          # 重新导出 .ts
 cd ../apps/flutter && dart run tool/gen_protocol.dart
 ```
 
-两份生成结果都要提交，CI 两边都会查。`models.dart`、`router.dart` 先用 `wire.dart` 解析，再转成界面用的样子，所以 Rust 改了字段、重新生成后，用到的地方会编不过；少了协议里必有的字段会报错，不悄悄补默认值。`number` 生成成 `num`（TS 里分不出整数和小数）；认不出的枚举值落到 `unknown`，认不出的那一种落到 `XxxUnknown`，主机比 App 新时不会解析失败。
+两份生成结果都要提交，CI 两边都会查。`models.dart`、`router.dart` 先用 `wire.dart` 解析，再转成界面用的样子，`client.dart` 发的请求也用 `wire.dart` 的 `Request` 拼，所以 Rust 改了字段、重新生成后，用到的地方会编不过；少了协议里必有的字段会报错，不悄悄补默认值。`number` 生成成 `num`（TS 里分不出整数和小数）；认不出的枚举值落到 `unknown`，认不出的那一种落到 `XxxUnknown`，主机比 App 新时不会解析失败。
 
 ## 桌面交互验证
 
