@@ -26,7 +26,7 @@ class _HomePageState extends State<HomePage> {
   /// 先打开待办（手机首页，apps-plan Q-6）。
   int _tab = kTabInbox;
 
-  bool _narrowChat(BuildContext context) => MediaQuery.sizeOf(context).width < kWideChat;
+  bool _threadOpen = false;
 
   void _openThread(String threadId) {
     final state = AppScope.read(context);
@@ -36,16 +36,16 @@ class _HomePageState extends State<HomePage> {
 
   /// 去对话页看现在打开着的对话（星图气泡里点“在对话页打开”）。
   void _showChat() {
-    setState(() => _tab = kTabChat);
-    if (_narrowChat(context)) _pushThread();
+    setState(() {
+      _tab = kTabChat;
+      _threadOpen = true;
+    });
   }
 
   void _newChat() {
     AppScope.read(context).startNewChat();
-    if (_narrowChat(context)) _pushThread();
+    _showChat();
   }
-
-  void _pushThread() => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ThreadScreen()));
 
   @override
   Widget build(BuildContext context) {
@@ -56,7 +56,14 @@ class _HomePageState extends State<HomePage> {
     final pages = [
       InboxPage(onOpenThread: _openThread),
       StarMapPage(onOpenChat: _showChat),
-      ChatPage(onOpenThread: _openThread, onNewChat: _newChat),
+      ChatPage(
+        active: _tab == kTabChat,
+        threadOpen: _threadOpen,
+        onOpenThread: _openThread,
+        onNewChat: _newChat,
+        onShowDetail: _showChat,
+        onBack: () => setState(() => _threadOpen = false),
+      ),
       const MePage(),
     ];
     const titles = ['待办', '星图', '对话', '我'];
@@ -78,11 +85,14 @@ class _HomePageState extends State<HomePage> {
         ),
       ],
     );
-    if (wide) {
-      return Scaffold(
-        body: SafeArea(
-          child: Row(
-            children: [
+    final phoneDetail = !wide && _tab == kTabChat && _threadOpen;
+    return Scaffold(
+      appBar: wide || _tab == kTabStars || phoneDetail ? null : AppBar(title: Text(titles[_tab])),
+      body: SafeArea(
+        bottom: wide || phoneDetail,
+        child: Row(
+          children: [
+            if (wide) ...[
               NavigationRail(
                 selectedIndex: _tab,
                 labelType: NavigationRailLabelType.all,
@@ -93,27 +103,24 @@ class _HomePageState extends State<HomePage> {
                 ],
               ),
               const VerticalDivider(width: 1),
-              Expanded(child: body),
             ],
-          ),
+            Expanded(child: body),
+          ],
         ),
-      );
-    }
-    return Scaffold(
-      // 星图自己有标题卡片，满屏显示。
-      appBar: _tab == kTabStars ? null : AppBar(title: Text(titles[_tab])),
-      body: _tab == kTabStars ? SafeArea(bottom: false, child: body) : body,
-      floatingActionButton: _tab == kTabChat
+      ),
+      floatingActionButton: !wide && !phoneDetail && _tab == kTabChat
           ? FloatingActionButton(tooltip: '新对话', onPressed: _newChat, child: const Icon(Icons.edit))
           : null,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: [
-          for (final (i, (icon, selected)) in icons.indexed)
-            NavigationDestination(icon: icon, selectedIcon: selected, label: titles[i]),
-        ],
-      ),
+      bottomNavigationBar: wide || phoneDetail
+          ? null
+          : NavigationBar(
+              selectedIndex: _tab,
+              onDestinationSelected: (i) => setState(() => _tab = i),
+              destinations: [
+                for (final (i, (icon, selected)) in icons.indexed)
+                  NavigationDestination(icon: icon, selectedIcon: selected, label: titles[i]),
+              ],
+            ),
     );
   }
 }

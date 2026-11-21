@@ -86,7 +86,6 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
   double _scale = 1;
   double _gestureScale = 1;
   Offset _gestureFocal = Offset.zero;
-  Offset _gesturePan = Offset.zero;
 
   /// 平滑飞到这个世界坐标（点 [[关联]] 跳转、居中时）。
   Offset? _flyTo;
@@ -183,15 +182,29 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
 
   Offset _toScreen(Offset world, Size size) => size.center(Offset.zero) + _pan + world * _scale;
 
-  void _zoomAt(Offset focal, double factor, Size size) {
-    final next = (_scale * factor).clamp(0.35, 3.0);
-    final world = (focal - size.center(Offset.zero) - _pan) / _scale;
+  void _moveView(Offset focal, {double scaleBy = 1, Offset panBy = Offset.zero}) {
+    final next = (_scale * scaleBy).clamp(0.35, 3.0);
+    final center = _viewport.center(Offset.zero);
+    final world = (focal - center - _pan) / _scale;
     setState(() {
       _userMoved = true;
       _flyTo = null;
       _scale = next;
-      _pan = focal - size.center(Offset.zero) - world * next;
+      _pan = focal + panBy - center - world * next;
     });
+  }
+
+  void _startGesture(Offset focal) {
+    _gestureFocal = focal;
+    _gestureScale = 1;
+    _flyTo = null;
+  }
+
+  void _updateGesture(Offset focal, double scale) {
+    if (scale <= 0) return; // 两个触点完全重合时没有可比较的倍率。
+    _moveView(_gestureFocal, scaleBy: scale / _gestureScale, panBy: focal - _gestureFocal);
+    _gestureFocal = focal;
+    _gestureScale = scale;
   }
 
   void _center() => setState(() {
@@ -336,28 +349,38 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
         _resumeAt = _clock.value + 1.5;
       },
       onPointerCancel: (_) => _pressing = false,
+      // macOS 的双指平移和捏合带累计位移、倍率，细微移动也要跟手。
+      onPointerPanZoomStart: (e) {
+        _pressing = true;
+        _startGesture(e.localPosition);
+      },
+      onPointerPanZoomUpdate: (e) => _updateGesture(e.localPosition + e.localPan, e.scale),
+      onPointerPanZoomEnd: (_) {
+        _pressing = false;
+        _resumeAt = _clock.value + 1.5;
+      },
       onPointerSignal: (e) {
-        if (e is PointerScrollEvent) _zoomAt(e.localPosition, e.scrollDelta.dy > 0 ? 0.9 : 1.1, _viewport);
+        if (e is PointerScrollEvent && e.scrollDelta.dy != 0) {
+          GestureBinding.instance.pointerSignalResolver.register(e, (_) {
+            _moveView(e.localPosition, scaleBy: math.exp(-e.scrollDelta.dy / 400));
+          });
+        }
       },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
+        supportedDevices: const {
+          PointerDeviceKind.touch,
+          PointerDeviceKind.mouse,
+          PointerDeviceKind.stylus,
+          PointerDeviceKind.invertedStylus,
+          PointerDeviceKind.unknown,
+        },
         onTap: () => setState(() {
           _selected = null;
           _settingsOpen = false;
         }),
-        onScaleStart: (d) {
-          _userMoved = true;
-          _flyTo = null;
-          _gestureScale = _scale;
-          _gestureFocal = d.localFocalPoint;
-          _gesturePan = _pan;
-        },
-        onScaleUpdate: (d) => setState(() {
-          final next = (_gestureScale * d.scale).clamp(0.35, 3.0);
-          final world = (_gestureFocal - _viewport.center(Offset.zero) - _gesturePan) / _gestureScale;
-          _scale = next;
-          _pan = d.localFocalPoint - _viewport.center(Offset.zero) - world * next;
-        }),
+        onScaleStart: (d) => _startGesture(d.localFocalPoint),
+        onScaleUpdate: (d) => _updateGesture(d.localFocalPoint, d.scale),
         child: ValueListenableBuilder<double>(
           valueListenable: _clock,
           builder: (context, t, _) {
@@ -899,7 +922,7 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            icon(Icons.add, '放大', () => _zoomAt(size.center(Offset.zero), 1.2, size)),
+            icon(Icons.add, '放大', () => _moveView(size.center(Offset.zero), scaleBy: 1.2)),
             SizedBox(
               width: 44,
               child: Text(
@@ -908,7 +931,7 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
                 style: const TextStyle(fontSize: 11.5, fontFamily: 'monospace', color: Color(0xFFCBD5E1)),
               ),
             ),
-            icon(Icons.remove, '缩小', () => _zoomAt(size.center(Offset.zero), 1 / 1.2, size)),
+            icon(Icons.remove, '缩小', () => _moveView(size.center(Offset.zero), scaleBy: 1 / 1.2)),
             Container(width: 1, height: 16, color: Colors.white.withValues(alpha: 0.15)),
             TextButton(
               style: TextButton.styleFrom(

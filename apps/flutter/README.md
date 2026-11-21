@@ -14,6 +14,14 @@ intelligent-position 的 App，一份 Dart 代码出 Android、iOS、macOS、Win
 
 还没有的（按顺序做，见 backlog）：任务页和岗位（F-15）、系统通知（F-16）、托盘和开机启动（F-17）、“管理”权限的页（F-18）、扫码配对（F-19）、从 Rust 生成协议类型（F-20）、手机锁屏推送（F-21）。
 
+## 桌面交互验证
+
+本轮在 Linux 用假主机跑过 53 个 Flutter 测试，包含跨断点保留草稿、从待办打开会话和星图手势。macOS 窗口的两项 XCTest 和真触控板手感仍待 Mac 验证。
+
+- 对话按扣除导航后的可用宽度分栏。打开一条对话并输入草稿，将窗口从 1280 拖窄到 880，再到手机宽度，当前会话、草稿和返回列表都应正常。从待办点“查看对话”也应直接看到正文。
+- 星图上双指移动应平移，捏合和鼠标滚轮应以指针所在的位置缩放。Dart 回归测试使用合成的指针事件。真机验收时，在同一颗天体旁连续平移、捏合再反向缩放。
+- Mac 第一次打开时目标内容区为 1120 × 760 点，以屏幕可用空间为限。移动并调整大小后用 ⌘Q 退出，再打开应回到原位置；拔掉外接屏后应能找到标题栏。安装好 Flutter 和 Xcode 后，在本目录执行 `flutter build macos --debug`，再执行 `xcodebuild -workspace macos/Runner.xcworkspace -scheme Runner -configuration Debug -destination 'platform=macOS' test`，可运行使用独立窗口保存名的 AppKit 测试。
+
 ## 和主机怎么连
 
 - 主机要配 `auth_token_env`（设备配对要它），在主机上运行 `ip device pair --config ip.yaml --name <设备名>`，或者在控制台“设备”页点“添加设备”，拿到 6 位配对码（2 分钟内有效，只能用一次）。

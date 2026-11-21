@@ -10,6 +10,12 @@ on:
     paths: ["apps/flutter/**", ".github/workflows/flutter.yml"]
     tags: ["app-v*"]
   workflow_dispatch:
+    inputs:
+      build:
+        description: 安装包范围
+        type: choice
+        default: all
+        options: [all, macos-preview]
 
 concurrency:
   group: flutter-${{ github.ref }}
@@ -25,6 +31,7 @@ defaults:
 
 jobs:
   check:
+    if: inputs.build != 'macos-preview'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +57,7 @@ jobs:
         run: flutter build linux --release
 
   installers:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/app-v')
+    if: (github.event_name == 'workflow_dispatch' && inputs.build != 'macos-preview') || startsWith(github.ref, 'refs/tags/app-v')
     needs: check
     strategy:
       fail-fast: false
@@ -95,4 +102,67 @@ jobs:
         with:
           name: ip-app-${{ matrix.os }}-${{ strategy.job-index }}
           path: apps/flutter/${{ matrix.out }}
+          if-no-files-found: error
+
+  macos-preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.build == 'macos-preview'
+    runs-on: macos-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Build macOS test host
+        run: flutter build macos --debug --no-pub
+      - name: Test first launch and saved window frame
+        run: |
+          xcodebuild test -workspace macos/Runner.xcworkspace -scheme Runner \
+            -configuration Debug -destination "platform=macOS,arch=$(uname -m)" \
+            -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/window.xcresult" \
+            -only-testing:RunnerTests/RunnerTests/testFirstLaunchFitsVisibleScreen \
+            -only-testing:RunnerTests/RunnerTests/testRestoresSavedSizeAndPosition
+          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/window.xcresult" > "$RUNNER_TEMP/window-tests.json"
+          python3 - "$RUNNER_TEMP/window-tests.json" <<'PY'
+          import json, sys
+          def cases(nodes):
+              for node in nodes:
+                  if node.get("nodeType") == "Test Case":
+                      yield node["name"].removesuffix("()"), node["result"]
+                  yield from cases(node.get("children", []))
+          with open(sys.argv[1]) as report:
+              results = dict(cases(json.load(report)["testNodes"]))
+          print(results)
+          if results != {"testFirstLaunchFitsVisibleScreen": "Passed", "testRestoresSavedSizeAndPosition": "Passed"}:
+              sys.exit("Expected both AppKit window tests to pass")
+          PY
+      - name: Build macOS release
+        run: flutter build macos --release --no-pub
+      - name: Create and verify disk image
+        run: |
+          app="build/macos/Build/Products/Release/intelligent-position.app"
+          executable="$app/Contents/MacOS/intelligent-position"
+          file "$executable"
+          lipo -archs "$executable"
+          codesign --verify --deep --strict "$app"
+          stage="$(mktemp -d)"
+          ditto "$app" "$stage/intelligent-position.app"
+          ln -s /Applications "$stage/Applications"
+          mkdir -p build/preview
+          image="build/preview/Intelligent-Position-${GITHUB_SHA:0:8}.dmg"
+          hdiutil create -volname "Intelligent Position" -srcfolder "$stage" -format UDZO "$image"
+          hdiutil verify "$image"
+          (cd build/preview && shasum -a 256 *.dmg > SHA256SUMS)
+          cat build/preview/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Intelligent-Position-macOS-${{ github.sha }}
+          path: apps/flutter/build/preview/
+          compression-level: 0
+          retention-days: 30
           if-no-files-found: error

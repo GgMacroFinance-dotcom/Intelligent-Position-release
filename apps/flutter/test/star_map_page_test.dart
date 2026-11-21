@@ -1,5 +1,8 @@
 // 星图页跑在假主机上：太阳是协调员、在问你的员工离太阳最近、点天体出气泡。
 
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ip_app/src/ui/inbox_page.dart';
@@ -55,6 +58,45 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('触控板的累计平移只应用一次，捏合和滚轮都围绕指针缩放', (tester) async {
+    final h = staffed();
+    await h.savePaired();
+    await h.start(tester, size: const Size(1280, 860));
+    await tester.tap(find.text('星图'));
+    await settle(tester);
+    final sun = find.byKey(const ValueKey('star-coord-1'));
+    final start = tester.getCenter(sun);
+    final size = tester.getSize(sun);
+    final anchor = start + const Offset(80, 50);
+    final pad = await tester.createGesture(kind: PointerDeviceKind.trackpad);
+    await pad.panZoomStart(anchor);
+    await pad.panZoomUpdate(anchor, pan: const Offset(2, 1));
+    await tester.pump();
+    expect(tester.getCenter(sun), offsetMoreOrLessEquals(start + const Offset(2, 1)));
+    const pan = Offset(32, -20);
+    await pad.panZoomUpdate(anchor, pan: pan);
+    await tester.pump();
+    expect(tester.getCenter(sun), offsetMoreOrLessEquals(start + pan));
+    expect(tester.getSize(sun), size);
+    await pad.panZoomUpdate(anchor, pan: pan, scale: 1.25);
+    await pad.panZoomEnd();
+    await tester.pump();
+    final zoomed = anchor + pan + (start - anchor) * 1.25;
+    expect(tester.getCenter(sun), offsetMoreOrLessEquals(zoomed));
+    expect(tester.getSize(sun).width, closeTo(size.width * 1.25, 0.001));
+
+    final mouse = TestPointer(12, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(mouse.addPointer(location: anchor));
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, -12)));
+    await tester.pump();
+    expect(tester.getCenter(sun), offsetMoreOrLessEquals(anchor + (zoomed - anchor) * math.exp(12 / 400)));
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, 12)));
+    await tester.pump();
+    expect(tester.getCenter(sun), offsetMoreOrLessEquals(zoomed));
+    await tester.sendEventToBinding(mouse.removePointer());
+    await h.stop(tester);
+  });
+
   testWidgets('协调员是太阳，在问你的员工离太阳最近，点开出气泡', (tester) async {
     final h = staffed();
     await h.savePaired();
