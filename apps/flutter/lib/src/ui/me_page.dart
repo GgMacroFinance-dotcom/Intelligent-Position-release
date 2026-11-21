@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../protocol/client.dart';
 import '../protocol/models.dart';
+import 'admin/devices_page.dart';
 import 'common.dart';
 
 class MePage extends StatelessWidget {
@@ -52,6 +53,7 @@ class MePage extends StatelessWidget {
           title: const Text('协议版本'),
           subtitle: Text('App $kProtocol，主机 ${state.serverProtocol ?? '—'}${state.outdated ? '（不一致，请升级）' : ''}'),
         ),
+        if (state.isAdmin) ...[const Divider(), const AdminSection()],
         const Divider(),
         const NotifySection(),
         const Divider(),
@@ -174,6 +176,41 @@ class NotifySection extends StatelessWidget {
             '${state.me?.device == null ? '用共用令牌连上的共用这一份设置。' : ''}',
             style: theme.textTheme.bodySmall,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+/// “管理”权限才有的几页（F-18），从“我”页进去。日常权限的设备看不到这一节，主机那边也会拒绝这些请求。
+class AdminSection extends StatelessWidget {
+  const AdminSection({super.key});
+
+  void _push(BuildContext context, String title, Widget page) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: page,
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Text('管理', style: theme.textTheme.titleMedium),
+        ),
+        ListTile(
+          leading: const Icon(Icons.devices_outlined),
+          title: const Text('设备'),
+          subtitle: const Text('添加设备、改权限、吊销'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _push(context, '设备', const DevicesPage()),
         ),
       ],
     );
