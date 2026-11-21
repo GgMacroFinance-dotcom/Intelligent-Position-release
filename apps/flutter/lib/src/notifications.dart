@@ -104,13 +104,17 @@ class LocalNotifier implements SystemNotifier {
         onDidReceiveNotificationResponse: tapped,
       );
       _ready = true;
-      final launch = await _plugin.getNotificationAppLaunchDetails();
-      final r = launch?.notificationResponse;
-      if (launch?.didNotificationLaunchApp == true && r != null) tapped(r);
     } catch (e) {
       // 系统没有通知服务（比如 Linux 没有通知守护进程）时不弹，App 照常用。
       debugPrint('系统通知用不了：$e');
+      return;
     }
+    // App 是不是被点通知打开的。Linux 的插件没有这个接口（会抛 UnimplementedError），当作不是。
+    try {
+      final launch = await _plugin.getNotificationAppLaunchDetails();
+      final r = launch?.notificationResponse;
+      if (launch?.didNotificationLaunchApp == true && r != null) tapped(r);
+    } catch (_) {}
   }
 
   @override
