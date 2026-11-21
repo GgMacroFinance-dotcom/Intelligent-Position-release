@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'models.dart';
+import 'router.dart';
 
 /// 这份 App 说的 `/ws` 协议版本，和服务端 `events.rs` 的 `PROTOCOL_VERSION` 对应。
 const int kProtocol = 1;
@@ -333,6 +334,25 @@ extension IpRequests on IpClient {
           'due_ms': ?dueMs,
         }) as Json,
       );
+
+  // ---------- 路由规则（F-18；看和试一试日常权限也能用，改要“管理”） ----------
+
+  Future<RulesView> listRules() async => RulesView.fromJson(await request({'type': 'list_rules'}) as Json);
+
+  /// 试一试：这句话会分给谁，不发送。
+  Future<RouteDecision> route(String text) async =>
+      RouteDecision.fromJson(await request({'type': 'route', 'text': text}) as Json);
+
+  /// 保存一整套路由规则，校验通过后立即生效并持久化，回复保存后的规则。`acceptedDraft` 是这次采纳的草案。
+  Future<RouterSpec> saveRules(RouterSpec spec, {String? acceptedDraft}) async => RouterSpec.fromJson(
+    await request({'type': 'save_rules', 'spec': spec.toJson(), 'accepted_draft': ?acceptedDraft}) as Json,
+  );
+
+  Future<List<RuleDraft>> listRuleDrafts() => _list({'type': 'list_rule_drafts'}, RuleDraft.fromJson);
+
+  /// 忽略一条草案，回复剩下的草案。
+  Future<List<RuleDraft>> dismissRuleDraft(String draftId) =>
+      _list({'type': 'dismiss_rule_draft', 'draft_id': draftId}, RuleDraft.fromJson);
 
   // ---------- 记忆（“管理”权限，F-18） ----------
 
