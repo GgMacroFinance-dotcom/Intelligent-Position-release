@@ -138,7 +138,11 @@ class _ThreadViewState extends State<ThreadView> {
       for (final m in state.messages) _message(state, m),
       for (final MapEntry(key: agentId, value: text) in state.drafts.entries)
         if (id == null || state.threadAgent[id] == null || state.threadAgent[id] == agentId)
-          _Bubble(who: state.agentName(agentId), note: '正在输入…', child: MessageMarkdown(text)),
+          _Bubble(
+            who: state.agentName(agentId),
+            note: '正在输入…',
+            child: MessageMarkdown(text, reportHint: agentId),
+          ),
       if (id != null && state.turnNote[id] != null)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -181,7 +185,11 @@ class MessageTile extends StatelessWidget {
         who: who,
         note: time,
         human: m.author is HumanAuthor,
-        child: m.author is HumanAuthor ? SelectableText(text) : MessageMarkdown(text),
+        child: switch (m.author) {
+          HumanAuthor() => SelectableText(text),
+          AgentAuthor(:final agentId) => MessageMarkdown(text, reportHint: agentId),
+          SystemAuthor() => MessageMarkdown(text),
+        },
       ),
       ToolCallBody(:final name, :final input) => _Folded(title: '调用工具 $name', text: _pretty(input)),
       ToolResultBody(:final ok, :final output) => _Folded(title: ok ? '工具结果' : '工具失败', text: output, failed: !ok),

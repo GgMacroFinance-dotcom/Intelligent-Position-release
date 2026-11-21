@@ -146,6 +146,7 @@ void installDefaults(FakeHost h) {
     },
     'list_approvals': (_) => [approval('a1')],
     'list_tasks': (_) => <Object>[],
+    'list_reports': (_) => <Object>[],
     'history': (req) => [message('m1', req['thread_id'] as String, human: '张三的手机', text: '最近 CPI 怎么样')],
   });
 }
