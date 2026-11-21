@@ -413,6 +413,8 @@ class Task {
     this.threadId,
     this.result,
     this.createdByAgent,
+    this.createdByName,
+    this.originThreadId,
     this.dueMs,
     required this.createdAtMs,
     required this.updatedAtMs,
@@ -431,6 +433,11 @@ class Task {
       {'kind': 'agent', 'agent_id': final String id} => id,
       _ => null,
     },
+    createdByName: switch (j['created_by']) {
+      {'kind': 'human', 'name': final String name} => name,
+      _ => null,
+    },
+    originThreadId: _str(j['origin_thread_id']),
     dueMs: _intOrNull(j['due_ms']),
     createdAtMs: _int(j['created_at_ms']),
     updatedAtMs: _int(j['updated_at_ms']),
@@ -451,6 +458,12 @@ class Task {
 
   /// 员工派给员工的任务才有：派活的员工。人派的任务为空。
   final String? createdByAgent;
+
+  /// 人派的任务才有：派活的人。
+  final String? createdByName;
+
+  /// 派活的对话：任务的结果写回这里。
+  final String? originThreadId;
 
   /// 截止时间；没设时为空。
   final int? dueMs;
@@ -565,4 +578,55 @@ class Alert {
   final String tag;
   final String? threadId;
   final int atMs;
+}
+
+// ---------- 报告 ----------
+
+/// `list_reports` 的一项：员工工作目录 `reports/` 下的一份报告。
+class ReportInfo {
+  const ReportInfo({required this.agentId, required this.path, required this.bytes, required this.modifiedMs});
+
+  factory ReportInfo.fromJson(Json j) => ReportInfo(
+    agentId: j['agent_id'] as String,
+    path: j['path'] as String,
+    bytes: _int(j['bytes']),
+    modifiedMs: _int(j['modified_ms']),
+  );
+
+  final String agentId;
+
+  /// 相对员工工作目录的路径，形如 `reports/2026-11-16-cpi.md`。
+  final String path;
+  final int bytes;
+  final int modifiedMs;
+
+  /// 去掉 `reports/` 的文件名。
+  String get fileName => path.replaceFirst(RegExp(r'^reports/'), '');
+}
+
+/// `read_report` 的回复。
+class ReportText {
+  const ReportText({
+    required this.agentId,
+    required this.path,
+    required this.text,
+    required this.modifiedMs,
+    required this.truncated,
+  });
+
+  factory ReportText.fromJson(Json j) => ReportText(
+    agentId: j['agent_id'] as String,
+    path: j['path'] as String,
+    text: j['text'] as String,
+    modifiedMs: _int(j['modified_ms']),
+    truncated: j['truncated'] as bool? ?? false,
+  );
+
+  final String agentId;
+  final String path;
+  final String text;
+  final int modifiedMs;
+
+  /// 文件超过 1 MB 时只给了前 1 MB。
+  final bool truncated;
 }
