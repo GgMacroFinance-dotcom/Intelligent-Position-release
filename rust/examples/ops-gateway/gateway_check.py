@@ -143,16 +143,17 @@ def check_pricing(rep, base, baseline_path, write_path):
 
 
 def check_probes(rep, base, token, models, timeout, slow_secs):
+    """base 是带 /v1 之前的部分；直接探上游（比如本机 OpenCodex）时 token 可以是 None。"""
     status, body, _ = http("GET", base + "/v1/models", token=token)
     listed = set()
     if status == 200 and isinstance(body, dict):
         listed = {m.get("id") for m in body.get("data") or [] if isinstance(m, dict)}
     else:
-        rep.add("probe-token", FAIL, f"探测令牌访问 /v1/models 回 {status} {upstream_error(body)}".strip(), http=status)
+        rep.add("probe-token", FAIL, f"探测用的 /v1/models 回 {status} {upstream_error(body)}".strip(), http=status)
         return
     for model in models:
         if model not in listed:
-            rep.add("probe", FAIL, f"{model}：探测令牌的模型列表里没有它", model=model)
+            rep.add("probe", FAIL, f"{model}：探测用的模型列表里没有它", model=model)
             continue
         req = {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1, "stream": False}
         status, body, secs = http("POST", base + "/v1/chat/completions", token=token, body=req, timeout=timeout)
@@ -250,6 +251,7 @@ def main():
     p.add_argument("--write-baseline", help="把当前的模型和计价写成基线文件（不比对）")
     p.add_argument("--probe-token-env", help="探测令牌所在的环境变量；不给就不探测模型")
     p.add_argument("--probe-model", action="append", default=[], help="要探测的模型，可以写多次")
+    p.add_argument("--probe-base-url", help="探测发到哪里，默认就是 --base-url；本机上游（比如 OpenCodex）不用令牌时写它的地址")
     p.add_argument("--probe-timeout", type=float, default=60)
     p.add_argument("--slow-secs", type=float, default=20, help="探测超过多少秒算偏慢")
     p.add_argument("--remote-cmd", help="在主机上跑探针的命令，探针从标准输入读进去，比如 \"ssh gateway sudo -n sh -s\"")
@@ -279,8 +281,9 @@ def main():
     check_status(rep, base, a.expect_version)
     check_auth(rep, base)
     check_pricing(rep, base, a.baseline, a.write_baseline)
-    if token:
-        check_probes(rep, base, token, a.probe_model, a.probe_timeout, a.slow_secs)
+    if a.probe_model and (token or a.probe_base_url):
+        probe_base = (a.probe_base_url or base).rstrip("/").removesuffix("/v1")
+        check_probes(rep, probe_base, token, a.probe_model, a.probe_timeout, a.slow_secs)
     check_tls(rep, base, a.tls_warn_days)
     if a.remote_cmd:
         check_remote(rep, a.remote_cmd, a.remote_env, a.backup_hours, a.disk_warn, a.disk_fail)

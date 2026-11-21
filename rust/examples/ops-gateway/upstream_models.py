@@ -2,7 +2,7 @@
 """对比上游（比如 OpenCodex）的模型目录和中转站对外的模型，找出上游新增和上游已经没有的。
 
   python3 upstream_models.py --base-url https://api.example.com --upstream-url http://127.0.0.1:8317/v1 \\
-      --upstream-key-env UPSTREAM_KEY [--mapping mapping.json] [--ignore ignore.json] [--probe] [--json report.json]
+      [--upstream-key-env UPSTREAM_KEY] [--mapping mapping.json] [--ignore ignore.json] [--probe] [--json report.json]
 
 - 中转站的模型从公开的 /api/pricing 取（不用令牌）。
 - --mapping：中转站短名 → 上游模型名的 JSON（就是渠道的 model_mapping）。没写进映射的按同名算。
@@ -44,16 +44,18 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base-url", required=True)
     p.add_argument("--upstream-url", required=True, help="上游的 OpenAI 兼容地址，带 /v1")
-    p.add_argument("--upstream-key-env", required=True, help="上游密钥所在的环境变量")
+    p.add_argument("--upstream-key-env", help="上游密钥所在的环境变量；本机上游不用密钥时不写")
     p.add_argument("--mapping")
     p.add_argument("--ignore")
     p.add_argument("--probe", action="store_true")
     p.add_argument("--json")
     a = p.parse_args()
-    key = os.environ.get(a.upstream_key_env, "").strip()
-    if not key:
-        print(f"环境变量 {a.upstream_key_env} 没设", file=sys.stderr)
-        return 2
+    key = None
+    if a.upstream_key_env:
+        key = os.environ.get(a.upstream_key_env, "").strip()
+        if not key:
+            print(f"环境变量 {a.upstream_key_env} 没设", file=sys.stderr)
+            return 2
     mapping = json.loads(pathlib.Path(a.mapping).read_text("utf-8")) if a.mapping else {}
     ignore = set(json.loads(pathlib.Path(a.ignore).read_text("utf-8"))) if a.ignore else set()
     base = a.base_url.rstrip("/").removesuffix("/v1")

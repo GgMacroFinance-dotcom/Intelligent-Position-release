@@ -117,6 +117,8 @@ if printf '%s' "$out" | grep -q 上游新增; then
 else
   echo "ok   忽略已看过的（忽略清单里的模型不再报）"
 fi
+expect 上游不用密钥时 2 "密钥不对" python3 "$here/upstream_models.py" \
+  --base-url "http://127.0.0.1:$port" --upstream-url "$up"
 expect 上游密钥不对 2 "密钥不对" env UPSTREAM_KEY=wrong python3 "$here/upstream_models.py" \
   --base-url "http://127.0.0.1:$port" --upstream-url "$up" --upstream-key-env UPSTREAM_KEY
 stop_gw

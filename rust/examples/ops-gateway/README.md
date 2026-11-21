@@ -13,7 +13,7 @@ New API 是 AGPL-3.0。这里只通过它的公开 HTTP 接口和主机上的 `d
 | `remote_probe.sh` | 在中转站主机上跑的只读探针，由 `gateway_check.py --remote-cmd` 调用，每行输出一个 JSON |
 | `fake_gateway.py` | 假中转站，能注入故障（版本不对、入口 502、鉴权丢失、模型下架、计价变化、上游鉴权失败、524、变慢）；顺带假扮 GitHub 的发布列表和上游的模型目录 |
 | `fake-bin/` | 假的 `docker`、`systemctl`、`df`、`hostname`，以及在 SQLite 上执行 SQL 的假 `psql`，演练时代替主机命令 |
-| `drill.sh` | 演练：巡检 16 个场景、新版本 3 个、上游模型 5 个、日报 6 个。CI 每次都跑 |
+| `drill.sh` | 演练：巡检 16 个场景、新版本 3 个、上游模型 6 个、日报 6 个。CI 每次都跑 |
 | `AGENTS.example.md` | 岗位手册的模板。复制到员工的工作目录改成 `AGENTS.md`，填上自己的部署 |
 | `fixtures/` | 假中转站的模型和计价基线、短名映射、演练用的一天日志 |
 
