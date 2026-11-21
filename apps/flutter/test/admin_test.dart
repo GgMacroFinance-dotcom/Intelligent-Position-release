@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ip_app/src/ui/admin/devices_page.dart';
+import 'package:ip_app/src/ui/admin/schedules_page.dart';
 
 import 'fake_host.dart';
 import 'harness.dart';
@@ -46,13 +47,29 @@ Harness adminHarness() {
   return h;
 }
 
-Future<void> openDevices(WidgetTester tester, Harness h) async {
+Future<void> openAdmin(WidgetTester tester, Harness h, String page) async {
   await tester.tap(find.byTooltip('我'));
   await tester.pumpAndSettle();
-  await h.scrollMe(tester, find.text('设备'));
-  await tester.tap(find.text('设备'));
+  await h.scrollMe(tester, find.text(page));
+  await tester.tap(find.text(page));
   await tester.pumpAndSettle();
 }
+
+Future<void> openDevices(WidgetTester tester, Harness h) => openAdmin(tester, h, '设备');
+
+Json schedule(String id, {bool enabled = true, Json? last, Json? to}) => {
+  'spec': {
+    'id': id,
+    'description': '每周一 CPI 点评',
+    'cron': '0 9 * * 1',
+    'utc_offset': '+08:00',
+    'to': ?to,
+    'text': '写一份上周 CPI 的点评',
+    'enabled': enabled,
+  },
+  'next_run_ms': enabled ? 5000 : null,
+  'last_run': last,
+};
 
 void main() {
   testWidgets('“日常”权限的设备在“我”页看不到“管理”', (tester) async {
@@ -146,6 +163,52 @@ void main() {
     expect(find.byType(DevicesPage), findsNothing);
     expect(h.state.isAdmin, isFalse);
     expect(find.text('添加设备、改权限、吊销'), findsNothing);
+    await h.stop(tester);
+  });
+
+  testWidgets('定时任务页：看下次、上次运行，立即运行后能打开那个对话', (tester) async {
+    final h = adminHarness();
+    final schedules = [
+      schedule('cpi', to: {'role': 'macro', 'agent': 'macro-1', 'escalate': false}),
+      schedule('old', enabled: false, last: {'at_ms': 3000, 'ok': false, 'detail': '模型超时'}),
+    ];
+    h.host.handlers.addAll({
+      'list_schedules': (_) => schedules,
+      'run_schedule': (req) {
+        schedules[0]['last_run'] = {'at_ms': 4000, 'ok': true, 'detail': 't9', 'thread_id': 't9'};
+        return {'message': message('m9', 't9', human: '定时任务', text: '写一份上周 CPI 的点评')};
+      },
+    });
+    await h.savePaired();
+    await h.start(tester);
+    await openAdmin(tester, h, '定时任务');
+    expect(find.byType(SchedulesPage), findsOneWidget);
+    expect(find.text('0 9 * * 1（UTC+08:00）· 发给 宏观研究 · 宏观研究员'), findsOneWidget);
+    expect(find.text('0 9 * * 1（UTC+08:00）· 发给 按路由规则'), findsOneWidget);
+    expect(find.text('已停用'), findsOneWidget);
+    expect(find.textContaining('失败：模型超时'), findsOneWidget);
+    expect(find.text('还没运行过'), findsOneWidget);
+
+    await tester.tap(find.text('立即运行').first);
+    await tester.pumpAndSettle();
+    expect(h.host.requests.lastWhere((r) => r['type'] == 'run_schedule')['schedule_id'], 'cpi');
+    expect(find.textContaining('已发出'), findsOneWidget);
+    expect(find.textContaining('上次').evaluate().length, 2);
+
+    await tester.tap(find.text('打开对话'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SchedulesPage), findsNothing);
+    expect(h.state.threadId, 't9');
+    await h.stop(tester);
+  });
+
+  testWidgets('没有定时任务时说明在哪配', (tester) async {
+    final h = adminHarness();
+    h.host.handlers['list_schedules'] = (_) => <Object>[];
+    await h.savePaired();
+    await h.start(tester);
+    await openAdmin(tester, h, '定时任务');
+    expect(find.textContaining('ip.yaml'), findsOneWidget);
     await h.stop(tester);
   });
 }

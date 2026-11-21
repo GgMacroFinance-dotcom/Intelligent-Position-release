@@ -6,6 +6,7 @@ import '../app_state.dart';
 import '../protocol/client.dart';
 import '../protocol/models.dart';
 import 'admin/devices_page.dart';
+import 'admin/schedules_page.dart';
 import 'common.dart';
 
 class MePage extends StatelessWidget {
@@ -211,6 +212,13 @@ class AdminSection extends StatelessWidget {
           subtitle: const Text('添加设备、改权限、吊销'),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _push(context, '设备', const DevicesPage()),
+        ),
+        ListTile(
+          leading: const Icon(Icons.schedule_outlined),
+          title: const Text('定时任务'),
+          subtitle: const Text('看下次和上次运行，立即运行一次'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => _push(context, '定时任务', const SchedulesPage()),
         ),
       ],
     );

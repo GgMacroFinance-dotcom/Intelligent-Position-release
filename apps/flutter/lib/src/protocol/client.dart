@@ -334,6 +334,14 @@ extension IpRequests on IpClient {
         }) as Json,
       );
 
+  // ---------- 定时任务（“管理”权限，F-18） ----------
+
+  Future<List<Schedule>> listSchedules() => _list({'type': 'list_schedules'}, Schedule.fromJson);
+
+  /// 立即运行一次（不影响原定的下次运行）。
+  Future<SendResult> runSchedule(String scheduleId) async =>
+      SendResult.fromJson(await request({'type': 'run_schedule', 'schedule_id': scheduleId}) as Json);
+
   // ---------- 设备管理（“管理”权限，F-18） ----------
 
   Future<List<DeviceInfo>> listDevices() => _list({'type': 'list_devices'}, DeviceInfo.fromJson);

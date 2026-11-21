@@ -278,6 +278,20 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 关掉推进去的页面，回主界面打开这个对话（“管理”各页里点“对话”时用）。
+  void openThreadFromAnywhere(String threadId) {
+    pendingOpen = (threadId,);
+    notifyListeners();
+  }
+
+  /// 岗位名；没有名字时用 id。
+  String roleName(String id) {
+    for (final r in roles) {
+      if (r.id == id) return r.name ?? r.id;
+    }
+    return id;
+  }
+
   /// 主界面处理完点通知的去向后调。
   (String?,)? takePendingOpen() {
     final p = pendingOpen;
