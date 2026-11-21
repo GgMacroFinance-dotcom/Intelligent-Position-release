@@ -71,6 +71,41 @@ void main() {
     await c.dispose();
   });
 
+  test('改任务状态、列报告、读报告的请求', () async {
+    final task = {
+      'id': 'k1',
+      'title': 't',
+      'description': '',
+      'status': 'in_progress',
+      'created_by': {'kind': 'system'},
+      'created_at_ms': 1,
+      'updated_at_ms': 2,
+    };
+    final h = FakeHost()
+      ..handlers.addAll({
+        'update_task': (_) => task,
+        'list_reports': (_) => [
+          {'agent_id': 'macro-1', 'path': 'reports/a.md', 'bytes': 3, 'modified_ms': 1},
+        ],
+        'read_report': (req) => {
+          'agent_id': req['agent_id'],
+          'path': req['path'],
+          'text': '# A',
+          'modified_ms': 1,
+          'truncated': false,
+        },
+      });
+    final c = clientFor(h)..connect();
+    await pumpEventQueue();
+    expect((await c.updateTask('k1', status: 'in_progress')).status, 'in_progress');
+    expect(h.requests.last, {'id': 1, 'type': 'update_task', 'task_id': 'k1', 'status': 'in_progress'});
+    expect((await c.listReports()).single.agentId, 'macro-1');
+    expect(h.requests.last, {'id': 2, 'type': 'list_reports', 'limit': 200});
+    expect((await c.readReport('macro-1', 'reports/a.md')).text, '# A');
+    expect(h.requests.last['path'], 'reports/a.md');
+    await c.dispose();
+  });
+
   test('事件按序号记下，断开后带 since 和 epoch 重连', () async {
     final h = FakeHost();
     final c = clientFor(h)..connect();

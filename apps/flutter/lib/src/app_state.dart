@@ -47,6 +47,9 @@ class AppState extends ChangeNotifier {
   List<Approval> approvals = [];
   List<Task> tasks = [];
 
+  /// 员工写的报告，新改的在前。
+  List<ReportInfo> reports = [];
+
   /// 有路由规则时，新对话默认自动分派。
   bool hasRules = false;
 
@@ -166,6 +169,7 @@ class AppState extends ChangeNotifier {
     threads = [];
     approvals = [];
     tasks = [];
+    reports = [];
     hasRules = false;
     threadId = null;
     messages = [];
@@ -206,6 +210,7 @@ class AppState extends ChangeNotifier {
         c.hasRules(),
         c.listApprovals(),
         c.listTasks(),
+        c.listReports(),
       ]);
       if (_client != c) return;
       roles = r[0] as List<Role>;
@@ -214,6 +219,7 @@ class AppState extends ChangeNotifier {
       hasRules = r[3] as bool;
       approvals = r[4] as List<Approval>;
       tasks = r[5] as List<Task>;
+      reports = r[6] as List<ReportInfo>;
       if (!_agentForNewChosen) agentForNew = hasRules || agents.isEmpty ? null : agents.first.id;
       loadError = null;
       notifyListeners();
@@ -304,6 +310,56 @@ class AppState extends ChangeNotifier {
     approvals = [a, ...approvals.where((x) => x.id != a.id)]..sort((x, y) => y.createdAtMs.compareTo(x.createdAtMs));
   }
 
+  /// 改任务的状态（待办里受阻的任务、完成的任务）。
+  Future<void> updateTask(Task t, String status) async {
+    final c = _client;
+    if (c == null) throw const RequestError('尚未连接');
+    final next = await c.updateTask(t.id, status: status);
+    tasks = [next, ...tasks.where((x) => x.id != next.id)]..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
+    notifyListeners();
+  }
+
+  /// 报告是谁写的：先在报告列表里找这个路径，找不到就用 `hint`（比如写这条消息的员工）。
+  /// 协调员转述研究员的报告时 hint 是协调员，列表里能找到真正写报告的人（和控制台一样）。
+  String? reportOwner(String path, String? hint) {
+    final found = reports.where((r) => r.path == path).toList();
+    if (hint != null && found.any((r) => r.agentId == hint)) return hint;
+    return found.isNotEmpty ? found.first.agentId : hint;
+  }
+
+  /// 读一份报告。列表里还没有这份时先刷新一次列表。
+  Future<ReportText> readReport(String path, {String? hint}) async {
+    final c = _client;
+    if (c == null) throw const RequestError('尚未连接');
+    if (!reports.any((r) => r.path == path)) {
+      try {
+        reports = await c.listReports();
+      } on RequestError {
+        // 读不到列表就用 hint 试。
+      }
+    }
+    final agent = reportOwner(path, hint);
+    if (agent == null) throw RequestError('找不到报告 $path');
+    return c.readReport(agent, path);
+  }
+
+  Timer? _reportsTimer;
+
+  /// 一轮结束后员工可能写了新报告，刷新列表（合并短时间内的多次）。
+  void _refreshReportsSoon() {
+    _reportsTimer?.cancel();
+    _reportsTimer = Timer(const Duration(milliseconds: 800), () async {
+      final c = _client;
+      if (c == null || !connected) return;
+      try {
+        reports = await c.listReports();
+        notifyListeners();
+      } on RequestError {
+        // 断线重连后会整个重新拉。
+      }
+    });
+  }
+
   Timer? _threadsTimer;
 
   /// 有新消息时刷新对话列表，合并短时间内的多次。
@@ -336,6 +392,7 @@ class AppState extends ChangeNotifier {
         agentsWorking.add(agentId);
         turnNote[threadId] = '${agentName(agentId)} 开始处理…';
       case TurnFinished():
+        _refreshReportsSoon();
         drafts.remove(e.agentId);
         agentsWorking.remove(e.agentId);
         agentFailures.remove(e.agentId);
@@ -363,6 +420,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _threadsTimer?.cancel();
+    _reportsTimer?.cancel();
     unawaited(_disconnect());
     super.dispose();
   }

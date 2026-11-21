@@ -95,6 +95,38 @@ void main() {
     expect(Scope.parse('daily').label, '日常');
   });
 
+  test('报告、任务的派活人和派活对话', () {
+    final r = ReportInfo.fromJson({
+      'agent_id': 'macro-1',
+      'path': 'reports/2026-11-21-cpi.md',
+      'bytes': 1200,
+      'modified_ms': 5,
+    });
+    expect(r.fileName, '2026-11-21-cpi.md');
+    final text = ReportText.fromJson({
+      'agent_id': 'macro-1',
+      'path': 'reports/a.md',
+      'text': '# 标题',
+      'modified_ms': 5,
+      'truncated': true,
+    });
+    expect(text.truncated, isTrue);
+    final t = Task.fromJson({
+      'id': 'k1',
+      'title': 't',
+      'description': '',
+      'status': 'done',
+      'origin_thread_id': 'to',
+      'created_by': {'kind': 'human', 'name': '张三'},
+      'created_at_ms': 1,
+      'updated_at_ms': 2,
+    });
+    expect(t.createdByName, '张三');
+    expect(t.createdByAgent, isNull);
+    expect(t.originThreadId, 'to');
+    expect(t.isOpen, isFalse);
+  });
+
   test('认不出的事件和帧不抛错', () {
     expect(RuntimeEvent.fromJson({'type': 'brand_new'}), isA<UnknownEvent>());
     expect(ServerFrame.fromJson({'type': 'brand_new'}), isA<UnknownFrame>());

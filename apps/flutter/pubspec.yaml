@@ -18,6 +18,8 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   # 员工回复按 Markdown 渲染。BSD-3-Clause。
   flutter_markdown_plus: ^1.0.12
+  # 自定义 Markdown 语法：正文里提到的 reports/<文件名>.md 变成能点的链接。flutter_markdown_plus 本来就带着它。BSD-3-Clause。
+  markdown: ^7.3.1
   # 链接用系统浏览器打开，只认 http、https、mailto。BSD-3-Clause。
   url_launcher: ^6.3.3
 
