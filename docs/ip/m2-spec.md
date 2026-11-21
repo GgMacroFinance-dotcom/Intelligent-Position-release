@@ -802,6 +802,29 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 - 通知：桌面 App 不订 Web Push（D-33），关窗口后常驻托盘、连接不断，照 D-32 的 `alert` 弹系统通知，窗口在前台时不弹。点通知现在只能把窗口叫出来。
 - 测试：来源检查加了一条（配了令牌时接受这三个来源，没配时不接受，相近的写法不接受）；壳的主机地址规整有单元测试。真的 App 在 Linux（Xvfb、GNOME 钥匙串）上跑过配对、存令牌、连上、重开读回令牌；其余用 Playwright 加假的壳核对。macOS、Windows 没跑过。
 
+### D-35 手机 App 的锁屏推送 · 提议（backlog F-21）
+
+背景：Flutter 手机 App（`apps-plan.md` 第 9 节）开着、在后台还没被系统杀掉时，照 D-32 的 `alert` 弹本地通知（F-16）；锁屏久了、App 被杀以后，连接断了就收不到。原生 App 订不了浏览器的 Web Push（D-33），要走苹果的 APNs 和谷歌的 FCM。维护者 2026-11-21 定：项目运营一个推送中转，官方 App 装上就能收（Q-11）。
+
+思路：**主机照旧发 Web Push**（RFC 8291 加密、RFC 8292 的 VAPID，D-33），中转在主机眼里就是又一个推送服务。手机 App 自己生成 Web Push 的密钥对，向中转登记拿到订阅地址，再用 D-33 已有的 `subscribe_push` 告诉主机。中转只见密文，解密在手机上做。协议不变：不加请求、不改帧。
+
+- **中转（`ip-relay`，新的独立程序，代码在本仓库）**：
+  - `POST /register {platform: "apns" | "fcm", token}`：`token` 是手机从 APNs 或 FCM 拿到的设备推送令牌。回 `{endpoint}`，地址是 `https://<中转>/w/<封条>`，封条是用中转自己的密钥（AES-256-GCM，从环境变量读）加密的 `{platform, token}`。中转不需要数据库，不存令牌。
+  - `POST /w/<封条>`：照 Web Push 推送服务的样子收。请求体是 `aes128gcm` 的密文，原样转出去：APNs 用 `mutable-content` 的通知，由 iOS 的通知扩展（Notification Service Extension）解密后显示；FCM 用数据消息，由 Android App 的后台处理解密后弹通知。`Urgency: high` 的用高优先级，`Topic` 转成 APNs 的 `apns-collapse-id` 和 FCM 的 `collapse_key`，`TTL` 照转。成功回 201；APNs、FCM 说令牌失效时回 410，主机照 D-33 删掉这个订阅。
+  - 只做转发：不解密、不记推送内容和令牌，日志只记次数和错误码。按来源地址和封条限流，单个请求体最多 3000 字节。
+  - 凭据：APNs 用 `.p8` 签名密钥（Team ID、Key ID、App 的 Bundle ID），FCM 用 HTTP v1 接口和服务账号。全部放在中转主机的环境变量里，不进仓库。换了中转的封条密钥，旧地址全部失效，App 下次打开时重新登记。
+- **主机**：
+  - `webpush.rs` 的白名单多认中转的主机名。官方中转的域名定下来后写进默认名单；自己搭中转的人在 `ip.yaml` 里加 `push: { hosts: [push.example.com] }`。只写主机名，照样只认 `https://`、不带端口和用户名、不跟随跳转；不让 App 登记任意地址，免得把主机当跳板连内网（和 D-33 同一个理由）。
+  - 负载上限从 3000 字节降到 2800：APNs 和 FCM 的消息上限都是 4 KB，密文转成 base64 再加上外层字段要放得下。
+- **App**：
+  - 连上主机、要到系统通知权限后，拿设备推送令牌（iOS 向 APNs 要，Android 向 FCM 要），生成 P-256 密钥对和 16 字节的 `auth`，向中转登记，再 `subscribe_push`。私钥放系统安全存储；iOS 的通知扩展要读到它，放在 App 和扩展共用的钥匙串分组里。不上传。
+  - 收到后按 F-16 的规则弹通知：同标签替换；`silent` 的“已在别处处理”直接按标签撤掉原来那条（原生 App 能做到，浏览器做不到）。点通知去那个对话，没有对话的去“待办”。
+  - 推送令牌、中转地址变了就重新登记、重新 `subscribe_push`（同一台设备同一个地址替换）。在“我”页关掉锁屏推送、断开主机时 `unsubscribe_push`；设备被吊销时主机已经会删它的订阅（D-33）。
+- **不重复打扰**：App 已经按 D-33 报 `presence`（F-16），在前台时主机不推。App 在后台但连接还在时，`alert` 和推送都会到，App 按标签去重，同一个标签 10 分钟内只弹一次。
+- **要维护者准备的**：苹果开发者账号（APNs 密钥，并用它给 iOS App 签名，Q-12）；一个 Firebase 项目（FCM 服务账号，Android App 的 `google-services.json`）；跑中转的主机和域名。没有这些之前，中转和 App 只用假的 APNs、FCM 测。
+- **Android 的依赖**：收 FCM 要谷歌 Play 服务（闭源）。官方 App 接受这一点；以后可以加 UnifiedPush 给没有 Play 服务的手机，主机这边不用再改。
+- 测试：主机加白名单的单元测试（`push.hosts` 里的认、相近的写法不认）和配置检查；`/ws` 集成测试用假中转走一遍 App 式的订阅。中转用假的 APNs、FCM 测登记、封条解不开、转发的字段、令牌失效回 410、限流。App 用假的推送通道测登记、换令牌、关掉、收到后解密弹通知和撤销。没有在真的 APNs、FCM 和真手机上跑过之前，不写“可用”。
+
 ---
 
 ## 修订记录
@@ -826,3 +849,4 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 | 2026-11-16 | v0.16 | 新增 D-32（提议，backlog F-9）：通知规则、每台设备的通知设置、`alert` 和 `dismiss` 两种服务端帧 |
 | 2026-11-16 | v0.17 | 新增 D-33（提议，backlog F-10）：Web Push、`push_key`、`subscribe_push`、`unsubscribe_push`、`presence` 四个请求，`ip.yaml` 的 `push.contact` |
 | 2026-11-16 | v0.18 | 新增 D-34（提议，backlog F-11）：配了令牌时 `/ws` 和 `/pair` 接受桌面 App 的来源 |
+| 2026-11-21 | v0.19 | 新增 D-35（提议，backlog F-21）：手机 App 的锁屏推送照 Web Push 发给项目运营的中转 `ip-relay`，中转转给 APNs、FCM；`ip.yaml` 加 `push.hosts`，推送负载上限降到 2800 字节。`/ws` 协议不变 |
