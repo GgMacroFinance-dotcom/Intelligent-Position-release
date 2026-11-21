@@ -137,6 +137,7 @@ docker compose up -d --build
 - [x] App 桌面版的托盘（backlog F-17）：关窗口藏到托盘、托盘显示待办数、托盘菜单开关开机启动和退出、只开一个。Linux 版在 Xvfb 里跑过关窗口、再打开、`--hidden` 启动；托盘图标本身、macOS、Windows 没跑过。Tauri 版（`apps/desktop/`）按 apps-plan Q-10 等 macOS、Windows 各装过一次后再删
 - [x] App 里“管理”权限的页（backlog F-18）：设备、定时任务、记忆、路由规则四页，从“我”页进去，日常权限看不到。只在假主机上测过
 - [x] App 扫码配对（backlog F-19）：Android、iOS、macOS 用摄像头扫配对二维码，扫到后照常先确认主机再配对；本机解码，不用谷歌 ML Kit。只在假相机上测，真相机没扫过
+- [ ] App 的协议类型从 Rust 生成（backlog F-20）：① 生成器已做，`apps/flutter/tool/gen_protocol.dart` 从 `web/src/types/*.ts` 生成 `wire.dart`，flutter CI 检查生成结果已提交；② 回复解析、③ 发请求改用生成的类型还没做
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片
 - [x] 路由 v2（二）：语义匹配（可选）：规则都没命中时请模型按岗位职责判断，把握够就分派，不够时把判断作为审批卡片的推荐项

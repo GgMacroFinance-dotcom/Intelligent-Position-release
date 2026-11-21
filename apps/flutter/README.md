@@ -18,7 +18,18 @@ intelligent-position 的 App，一份 Dart 代码出 Android、iOS、macOS、Win
 - **扫码配对**（F-19，Android、iOS、macOS）：“连接主机”页点“扫配对二维码”，扫控制台或 App“设备”页上的码，扫到后和手填一样先确认主机再配对。相机画面在本机解码（纯 Dart 的 zxing2），不用谷歌的 ML Kit。第一次扫时系统会要相机权限。
 - 断线自动重连（500 毫秒起翻倍，最多 8 秒），带上次的事件序号让主机补发断开期间的事件；补不上就整个重新拉。App 从后台回到前台时马上重连。主机吊销了这台设备（401）时不再重连，提示重新配对。
 
-还没有的（按顺序做，见 backlog）：从 Rust 生成协议类型（F-20）、手机锁屏推送（F-21）。
+还没有的（按顺序做，见 backlog）：解析回复和发请求改用从 Rust 生成的协议类型（F-20 的后两步）、手机锁屏推送（F-21）。
+
+## 协议类型从 Rust 生成（F-20）
+
+Rust 的协议类型由 ts-rs 导出成 `rust/web/src/types/*.ts`，`tool/gen_protocol.dart` 再把它们生成成 `lib/src/protocol/wire.dart`（不要手改）。改了 Rust 的协议类型时：
+
+```sh
+cd rust && cargo test          # 重新导出 .ts
+cd ../apps/flutter && dart run tool/gen_protocol.dart
+```
+
+两份生成结果都要提交，CI 两边都会查。`number` 生成成 `num`（TS 里分不出整数和小数）；认不出的枚举值落到 `unknown`，认不出的那一种落到 `XxxUnknown`，主机比 App 新时不会解析失败。
 
 ## 桌面交互验证
 
@@ -54,6 +65,8 @@ intelligent-position 的 App，一份 Dart 代码出 Android、iOS、macOS、Win
 | `lib/src/ui/` | 各页（`task_card.dart` 是待办和任务页共用的任务卡片）；`star_map_page.dart` 是星图，`celestial_painter.dart` 画太阳、行星和恒星，`report.dart` 是报告链接和看报告 |
 | `test/` | 单元测试和界面测试，跑在假主机上（`test/fake_host.dart`） |
 | `integration_test/` | 连真主机的端到端测试，不在 CI 跑 |
+| `lib/src/protocol/wire.dart` | 从 Rust 生成的协议类型（F-20），`tool/gen_protocol.dart` 生成，不要手改 |
+| `tool/gen_protocol.dart` | 从 ts-rs 导出的 `rust/web/src/types/*.ts` 生成 `wire.dart`；`--check` 只查是不是最新的 |
 | `tool/check_licenses.dart` | 依赖许可检查 |
 
 ## 开发
@@ -80,12 +93,13 @@ dart format --output=none --set-exit-if-changed lib test tool integration_test
 flutter analyze --fatal-infos
 flutter test
 dart run tool/check_licenses.dart
+dart run tool/gen_protocol.dart --check
 flutter build linux --release
 ```
 
-CI 的 `flutter` 工作流在 PR 改到 `apps/flutter/` 时跑上面这些（只用 Linux）。五个平台的安装包只在手动触发或打 `app-v*` 标签时打：Linux、Android（APK，调试签名）、macOS、iOS（不签名，只看能不能编过）、Windows。都没有签名证书。
+CI 的 `flutter` 工作流在 PR 改到 `apps/flutter/` 或 `rust/web/src/types/` 时跑上面这些（只用 Linux）。五个平台的安装包只在手动触发或打 `app-v*` 标签时打：Linux、Android（APK，调试签名）、macOS、iOS（不签名，只看能不能编过）、Windows。都没有签名证书。
 
-依赖只用和 Apache-2.0 兼容的许可（BSD、MIT、Apache-2.0），`tool/check_licenses.dart` 按每个包的 LICENSE 正文查，认不出的就失败。现在的直接依赖：`flutter_secure_storage`、`flutter_markdown_plus`、`markdown`、`url_launcher`、`flutter_local_notifications`（都是 BSD-3-Clause），`tray_manager`、`window_manager`（MIT）。按包放行的例外只有 `dbus`（MPL-2.0，`flutter_local_notifications` 在 Linux 上用，原样使用）。
+依赖只用和 Apache-2.0 兼容的许可（BSD、MIT、Apache-2.0），`tool/check_licenses.dart` 按每个包的 LICENSE 正文查，认不出的就失败。现在的直接依赖：`flutter_secure_storage`、`flutter_markdown_plus`、`markdown`、`url_launcher`、`flutter_local_notifications`（都是 BSD-3-Clause），`tray_manager`、`window_manager`（MIT），扫码用的 `camera`、`zxing2`（BSD-3-Clause）和 `camera_macos`（MIT）。按包放行的例外只有 `dbus`（MPL-2.0，`flutter_local_notifications` 在 Linux 上用，原样使用）。
 
 ## 连真主机的端到端测试
 
