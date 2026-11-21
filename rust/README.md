@@ -177,7 +177,7 @@ docker compose up -d --build
 - [x] Docker 部署：`rust/Dockerfile`、`docker-compose.yml`、`deploy/env.example`；镜像带 bubblewrap，可选带 Codex；以 uid 10001 运行，数据放命名卷，端口只绑本机。在容器里用假模型跑通了沙箱里的 shell，`ip check`、健康检查、令牌校验都测过；真实模型、Slack、Codex 和其他验收一起做。见[《用 Docker 部署》](../docs/ip/deploy-docker.md)
 - [x] 质量评测 `ip eval`（backlog B-1）：评测集 `evals/macro-smoke.yaml` 两个固定问题（有数据的、一半取不到的），检查项全由程序判定；2026-11-12 用 `gpt-6-luna` 真实跑两遍，都是 2/2 通过，每遍不到 0.01 美元，结果在 `docs/ip/evals/2026-11-12-luna/`
 - [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（容器只能经代理出网，backlog E-12）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
-- [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账还没修（E-10）
+- [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账 2026-11-16 修了（E-10，只用假 codex 测过）
 
 **M0 验收**：在云主机上用一个可执行文件启动；通过 WebSocket 和一个岗位对话，它能在沙箱里跑 shell 命令；中文能搜到历史消息；启动、内存、并发三项达到方案里的性能目标。
 
@@ -185,7 +185,7 @@ docker compose up -d --build
 
 设计见 [`docs/ip/context-memory-design.md`](../docs/ip/context-memory-design.md)，分 7 步做。
 
-- [x] 第 1 步：系统提示词多两层，决策者笔记和岗位记忆摘要，按岗位存在设置表里，排在稳定内容之后；`memory` 配置（默认关，可限定岗位，两层各有字数上限）；`ip context show / set / clear` 查看和修改，服务运行时也能改，下一轮生效；`ip bench store` 加了每轮读这两层的耗时。只用假模型测过
+- [x] 第 1 步：系统提示词多两层，决策者笔记和岗位记忆摘要，按岗位存在设置表里，排在稳定内容之后；`memory` 配置（当时默认关，2026-11-16 起默认开，可限定岗位，两层各有字数上限）；`ip context show / set / clear` 查看和修改，服务运行时也能改，下一轮生效；`ip bench store` 加了每轮读这两层的耗时。只用假模型测过
 - [x] 第 2 步：后台任务从凉下来的对话里按岗位提炼摘要（默认闲置 6 小时后，每轮最多 2 份）。交给模型前和存库前都做密钥脱敏；费用记在岗位当天的账上，预算剩余不到 25% 时不提炼；失败退避重试；外部渠道的对话默认不进记忆，从渠道对话派出去的执行对话（顺着任务的派活来源往上查）也一样（#67）。`ip context show` 能看到提炼结果。只用假模型测过
 - [x] 第 3 步：同一个后台任务里，每轮提炼之后按岗位把对话摘要合并成岗位记忆摘要，员工下一轮开工就带上。选中的对话摘要（默认 30 天内用过或生成的，最多 256 份）和上次合并时一样就不调模型；没变的只给标题，新增和改过的给全文；失败或没有输出时保留旧的一版。默认用岗位自己的模型，可用 `memory.consolidation_model` 另指定。分批合并时，暂缓更新的摘要保留已合并版本的来源记录，后续过期或移除仍能清理。只用假模型测过
 - [x] 第 4 步：开了记忆的岗位多两个只读工具。`memory_search` 在本岗位的对话记忆里按词查找，`memory_read` 读一份全文；岗位取自调用者本人，别的岗位的搜不到也读不到。读成功记一次使用，合并时用得多的优先、长期没人读的淘汰。`ip bench store` 加了搜索耗时（2000 份时 p95 约 8 毫秒）。只用假模型测过

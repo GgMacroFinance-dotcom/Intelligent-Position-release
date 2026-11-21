@@ -16,8 +16,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemoryConfig {
-    /// 是否把岗位记忆摘要放进系统提示词。默认关。决策者笔记不受这个开关影响。
-    #[serde(default)]
+    /// 是否把岗位记忆摘要放进系统提示词、后台是否提炼。默认开（维护者 2026-11-16 定），写 `enabled: false` 关掉。
+    /// 决策者笔记不受这个开关影响。
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
     /// 只对这些岗位生效；省略表示所有岗位。
     #[serde(default)]
@@ -64,6 +65,10 @@ pub struct MemoryConfig {
     /// 外部渠道（如 Slack）进来的对话要不要进记忆，从这些对话派出去的执行对话跟着它走。默认不进。
     #[serde(default)]
     pub include_channels: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 fn default_notes_max_chars() -> usize {
@@ -113,7 +118,7 @@ fn default_max_summaries() -> usize {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: default_enabled(),
             roles: Vec::new(),
             notes_max_chars: default_notes_max_chars(),
             summary_max_chars: default_summary_max_chars(),

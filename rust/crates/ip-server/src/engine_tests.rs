@@ -193,7 +193,23 @@ async fn codex_turns_resume_with_only_new_messages() {
         2,
         &[
             serde_json::json!({"type": "item.completed", "item": {"id": "j1", "type": "agent_message", "text": "再跑一遍也通过。"}}),
-            serde_json::json!({"type": "turn.completed", "usage": {"input_tokens": 0, "output_tokens": 0}}),
+            // 续接时 Codex 报的是整个会话的累计用量（backlog E-10）：这一轮自己只有 20 万输入（10 万命中缓存）、1 万输出。
+            serde_json::json!({"type": "turn.completed", "usage": {"input_tokens": 1_200_000, "cached_input_tokens": 500_000, "output_tokens": 110_000}}),
+        ],
+    );
+    // 第三轮报了用量之后又报失败：这一轮的用量照记，但不能在第四轮再记一次。
+    f.out(
+        3,
+        &[
+            serde_json::json!({"type": "turn.completed", "usage": {"input_tokens": 1_300_000, "cached_input_tokens": 500_000, "output_tokens": 110_000}}),
+            serde_json::json!({"type": "turn.failed", "error": {"message": "额度不足"}}),
+        ],
+    );
+    f.out(
+        4,
+        &[
+            serde_json::json!({"type": "item.completed", "item": {"id": "k1", "type": "agent_message", "text": "好了。"}}),
+            serde_json::json!({"type": "turn.completed", "usage": {"input_tokens": 1_300_000, "cached_input_tokens": 500_000, "output_tokens": 120_000}}),
         ],
     );
     let rt = f.runtime();
@@ -263,7 +279,15 @@ async fn codex_turns_resume_with_only_new_messages() {
     rt.send(&"ops-1".into(), thread.clone(), human(), "再跑一遍")
         .await
         .unwrap();
-    assert!(matches!(turn_end(&mut rx).await, RuntimeEvent::TurnFinished { .. }));
+    let RuntimeEvent::TurnFinished { usage, cost_usd, .. } = turn_end(&mut rx).await else {
+        panic!("第二轮应当正常结束")
+    };
+    // 只记这一轮的差值：0.1（没命中的输入）+ 0.05（命中缓存的输入）+ 0.02（输出）。
+    assert_eq!(
+        (usage.prompt_tokens, usage.cached_tokens, usage.completion_tokens),
+        (200_000, 100_000, 10_000)
+    );
+    assert!((cost_usd - 0.17).abs() < 1e-9, "{cost_usd}");
     let args = f.recorded("args", 2);
     assert!(args.contains("\nresume\nsess-1\n-\n"), "{args}");
     let stdin = f.recorded("stdin", 2);
@@ -275,7 +299,34 @@ async fn codex_turns_resume_with_only_new_messages() {
     );
 
     let spend = rt.spend_today().await.unwrap();
-    assert!((spend.roles[&"ops".into()] - 1.0).abs() < 1e-9, "{spend:?}");
+    assert!((spend.roles[&"ops".into()] - 1.17).abs() < 1e-9, "{spend:?}");
+
+    // 第三轮失败：10 万输入照记（0.1），累计用量也存下来。
+    rt.send(&"ops-1".into(), thread.clone(), human(), "还有一处")
+        .await
+        .unwrap();
+    assert!(matches!(turn_end(&mut rx).await, RuntimeEvent::TurnFailed { .. }));
+    let spend = rt.spend_today().await.unwrap();
+    assert!((spend.roles[&"ops".into()] - 1.27).abs() < 1e-9, "{spend:?}");
+    let session = rt
+        .store()
+        .engine_session(&"ops-1".into(), &thread)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(session.used.prompt_tokens, 1_300_000);
+
+    // 第四轮：只多了 1 万输出（0.02），第三轮的 10 万输入没有被再记一次。
+    rt.send(&"ops-1".into(), thread.clone(), human(), "再试一次")
+        .await
+        .unwrap();
+    let RuntimeEvent::TurnFinished { usage, .. } = turn_end(&mut rx).await else {
+        panic!("第四轮应当正常结束")
+    };
+    assert_eq!((usage.prompt_tokens, usage.completion_tokens), (0, 10_000));
+    assert!(f.recorded("args", 4).contains("\nresume\nsess-1\n-\n"));
+    let spend = rt.spend_today().await.unwrap();
+    assert!((spend.roles[&"ops".into()] - 1.29).abs() < 1e-9, "{spend:?}");
 }
 
 /// 超时整组终止，异常退出带上 stderr；派给它的任务标为受阻，原因写回派活的对话。
@@ -590,6 +641,22 @@ async fn claude_code_turns_resume_with_only_new_messages() {
     assert!(
         (spend.roles[&"ops".into()] - 1.0).abs() < 1e-9,
         "第二轮用量是 0，不能按累计的 total_cost_usd 记：{spend:?}"
+    );
+    // 引擎会话表里的累计用量：第一轮的加上第二轮的（第二轮是 0）。
+    let session = rt
+        .store()
+        .engine_session(&"ops-1".into(), &thread)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(session.engine, "claude_code");
+    assert_eq!(
+        (
+            session.used.prompt_tokens,
+            session.used.cached_tokens,
+            session.used.completion_tokens
+        ),
+        (1_000_000, 400_000, 100_000)
     );
 }
 

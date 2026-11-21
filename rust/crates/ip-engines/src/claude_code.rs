@@ -240,16 +240,12 @@ impl ClaudeCodeEngine {
         if let Some(grant) = &ctx.mcp {
             cmd.env("IP_MCP_TOKEN", &grant.token);
         }
-        let report = process::drive(
-            &KIND,
-            cmd,
-            ctx.input.to_string(),
-            started,
-            timeout,
-            self.config.price,
-            &ctx,
-        )
-        .await;
+        let mut report = process::drive(&KIND, cmd, ctx.input.to_string(), started, timeout, &ctx).await;
+        // `usage` 只算这一次进程，直接计费；会话累计值（存进引擎会话表）在上一轮的基础上往上加。
+        report.cost_usd = self.config.price.map_or(0.0, |p| p.cost(&report.usage));
+        let resumed = ctx.session.is_some() && report.session_id.as_deref().is_none_or(|id| Some(id) == ctx.session);
+        let baseline = if resumed { ctx.session_usage } else { Usage::default() };
+        report.session_usage = Some(process::add_usage(baseline, report.usage));
         let _ = std::fs::remove_file(&prompt_file);
         report
     }

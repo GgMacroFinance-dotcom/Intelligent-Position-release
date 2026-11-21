@@ -7,7 +7,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use ip_core::Body;
-use ip_models::{Price, Usage};
+use ip_models::Usage;
 use ip_runtime::engine::{TurnContext, TurnReport};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -76,13 +76,15 @@ pub(crate) fn command(program: &str, workspace: &Path) -> Command {
 }
 
 /// 跑这一轮的进程：`prompt` 写进标准输入，输出逐行交给 `kind.parse`，到 `started + timeout` 还没结束就整组终止。
+///
+/// 结果里的 `usage` 是进程报的原样累加，`cost_usd` 和 `session_usage` 留给引擎填：
+/// Codex 续接时报的是会话累计（要减掉以前几轮，backlog E-10），Claude Code 报的只是这一次进程。
 pub(crate) async fn drive(
     kind: &Kind,
     mut cmd: Command,
     prompt: String,
     started: Instant,
     timeout: Duration,
-    price: Option<Price>,
     ctx: &TurnContext<'_>,
 ) -> TurnReport {
     let name = kind.name;
@@ -130,7 +132,6 @@ pub(crate) async fn drive(
 
     report.steps = state.steps;
     report.usage = state.usage;
-    report.cost_usd = price.map_or(0.0, |p| p.cost(&state.usage));
     report.session_id = state.session;
     report.error = match status {
         Err(_) => {
@@ -175,6 +176,16 @@ async fn tail(mut stderr: tokio::process::ChildStderr) -> String {
     let _ = stderr.read_to_end(&mut buf).await;
     let start = buf.len().saturating_sub(MAX_STDERR);
     String::from_utf8_lossy(&buf[start..]).into_owned()
+}
+
+/// 两份用量相加。
+pub(crate) fn add_usage(a: Usage, b: Usage) -> Usage {
+    Usage {
+        prompt_tokens: a.prompt_tokens.saturating_add(b.prompt_tokens),
+        cached_tokens: a.cached_tokens.saturating_add(b.cached_tokens),
+        cache_write_tokens: a.cache_write_tokens.saturating_add(b.cache_write_tokens),
+        completion_tokens: a.completion_tokens.saturating_add(b.completion_tokens),
+    }
 }
 
 /// 写进对话前截断工具输出。

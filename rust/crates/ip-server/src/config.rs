@@ -53,7 +53,7 @@ pub struct Config {
     /// 上下文超过这么多字时压缩较早的对话；0 表示不压缩。
     #[serde(default)]
     pub context_budget_chars: Option<usize>,
-    /// 岗位记忆：默认关（`docs/ip/context-memory-design.md`）。
+    /// 岗位记忆：默认开，`enabled: false` 关掉（`docs/ip/context-memory-design.md`）。
     #[serde(default)]
     pub memory: ip_runtime::memory::MemoryConfig,
     #[serde(default)]
