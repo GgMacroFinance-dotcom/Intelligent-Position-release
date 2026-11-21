@@ -558,6 +558,92 @@ class DeviceInfo {
   final bool online;
 }
 
+/// 定时任务发给谁（`Target`）。
+class ScheduleTarget {
+  const ScheduleTarget({required this.role, this.agent, this.escalate = false});
+
+  factory ScheduleTarget.fromJson(Json j) =>
+      ScheduleTarget(role: j['role'] as String, agent: _str(j['agent']), escalate: j['escalate'] as bool? ?? false);
+
+  final String role;
+
+  /// 指定某个员工；为空时在岗位里挑当前最空闲的。
+  final String? agent;
+
+  /// 用岗位配置里的升级模型处理。
+  final bool escalate;
+}
+
+/// `list_schedules` 的一项（`ScheduleView`）：配置、下次运行时间、上次运行结果。
+class Schedule {
+  const Schedule({
+    required this.id,
+    required this.description,
+    required this.cron,
+    required this.utcOffset,
+    this.to,
+    required this.text,
+    required this.enabled,
+    this.nextRunMs,
+    this.lastRun,
+  });
+
+  factory Schedule.fromJson(Json j) {
+    final spec = j['spec'] as Json;
+    final last = j['last_run'] as Json?;
+    return Schedule(
+      id: spec['id'] as String,
+      description: _str(spec['description']) ?? '',
+      cron: spec['cron'] as String,
+      utcOffset: _str(spec['utc_offset']) ?? '+00:00',
+      to: spec['to'] == null ? null : ScheduleTarget.fromJson(spec['to'] as Json),
+      text: _str(spec['text']) ?? '',
+      enabled: spec['enabled'] as bool? ?? true,
+      nextRunMs: _intOrNull(j['next_run_ms']),
+      lastRun: last == null ? null : LastRun.fromJson(last),
+    );
+  }
+
+  final String id;
+  final String description;
+
+  /// 五段 cron：分 时 日 月 周。
+  final String cron;
+
+  /// 按哪个时区解读 cron，如 `+08:00`。
+  final String utcOffset;
+
+  /// 为空时按路由规则分派。
+  final ScheduleTarget? to;
+
+  /// 到点发出的消息。
+  final String text;
+  final bool enabled;
+
+  /// 下次运行的时间；停用或 cron 永远不会命中时为空。
+  final int? nextRunMs;
+  final LastRun? lastRun;
+}
+
+/// 定时任务上次运行的情况。
+class LastRun {
+  const LastRun({required this.atMs, required this.ok, required this.detail, this.threadId});
+
+  factory LastRun.fromJson(Json j) => LastRun(
+    atMs: _int(j['at_ms']),
+    ok: j['ok'] as bool,
+    detail: _str(j['detail']) ?? '',
+    threadId: _str(j['thread_id']),
+  );
+
+  final int atMs;
+  final bool ok;
+
+  /// 成功时是新对话的 id，失败时是原因。
+  final String detail;
+  final String? threadId;
+}
+
 /// `create_pairing` 的回复：配对码只在这里出现一次。
 class NewPairing {
   const NewPairing({required this.code, required this.name, required this.expiresMs, this.link, this.qr});
