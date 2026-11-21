@@ -161,6 +161,14 @@ Codex 自带一份 bubblewrap，也靠这三项才能在容器里跑；不用 Co
     contact: mailto:ops@example.com
   ```
 
+- 手机 App 的锁屏推送经推送中转送到 APNs、FCM（m2-spec D-35，还在开发）。自己搭中转的，把中转的域名写进 `push.hosts`，主机才肯往那里发：
+
+  ```yaml
+  push:
+    contact: mailto:ops@example.com
+    hosts: [push.example.com]
+  ```
+
 - 主机第一次用到推送时生成自己的密钥，存在数据库里。删了数据库或换了主机，各设备打开控制台时会自动重新订阅。
 - 以上只用假推送服务测过，没在真的手机上收过推送。
 

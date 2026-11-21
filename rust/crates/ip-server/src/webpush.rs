@@ -35,14 +35,16 @@ const ACTIVE_MS: i64 = 30 * 1000;
 const TTL_SECS: u32 = 24 * 3600;
 /// 加密后的记录大小（RFC 8188）。负载加上分隔符和标签要放得进一条记录。
 const RECORD_SIZE: u32 = 4096;
-/// 负载上限。通知的标题和两句预览远小于它。
-const MAX_PAYLOAD: usize = 3000;
+/// 负载上限。通知的标题和两句预览远小于它。手机 App 的推送经中转转给 APNs、FCM（D-35），
+/// 它们的消息上限是 4 KB，密文转成 base64 再加上外层字段要放得下，所以不是 3000。
+const MAX_PAYLOAD: usize = 2800;
 /// 同时在发的推送最多几个。
 const MAX_IN_FLIGHT: usize = 16;
 /// 每个订阅记着最近推过的几个标签，事情在别处处理过时用同一个标签盖掉。
 const SENT_TAGS: usize = 64;
 
-/// 浏览器厂商的推送服务。订阅地址只能是这些主机上的 `https://` 地址，免得有人登记一个内网地址，
+/// 已知的推送服务：浏览器厂商的四家。手机 App 的推送中转（D-35）写在 `ip.yaml` 的 `push.hosts` 里。
+/// 订阅地址只能是这些主机上的 `https://` 地址，免得有人登记一个内网地址，
 /// 让主机替他往内网发请求。
 const PUSH_HOSTS: &[&str] = &["fcm.googleapis.com", "web.push.apple.com"];
 const PUSH_HOST_SUFFIXES: &[&str] = &[".push.services.mozilla.com", ".notify.windows.com"];
@@ -82,6 +84,8 @@ pub struct WebPush {
     http: reqwest::Client,
     in_flight: Arc<Semaphore>,
     started: AtomicBool,
+    /// `ip.yaml` 的 `push.hosts`：另外放行的推送服务主机名（自己搭的分发器或中转），已小写。
+    extra_hosts: Vec<String>,
     /// 测试时允许 `http://127.0.0.1` 的订阅地址（假推送服务）。
     loopback_ok: AtomicBool,
 }
@@ -109,8 +113,15 @@ impl WebPush {
                 .unwrap_or_default(),
             in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
             started: AtomicBool::new(false),
+            extra_hosts: Vec::new(),
             loopback_ok: AtomicBool::new(false),
         }
+    }
+
+    /// 另外放行的推送服务主机名（`push.hosts`，配置检查时已核对过格式）。
+    pub fn with_hosts(mut self, hosts: &[String]) -> Self {
+        self.extra_hosts = hosts.iter().map(|h| h.to_ascii_lowercase()).collect();
+        self
     }
 
     /// 启动时读订阅和 VAPID 密钥（没有就生成一个存起来）。
@@ -394,7 +405,9 @@ impl WebPush {
         if self.loopback_ok.load(Ordering::SeqCst) && url.scheme() == "http" && host == "127.0.0.1" {
             return Ok(());
         }
-        let known = PUSH_HOSTS.contains(&host.as_str()) || PUSH_HOST_SUFFIXES.iter().any(|s| host.ends_with(s));
+        let known = PUSH_HOSTS.contains(&host.as_str())
+            || PUSH_HOST_SUFFIXES.iter().any(|s| host.ends_with(s))
+            || self.extra_hosts.contains(&host);
         if url.scheme() != "https" || !known || url.port().is_some() || !url.username().is_empty() {
             return Err(format!("订阅地址不是已知的推送服务：{host}"));
         }
@@ -751,6 +764,25 @@ pub(crate) mod tests {
         assert_eq!(p.count("dev_1"), 4);
         p.forget("dev_1").await.unwrap();
         assert_eq!(p.count("dev_1"), 0);
+    }
+
+    #[tokio::test]
+    async fn configured_push_hosts_are_allowed() {
+        let (_dir, p) = push();
+        let p = WebPush::new(p.store, None).with_hosts(&["Push.Example.com".into()]);
+        let (_ua, key, auth) = browser_keys();
+        p.subscribe("dev_1", "https://push.example.com/w/abc", &key, &auth, 0)
+            .await
+            .unwrap();
+        for bad in [
+            "http://push.example.com/w/abc",
+            "https://push.example.com:8443/w/abc",
+            "https://a.push.example.com/w/abc",
+            "https://push.example.com.evil.example/w/abc",
+        ] {
+            assert!(p.subscribe("dev_1", bad, &key, &auth, 0).await.is_err(), "{bad}");
+        }
+        assert_eq!(p.count("dev_1"), 1);
     }
 
     #[test]
