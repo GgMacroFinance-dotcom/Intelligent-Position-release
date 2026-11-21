@@ -1,13 +1,14 @@
 name: flutter
 
-# 各平台 App（apps/flutter，backlog F-13，docs/ip/apps-plan.md 第 9 节）。改了它才跑检查，只用 Linux。
+# 各平台 App（apps/flutter，backlog F-13，docs/ip/apps-plan.md 第 9 节）。改了它、或者 Rust 导出的协议类型
+# （rust/web/src/types，App 的 wire.dart 从它生成，F-20）才跑检查，只用 Linux。
 # 五个平台的安装包只在手动触发或打 app-v* 标签时打：macOS、Windows 的 Actions 分钟数贵。
 on:
   pull_request:
-    paths: ["apps/flutter/**", ".github/workflows/flutter.yml"]
+    paths: ["apps/flutter/**", "rust/web/src/types/**", ".github/workflows/flutter.yml"]
   push:
     branches: [main]
-    paths: ["apps/flutter/**", ".github/workflows/flutter.yml"]
+    paths: ["apps/flutter/**", "rust/web/src/types/**", ".github/workflows/flutter.yml"]
     tags: ["app-v*"]
   workflow_dispatch:
     inputs:
@@ -50,6 +51,9 @@ jobs:
         run: flutter test
       - name: Dependency licenses
         run: dart run tool/check_licenses.dart
+      # 协议类型从 Rust 生成（F-20）：rust/web/src/types 改了却没重新生成 wire.dart 时失败。
+      - name: Protocol types up to date
+        run: dart run tool/gen_protocol.dart --check
       # 原生插件（安全存储、打开链接、托盘）的 C++ 代码也要编得过。托盘（F-17）要 appindicator。
       - name: Install system libraries
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libsecret-1-dev libayatana-appindicator3-dev ninja-build
