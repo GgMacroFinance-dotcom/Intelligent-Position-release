@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../push/lock_push.dart';
 import '../protocol/client.dart';
 import '../protocol/models.dart';
 import 'admin/devices_page.dart';
@@ -139,6 +140,7 @@ class NotifySection extends StatelessWidget {
           value: s.preview,
           onChanged: (v) => save(s.copyWith(preview: v)),
         ),
+        if (state.lockPush case final push?) LockPushTile(push: push),
         ListTile(
           title: Text(muted ? '静音到 ${formatTime(until)}' : '静音'),
           subtitle: Wrap(
@@ -175,7 +177,7 @@ class NotifySection extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
           child: Text(
             '要我处理的：审批卡、员工提问、一轮失败、任务受阻。“全部”另外包括员工回复和任务完成。'
-            'App 在前台时不弹；手机上 App 被系统关掉、锁屏以后暂时收不到（要等推送中转，见 F-21）。'
+            'App 在前台时不弹。${state.lockPush == null ? '这个版本没有锁屏推送：App 被系统关掉、手机锁屏以后收不到。' : ''}'
             '${state.me?.device == null ? '用共用令牌连上的共用这一份设置。' : ''}',
             style: theme.textTheme.bodySmall,
           ),
@@ -183,6 +185,34 @@ class NotifySection extends StatelessWidget {
       ],
     );
   }
+}
+
+/// 锁屏推送的开关（F-21）。
+class LockPushTile extends StatelessWidget {
+  const LockPushTile({super.key, required this.push});
+
+  final LockPush push;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: push,
+    builder: (context, _) {
+      final state = AppScope.of(context);
+      final (String subtitle, bool? value) = switch (push.state) {
+        LockPushState.unavailable => ('这个版本没有配系统推送', null),
+        LockPushState.off => (state.notificationsAllowed == false ? '系统没允许这个 App 发通知' : 'App 被系统关掉、锁屏以后收不到', false),
+        LockPushState.registering => ('正在登记…', true),
+        LockPushState.on => ('App 被系统关掉、锁屏以后也能收到。内容经推送中转加密送达，中转看不到', true),
+        LockPushState.failed => ('登记失败：${push.error ?? ''}', true),
+      };
+      return SwitchListTile(
+        title: const Text('锁屏推送'),
+        subtitle: Text(subtitle),
+        value: value ?? false,
+        onChanged: value == null || !state.connected ? null : (on) => state.setLockPush(on),
+      );
+    },
+  );
 }
 
 /// “管理”权限才有的几页（F-18），从“我”页进去。日常权限的设备看不到这一节，主机那边也会拒绝这些请求。
