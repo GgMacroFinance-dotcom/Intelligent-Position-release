@@ -873,15 +873,17 @@ fn parses_example_config() {
     assert_eq!(c.agents.len(), 2);
     assert!(c.agents[0].tools && !c.agents[1].tools);
     assert_eq!(c.endpoints["deepseek"].max_concurrency, Some(8));
-    // 没写 memory 时默认关。
-    assert!(!c.memory.enabled && c.memory.summary_max_chars == 10_000);
-    let on = EXAMPLE.replacen(
-        "org_prompt:",
-        "memory: { enabled: true, roles: [macro] }\norg_prompt:",
-        1,
-    );
-    let c = Config::from_yaml(&on).unwrap();
+    // 没写 memory 时默认开，所有岗位都开。
+    assert!(c.memory.enabled && c.memory.summary_max_chars == 10_000);
+    assert!(c.memory.enabled_for(&"macro".into()) && c.memory.enabled_for(&"ops".into()));
+    // 只写 roles 不写 enabled：只对列出的岗位开。
+    let some = EXAMPLE.replacen("org_prompt:", "memory: { roles: [macro] }\norg_prompt:", 1);
+    let c = Config::from_yaml(&some).unwrap();
     assert!(c.memory.enabled_for(&"macro".into()) && !c.memory.enabled_for(&"ops".into()));
+    // 写 enabled: false 关掉。
+    let off = EXAMPLE.replacen("org_prompt:", "memory: { enabled: false }\norg_prompt:", 1);
+    let c = Config::from_yaml(&off).unwrap();
+    assert!(!c.memory.enabled && !c.memory.enabled_for(&"macro".into()));
     // 没写 utc_offset 时按 UTC 显示时间；写了就换成分钟数。
     assert_eq!(c.utc_offset_minutes().unwrap(), 0);
     for (offset, minutes) in [("+08:00", 480), ("-05:30", -330), ("UTC", 0)] {
@@ -1649,11 +1651,11 @@ async fn memory_page_requests_view_edit_forget_and_clear() {
         .unwrap();
     let mut ws = connect(server.addr, "").await.unwrap();
 
-    // 看：这台服务没开记忆，页面要能看出来。
+    // 看：记忆默认开，页面要能看出来。
     let (reply, _) = request(&mut ws, 1, json!({"type": "get_memory", "role_id": "macro"})).await;
     assert_eq!(reply["ok"], true, "{reply}");
     let view = &reply["data"];
-    assert_eq!(view["enabled"], false);
+    assert_eq!(view["enabled"], true);
     assert_eq!(view["notes"], Value::Null);
     assert_eq!(view["threads"][0]["thread_id"], "t-decimals");
     assert_eq!(view["threads"][0]["title"], "小数位");
