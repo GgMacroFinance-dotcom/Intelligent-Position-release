@@ -52,6 +52,7 @@
 | D-3 | 岗位专家小模型（约 1B 参数）是为以后接入做准备，这一版不训练。只挑几个已经后训练好的现成模型，换端点接进来，用 B 组的评测集测一遍。测哪几个模型、跑在哪里（云主机目前没有 GPU）还没定，所以放在 D 组最后做 | 待做（依赖 B；排在 D-4 之后；模型和运行位置等人定） |
 | D-4 | 第二个岗位“运维、测试”：流程骨架已有，真实跑通取决于 A-4 | 用真实 Codex 跑通了 `examples/ops-demo`（A-4，2026-11-14）。2026-11-22 维护者定：这个岗位首要职责是维护服务器上的模型中转站（New API 类网关），走 Codex 引擎、在中转站主机上直接操作。分几步：① 中转站运维工具和演练（巡检、新版本、上游新模型、每晚日报，`examples/ops-gateway`，演练只用假服务）**已做**；② 维护者那台中转站的私有岗位手册（从 `AGENTS.example.md` 填）和员工工作目录；③ 在真中转站上跑一次巡检和日报；④ 开定时任务（每天巡检、每天查上游新模型、每周查新版本、每晚 23:00 日报）。2026-11-22 维护者定：harness 预算用的模型价格不再手填，改成每月 1 号 08:30 从 OpenRouter 的公开模型目录读（定时任务 `monthly-model-prices`），有变化先请人确认再写回 `ip.yaml`（`model_prices.py`，**已做**，只用假 OpenRouter 演练过、对真 OpenRouter 只读跑过） |
 | D-5 | 公司上下文：让所有岗位共享公司的基本情况和资料。设计见 [company-context-design.md](company-context-design.md)，按维护者 2026-11-21 的要求参考 Notion 和 AFFiNE：部署里一个知识库工作区（公司空间加各岗位空间，页面树，Markdown 正文，有历史版本），置顶的“公司简介”整页进所有岗位的系统提示词，其余页面员工用 `kb_search`、`kb_read`、`kb_list` 按需查；员工不能直接改，只能用 `kb_suggest` 提建议，人在控制台接受；组织级记忆以后也变成建议。客户已有的 Notion 等走 MCP 接。不引入 AFFiNE 服务端（非开源许可）和 BlockSuite（MPL-2.0）的代码。只有设计，没有代码 | 等人：设计第 9 节的问题等维护者定。建议排在 D-1 收尾之后，先做第 1、2 步 |
+| D-6 | 存储层改用 PostgreSQL，和团队上下文系统（`Team-context-management-system`）共用一个库、各用一个 schema（`ip`、`tcms`），只用标准 PostgreSQL、不装扩展。维护者 2026-11-22 定。方案见 [postgres-migration-plan.md](postgres-migration-plan.md)：`ip-store` 对外接口不变，驱动 `tokio-postgres`，中文搜索继续用二字切分、存成 `tsvector`，`ip store import-sqlite` 导入旧数据，docker-compose 加 PostgreSQL，mobius 另起一个容器 | 方案已定（2026-11-22：不留 SQLite、mobius 单独起 PostgreSQL、JSON 用 JSONB），按方案第 8 节分 PR 做，代码还没开始 |
 
 ## E. 已知的小问题
 

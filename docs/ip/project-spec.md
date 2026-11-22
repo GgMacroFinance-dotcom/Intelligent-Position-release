@@ -35,6 +35,7 @@ intelligent-position（I.P.）的首要目标是做一个有影响力的开源�
 | 路由 | 决定请求交给哪个岗位 | 规则，匹配不到就出决策卡给人 | 人改过的决定沉淀成新规则，人批准后生效 |
 | 工具与数据 | 沙箱里的工具、MCP 服务器、公开数据 | 本机和远程 MCP 都支持 | 需要浏览器的岗位先配 Playwright MCP |
 | 渠道与外部引擎 | Slack 线程、Codex | Slack 在真实工作区的公开频道里走通过一次（2026-11-16，经本机转发器连接）；Codex 用真实的跑通过一次示例项目（2026-11-14） | Claude Code 引擎已实现（2026-11-21，D-36），只用假的模型接口核对过 |
+| 存储 | 事件日志、对话、任务、审批、记忆、全文搜索 | SQLite（`ip-store`） | 改用和团队上下文系统共用的 PostgreSQL（2026-11-22 定，backlog D-6） |
 
 harness 从第一天就用 Rust 写，目的是充分利用硬件效率。代码在仓库 `rust/` 下，13 个 crate，约 2.6 万行（含测试，2026-11-15）。性能算功能的一部分，新增热路径要带 `ip bench` 基准。
 
@@ -140,6 +141,7 @@ FRED 数据只留 Finance Macro Data API 这一个来源，`examples/public-data
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-22 | 维护者定：存储层从 SQLite 改用 PostgreSQL，和团队上下文系统共用一个库、各用一个 schema（`ip`、`tcms`），只用标准 PostgreSQL、不装扩展；不留 SQLite，mobius 上单独起一个 PostgreSQL，JSON 列用 `JSONB`。方案见 `postgres-migration-plan.md`，backlog D-6，代码还没改 |
 | 2026-11-21 | “数据”一节：Render 托管版从境外访问国家统计局真实跑通（backlog E-2），没有新决定 |
 | 2026-11-21 | 维护者给了 Obsidian 图谱风格的样稿，定：App 里的 Bot 照这个风格展现，背景星空，图标用八大行星和知名恒星，幕僚长在中心用太阳，越紧急离太阳越近，越重要图标越大。协议里没有紧急度、重要度，Claude 按建议用待决定的提问、任务的截止时间和状态、失败和正在处理、工作量和岗位预算来算，理由照原样给人看（apps-plan 9.7，backlog F-22，已做） |
 | 2026-11-21 | 维护者定：各个平台都基于 Flutter 开发 App（Android、iOS、macOS、Windows、Linux）。Claude 按建议定的细节（维护者可改）：网页控制台和 PWA 保留给浏览器用户，Flutter 不出 Web 版；Tauri 桌面 App 在 Flutter 桌面版补齐托盘、通知、开机启动后删掉；协议仍只有 `/ws` 一套，服务端不用改。手机锁屏推送要只见密文的中转，和上不上商店一起列进待定。方案见 `apps-plan.md` 第 9 节，清单见 backlog F-13 起；F-13（工程骨架、连接主机、待办、对话）已做 |
