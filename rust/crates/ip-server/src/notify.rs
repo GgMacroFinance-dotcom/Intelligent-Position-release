@@ -815,7 +815,7 @@ mod tests {
     #[tokio::test]
     async fn settings_are_saved_per_device() {
         let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(dir.path().join("ip.db")).unwrap();
+        let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
         let n = Notifier::new(store.clone());
         assert_eq!(n.settings("dev_1"), NotifySettings::default());
         let s = NotifySettings {

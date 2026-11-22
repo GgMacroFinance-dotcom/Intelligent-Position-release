@@ -19,7 +19,7 @@ ip-models.workspace = true
 ip-relay.workspace = true
 ip-runtime.workspace = true
 ip-server.workspace = true
-ip-store.workspace = true
+ip-store = { workspace = true, features = ["testing"] }
 mimalloc.workspace = true
 regex.workspace = true
 serde.workspace = true

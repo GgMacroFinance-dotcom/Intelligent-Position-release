@@ -513,15 +513,15 @@ async fn put<T: Serialize>(store: &Store, key: &str, value: &T) -> Result<(), St
 mod tests {
     use super::*;
 
-    fn devices() -> (tempfile::TempDir, std::sync::Arc<Devices>) {
+    async fn devices() -> (tempfile::TempDir, std::sync::Arc<Devices>) {
         let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(dir.path().join("ip.db")).unwrap();
+        let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
         (dir, std::sync::Arc::new(Devices::new(store)))
     }
 
     #[tokio::test]
     async fn pairs_once_and_authenticates_by_token() {
-        let (_dir, d) = devices();
+        let (_dir, d) = devices().await;
         let p = d
             .create_pairing(" 张三的手机 ", Some("https://ip.example.com/"), 1_000)
             .await
@@ -554,7 +554,7 @@ mod tests {
 
     #[tokio::test]
     async fn codes_expire() {
-        let (_dir, d) = devices();
+        let (_dir, d) = devices().await;
         let p = d.create_pairing("平板", None, 0).await.unwrap();
         assert!(p.link.is_none() && p.qr.is_none());
         assert_eq!(
@@ -565,7 +565,7 @@ mod tests {
 
     #[tokio::test]
     async fn too_many_wrong_codes_void_all_pending_codes() {
-        let (_dir, d) = devices();
+        let (_dir, d) = devices().await;
         let p = d.create_pairing("电脑", None, 0).await.unwrap();
         let wrong = if p.code == "000000" { "000001" } else { "000000" };
         for _ in 0..MAX_FAILED_CLAIMS - 1 {
@@ -582,7 +582,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_cli_cannot_resurrect_a_used_code() {
-        let (_dir, d) = devices();
+        let (_dir, d) = devices().await;
         let store = d.store.clone();
         let p = create_pairing(&store, "手机", None, 0).await.unwrap();
         let stale: serde_json::Value = store.setting(PAIRINGS_KEY).await.unwrap().unwrap();
@@ -594,7 +594,7 @@ mod tests {
 
     #[tokio::test]
     async fn rename_revoke_and_online() {
-        let (_dir, d) = devices();
+        let (_dir, d) = devices().await;
         let p = d.create_pairing("旧名字", None, 0).await.unwrap();
         let c = d.claim(&p.code, 1).await.unwrap();
         let device = d.authenticate(&c.token).unwrap();
@@ -619,7 +619,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_devices_are_daily_until_promoted() {
-        let (_dir, d) = devices();
+        let (_dir, d) = devices().await;
         let p = d.create_pairing("手机", None, 0).await.unwrap();
         let c = d.claim(&p.code, 1).await.unwrap();
         assert_eq!(c.device.scope, Scope::Daily);

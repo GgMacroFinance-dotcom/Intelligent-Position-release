@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 use ip_core::{Agent, Author, ModelSlot, Role, ThreadId};
 use ip_models::{ModelRegistry, ScriptedModel, ScriptedTurn};
 use ip_runtime::{AgentSetup, Runtime, RuntimeConfig, RuntimeEvent};
-use ip_store::Store;
 use serde::Serialize;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -63,7 +62,7 @@ async fn measure() -> anyhow::Result<Report> {
     let dir = std::env::temp_dir().join(format!("ip-bench-agents-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
-    let store = Store::open(dir.join("store.db"))?;
+    let store = ip_store::testing::TestDb::new().open().await;
 
     let reply: String = "宏观数据点评：本月通胀温和回升，"
         .chars()

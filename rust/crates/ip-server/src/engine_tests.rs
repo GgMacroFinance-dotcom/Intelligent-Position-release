@@ -11,7 +11,6 @@ use std::time::Duration;
 use ip_core::{Agent, Author, Body, ModelSlot, Notice, OrgSpec, Role, TaskStatus, ThreadId};
 use ip_models::ModelRegistry;
 use ip_runtime::{AgentSetup, NewTask, Runtime, RuntimeConfig, RuntimeEvent};
-use ip_store::Store;
 use ip_tools::{Limits, Sandbox, Toolbox};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -105,7 +104,7 @@ async fn fixture_with(
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
     let engine = engine(&bin, data.join("engines"));
 
-    let store = Store::open(data.join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(data.join("ip.db")).await;
     let rc = RuntimeConfig {
         org_prompt: "组织规则：结论先行。".into(),
         ..RuntimeConfig::default()

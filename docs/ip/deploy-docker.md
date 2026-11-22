@@ -77,7 +77,7 @@
 | 路径 | 是什么 | 怎么来的 |
 | --- | --- | --- |
 | `/srv/ip/ip.yaml` | 你的配置 | 从 `rust/ip.yaml` 只读挂进来 |
-| `/srv/ip/data` | 数据库、员工的工作目录、Codex 的配置目录 | 命名卷 `ip-data` |
+| `/srv/ip/data` | 员工的工作目录、Codex 的配置目录 | 命名卷 `ip-data` |
 | `/srv/ip/examples/public-data` | `ip data pull` 拉下来的公开数据（示例配置默认不开，见 `ip.example.yaml` 的 `public`） | 命名卷 `public-data`；第一次创建时 Docker 会把镜像里的 `catalog.yaml` 拷进去 |
 | `/srv/ip/examples/macro-data` 等 | 示例数据和示例项目 | 镜像自带 |
 
@@ -217,7 +217,7 @@ Codex 自带一份 bubblewrap，也靠这三项才能在容器里跑；不用 Co
 **这是容器整体的兜底，不是每条命令的上限。** 服务进程和所有员工的命令共用这一份额度，所以：
 
 - 一条命令把进程数或内存用光时，服务自己也可能开不了新线程，或者被容器里的 OOM 杀掉（所有员工都在这一个进程里）。容器设了 `restart: unless-stopped`，被杀后会自动重启，但正在进行的那几轮会中断。上限保住的是主机，保不住服务本身。
-- 员工的工作目录在 `ip-data` 卷里，写在主机磁盘上，这三项都管不到磁盘；数据库也在这个卷里，写满磁盘会影响数据库。
+- 员工的工作目录在 `ip-data` 卷里，写在主机磁盘上，这三项都管不到磁盘；数据库在 `pg-data` 卷里，和它在同一块磁盘上，写满磁盘会影响数据库。
 - 每条命令自己的上限（用 `prlimit` 限内存、文件大小和进程数，`/tmp` 的 tmpfs 加 `--size`，`ip check` 报告上限是否生效）是 backlog E-15 的第二步，还没做，见 backlog E-14。
 
 compose 的写法用 `docker compose config` 在 Compose v5.7.1 上校验过，默认值和用变量覆盖都能解析；还没在真的容器里跑过耗尽资源的命令。
@@ -236,10 +236,25 @@ git pull && docker compose up -d --build
 0 9 * * * cd /path/to/intelligent-position/rust && docker compose run --rm ip data pull --config /srv/ip/ip.yaml
 ```
 
-**备份**：先停服务，再把 `ip-data` 卷打包。卷名前面会带上 compose 项目名，默认是目录名 `rust`，可以用 `docker volume ls` 确认。
+**数据库**：存储在 compose 里的 `postgres` 服务上（PostgreSQL 17，数据卷 `pg-data`，不映射到主机端口）。第一次启动时
+`deploy/postgres-init/01-roles.sh` 建 `ip_app` 角色和 `ip` schema（填了 `TCMS_DB_PASSWORD` 时另建团队上下文系统的 `tcms_app` 和 `tcms`），
+两个角色互相没有权限。`.env` 里的 `POSTGRES_PASSWORD`、`IP_DB_PASSWORD` 只在数据卷第一次建出来时生效。
+I.P. 启动时自己建表、跑迁移。改用自己已有的 PostgreSQL（RDS、Supabase 等）时，在库里照 `01-roles.sh` 建好角色和 schema，
+把 `IP_DATABASE_URL` 换成那个库的连接串，去掉 compose 里的 `postgres` 服务。现在只支持不加密的连接，
+连外部库要 TLS 的情况还没做（backlog D-6）。Supabase 用直连地址或 session 模式的连接池地址，不能用 transaction 模式（6543 端口）。
+
+**备份**：数据库每天用 `pg_dump` 导一份，按 schema 分开（团队上下文系统的用 `-n tcms`）。不用停服务。
 
 ```bash
-docker compose stop
+docker compose exec -T postgres pg_dump -U postgres -d ip -n ip -Fc > ip-$(date +%F).dump
+```
+
+恢复到一个空库：`pg_restore -U postgres -d ip --no-owner --role=ip_app ip-2026-11-22.dump`。
+
+员工的工作目录在 `ip-data` 卷里，先停服务再打包。卷名前面会带上 compose 项目名，默认是目录名 `rust`，可以用 `docker volume ls` 确认。
+
+```bash
+docker compose stop ip
 ```
 
 ```bash
@@ -247,7 +262,7 @@ docker run --rm -v rust_ip-data:/data -v "$PWD":/backup debian:trixie-slim tar c
 ```
 
 ```bash
-docker compose start
+docker compose start ip
 ```
 
 ## 实测结果

@@ -1,7 +1,9 @@
 # 组织配置示例。复制为 ip.yaml 后修改，启动：ip serve --config ip.yaml
 # 密钥只写环境变量名，不写进本文件。
 
-data_dir: ./data                  # 数据库和各员工工作目录；相对路径以本文件所在目录为准
+data_dir: ./data                  # 各员工工作目录等；相对路径以本文件所在目录为准
+# 存储用 PostgreSQL。连接串（含密码）放在环境变量里，默认读 IP_DATABASE_URL，表放在 schema ip。
+# database: { url_env: IP_DATABASE_URL, schema: ip, max_connections: 8 }
 # auth_token_env: IP_TOKEN        # 监听非本机地址（如 0.0.0.0）时必须设置
 # allowed_origins: [https://ip.example.com]  # 反向代理把 Host 改成上游地址时，写上控制台对外的地址
 # push: { contact: mailto:ops@example.com }   # Web Push 的联系方式，推送服务有问题时找谁；发给 iPhone、Safari 要有

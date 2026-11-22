@@ -218,7 +218,11 @@ impl App {
 
         std::fs::create_dir_all(&config.data_dir)
             .with_context(|| format!("创建数据目录 {}", config.data_dir.display()))?;
-        let store = Store::open(config.data_dir.join("ip.db")).context("打开数据库")?;
+        let db = config
+            .database
+            .resolve(&|var| std::env::var(var).ok())
+            .map_err(anyhow::Error::msg)?;
+        let store = Store::connect(&db).await.context("连接数据库")?;
 
         let sandbox = match config.sandbox.mode {
             SandboxMode::Bubblewrap => Sandbox::bubblewrap(config.sandbox.network)

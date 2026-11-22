@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use ip_core::{Agent, Author, Body, ModelSlot, Role, RoleId, ThreadId};
 use ip_models::{ChatMessage, ModelRegistry, ScriptedModel, ScriptedTurn, ToolCall};
-use ip_store::Store;
 use ip_tools::{Limits, Sandbox, Toolbox};
 use tokio::sync::broadcast;
 
@@ -48,9 +47,9 @@ fn memory_off() -> RuntimeConfig {
     }
 }
 
-fn fixture(turns: Vec<ScriptedTurn>, config: RuntimeConfig) -> Fixture {
+async fn fixture(turns: Vec<ScriptedTurn>, config: RuntimeConfig) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
     let model = Arc::new(ScriptedModel::new(turns));
     let mut models = ModelRegistry::new();
     models.insert("fake", model.clone());
@@ -121,7 +120,7 @@ async fn text_reply_is_streamed_and_stored() {
         org_prompt: "公司规则：结论先行。".into(),
         ..RuntimeConfig::default()
     };
-    let f = fixture(vec![ScriptedTurn::Text("收到，开始写研报".into())], config);
+    let f = fixture(vec![ScriptedTurn::Text("收到，开始写研报".into())], config).await;
     f.spawn("a1", false);
     let mut rx = f.runtime.subscribe();
     let thread = ThreadId::new();
@@ -213,7 +212,8 @@ async fn tool_calls_are_executed_and_fed_back() {
             ScriptedTurn::Text("完成".into()),
         ],
         RuntimeConfig::default(),
-    );
+    )
+    .await;
     f.spawn("a1", true);
     let mut rx = f.runtime.subscribe();
     let thread = ThreadId::new();
@@ -268,7 +268,7 @@ async fn step_limit_stops_runaway_loops() {
         max_steps: 3,
         ..RuntimeConfig::default()
     };
-    let f = fixture(vec![ScriptedTurn::ToolCalls(vec![call])], config);
+    let f = fixture(vec![ScriptedTurn::ToolCalls(vec![call])], config).await;
     f.spawn("a1", true);
     let mut rx = f.runtime.subscribe();
     let thread = ThreadId::new();
@@ -288,7 +288,7 @@ async fn step_limit_stops_runaway_loops() {
 
 #[tokio::test]
 async fn unknown_endpoint_fails_the_turn_not_the_agent() {
-    let f = fixture(vec![ScriptedTurn::Text("ok".into())], RuntimeConfig::default());
+    let f = fixture(vec![ScriptedTurn::Text("ok".into())], RuntimeConfig::default()).await;
     f.runtime
         .spawn_agent(AgentSetup {
             agent: agent("a1"),
@@ -312,7 +312,7 @@ async fn unknown_endpoint_fails_the_turn_not_the_agent() {
 
 #[tokio::test]
 async fn spawn_and_send_errors() {
-    let f = fixture(vec![ScriptedTurn::Text("ok".into())], RuntimeConfig::default());
+    let f = fixture(vec![ScriptedTurn::Text("ok".into())], RuntimeConfig::default()).await;
     f.spawn("a1", false);
     let dup = f.runtime.spawn_agent(AgentSetup {
         agent: agent("a1"),
@@ -341,7 +341,7 @@ async fn spawn_and_send_errors() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn many_agents_work_concurrently() {
-    let f = fixture(vec![ScriptedTurn::Text("好的".into())], RuntimeConfig::default());
+    let f = fixture(vec![ScriptedTurn::Text("好的".into())], RuntimeConfig::default()).await;
     let n = 200;
     for i in 0..n {
         f.spawn(&format!("a{i}"), false);
@@ -451,7 +451,7 @@ fn history_keeps_only_own_tool_traffic_and_repairs_gaps() {
 #[tokio::test]
 async fn escalate_uses_bigger_model_and_least_busy_balances() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
     let small =
         Arc::new(ScriptedModel::new([ScriptedTurn::Text("小模型".into())]).with_delay(Duration::from_millis(20)));
     let big = Arc::new(ScriptedModel::new([ScriptedTurn::Text("大模型".into())]));
@@ -515,7 +515,8 @@ async fn long_history_is_compacted_into_a_summary() {
             ScriptedTurn::Text("第二轮回复".into()),
         ],
         config,
-    );
+    )
+    .await;
     f.spawn("a1", false);
     let mut rx = f.runtime.subscribe();
     let thread = ThreadId::new();
@@ -628,7 +629,8 @@ async fn agents_create_and_update_tasks_with_tools() {
             ScriptedTurn::Text("已派给同事".into()),
         ],
         RuntimeConfig::default(),
-    );
+    )
+    .await;
     f.spawn("a1", false);
     f.spawn("a2", false);
     let mut rx = f.runtime.subscribe();
@@ -684,7 +686,7 @@ async fn agents_create_and_update_tasks_with_tools() {
 #[tokio::test]
 async fn delegated_task_reports_back_to_the_coordinator() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
     let create = ToolCall {
         id: "c1".into(),
         name: "create_task".into(),
@@ -810,7 +812,7 @@ async fn delegation_cannot_loop() {
         max_delegation_depth: 2,
         ..RuntimeConfig::default()
     };
-    let f = fixture(vec![ScriptedTurn::Text("好".into())], config);
+    let f = fixture(vec![ScriptedTurn::Text("好".into())], config).await;
     f.spawn("a1", false);
     f.spawn("a2", false);
     let by = |id: &str| Author::Agent { agent_id: id.into() };
@@ -867,7 +869,7 @@ async fn researcher_pulls_data_and_writes_a_report() {
         )]),
         ScriptedTurn::Text("报告已写好：reports/2026-11-10-cpi.md".into()),
     ];
-    let f = fixture(turns, RuntimeConfig::default());
+    let f = fixture(turns, RuntimeConfig::default()).await;
     let mut sources = std::collections::BTreeMap::new();
     sources.insert(
         "demo".to_string(),
@@ -924,7 +926,7 @@ async fn researcher_pulls_data_and_writes_a_report() {
 #[tokio::test]
 async fn coordinator_wakes_once_all_tasks_are_back() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
     let create = |id: &str, title: &str| ToolCall {
         id: id.into(),
         name: "create_task".into(),
@@ -1051,7 +1053,7 @@ async fn daily_budget_stops_the_role_and_survives_restart() {
             })
             .unwrap();
     };
-    let make = || {
+    let make = async || {
         let mut models = ModelRegistry::new();
         let model = ScriptedModel::new([ScriptedTurn::Text("好的".into())]).with_usage(usage);
         models.insert("fake", Arc::new(model));
@@ -1066,7 +1068,7 @@ async fn daily_budget_stops_the_role_and_survives_restart() {
             },
         );
         let runtime = Runtime::new(
-            Store::open(dir.path().join("ip.db")).unwrap(),
+            ip_store::testing::store_at(dir.path().join("ip.db")).await,
             models,
             RuntimeConfig::default(),
         );
@@ -1074,7 +1076,7 @@ async fn daily_budget_stops_the_role_and_survives_restart() {
         runtime
     };
 
-    let runtime = make();
+    let runtime = make().await;
     let mut rx = runtime.subscribe();
     let thread = ThreadId::new();
     let run = async |rt: &Runtime, rx: &mut broadcast::Receiver<RuntimeEvent>| {
@@ -1104,7 +1106,7 @@ async fn daily_budget_stops_the_role_and_survives_restart() {
     drop(runtime);
 
     // 重启后账本还在。
-    let runtime = make();
+    let runtime = make().await;
     let mut rx = runtime.subscribe();
     let again = run(&runtime, &mut rx).await;
     assert!(matches!(again, RuntimeEvent::TurnFailed { .. }), "{again:?}");
@@ -1120,12 +1122,12 @@ async fn token_usage_is_tallied_per_role_and_survives_restart() {
         cached_tokens: 600,
         cache_write_tokens: 0,
     };
-    let make = || {
+    let make = async || {
         let mut models = ModelRegistry::new();
         let model = ScriptedModel::new([ScriptedTurn::Text("好的".into())]).with_usage(usage);
         models.insert("fake", Arc::new(model));
         let runtime = Runtime::new(
-            Store::open(dir.path().join("ip.db")).unwrap(),
+            ip_store::testing::store_at(dir.path().join("ip.db")).await,
             models,
             RuntimeConfig::default(),
         );
@@ -1143,7 +1145,7 @@ async fn token_usage_is_tallied_per_role_and_survives_restart() {
     };
     let role_id = role("fake/m").id;
 
-    let runtime = make();
+    let runtime = make().await;
     assert!(runtime.spend_today().await.unwrap().tokens.is_empty());
     let mut rx = runtime.subscribe();
     let thread = ThreadId::new();
@@ -1179,7 +1181,7 @@ async fn token_usage_is_tallied_per_role_and_survives_restart() {
     drop(runtime);
 
     // 重启后接着累计。
-    let runtime = make();
+    let runtime = make().await;
     let mut rx = runtime.subscribe();
     assert_eq!(
         runtime.spend_today().await.unwrap().tokens[&role_id].prompt_tokens,
@@ -1210,7 +1212,7 @@ async fn failed_turn_blocks_the_task() {
     );
     let dir = tempfile::tempdir().unwrap();
     let runtime = Runtime::new(
-        Store::open(dir.path().join("ip.db")).unwrap(),
+        ip_store::testing::store_at(dir.path().join("ip.db")).await,
         models,
         RuntimeConfig::default(),
     );
@@ -1296,7 +1298,7 @@ async fn ops_reproduces_fixes_and_verifies() {
         ),
         ScriptedTurn::Text("已修复，报告见 reports/2026-11-10-growth.md".into()),
     ];
-    let f = fixture(turns, RuntimeConfig::default());
+    let f = fixture(turns, RuntimeConfig::default()).await;
     let demo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ops-demo");
     for file in ["growth.sh", "test.sh"] {
         std::fs::copy(demo.join(file), f.workspace.path().join(file)).unwrap();
@@ -1338,7 +1340,7 @@ async fn ops_reproduces_fixes_and_verifies() {
 async fn turn_tokens_expose_org_and_data_tools_but_not_workspace_tools() {
     use ip_mcp::server::TurnTools;
 
-    let f = fixture(vec![], RuntimeConfig::default());
+    let f = fixture(vec![], RuntimeConfig::default()).await;
     let mut sources = std::collections::BTreeMap::new();
     sources.insert(
         "demo".to_string(),
@@ -1430,7 +1432,7 @@ async fn notes_and_role_memory_are_added_to_the_system_prompt() {
         ..RuntimeConfig::default()
     };
     let turns = (0..3).map(|_| ScriptedTurn::Text("好".into())).collect();
-    let f = fixture(turns, config);
+    let f = fixture(turns, config).await;
     f.spawn("a1", false);
     let store = f.runtime.store();
     let role = "researcher".into();
@@ -1470,7 +1472,7 @@ async fn role_memory_is_on_by_default_and_respects_the_switch_roles_and_limits()
     use crate::memory::{self, Layer, MemoryConfig};
 
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
     let role = "researcher".into();
     memory::put(&store, Layer::Notes, &role, "一二三四五六", 1)
         .await
@@ -1558,7 +1560,8 @@ async fn cooled_threads_are_distilled_once_per_role_and_again_after_new_messages
             ScriptedTurn::Text("无".into()),
         ],
         memory_on(),
-    );
+    )
+    .await;
     f.spawn("a1", false);
     let store = f.runtime.store();
     let role = "researcher".into();
@@ -1655,7 +1658,8 @@ async fn thread_summaries_are_consolidated_into_role_memory_only_when_they_chang
             ScriptedTurn::Text("## 怎么和这个团队配合\n## 干活的提示\n## 记忆里有什么".into()),
         ],
         memory_on(),
-    );
+    )
+    .await;
     f.spawn("a1", false);
     let store = f.runtime.store();
     let role: RoleId = "researcher".into();
@@ -1748,7 +1752,7 @@ async fn consolidation_respects_the_switch_and_takes_over_a_hand_written_memory(
         retry_after_ms: None,
     };
     // 没开记忆：有对话摘要也不合并。
-    let off = fixture(vec![ScriptedTurn::Text("新".into())], memory_off());
+    let off = fixture(vec![ScriptedTurn::Text("新".into())], memory_off()).await;
     off.spawn("a1", false);
     off.runtime
         .store()
@@ -1767,7 +1771,8 @@ async fn consolidation_respects_the_switch_and_takes_over_a_hand_written_memory(
     let f = fixture(
         vec![ScriptedTurn::Text("第一版".into()), ScriptedTurn::Text("第二版".into())],
         config,
-    );
+    )
+    .await;
     f.spawn("a1", false);
     let store = f.runtime.store();
     let role: RoleId = "researcher".into();
@@ -1848,7 +1853,8 @@ async fn memory_tools_only_see_the_callers_role_and_reads_count_as_usage() {
     let f = fixture(
         vec![ScriptedTurn::ToolCalls(calls()), ScriptedTurn::Text("好".into())],
         memory_on(),
-    );
+    )
+    .await;
     f.spawn("a1", false);
     let store = f.runtime.store();
     let (researcher, ops): (RoleId, RoleId) = ("researcher".into(), "ops".into());
@@ -1912,7 +1918,8 @@ async fn memory_tools_only_see_the_callers_role_and_reads_count_as_usage() {
     let off = fixture(
         vec![ScriptedTurn::ToolCalls(calls()), ScriptedTurn::Text("好".into())],
         memory_off(),
-    );
+    )
+    .await;
     off.spawn("a1", false);
     off.runtime
         .store()
@@ -1967,7 +1974,8 @@ async fn corrections_are_noted_only_at_a_humans_request_and_applied_on_consolida
             ScriptedTurn::Text("## 怎么和这个团队配合\n收益率写两位小数。CPI 用同比。".into()),
         ],
         memory_on(),
-    );
+    )
+    .await;
     f.spawn("a1", false);
     let store = f.runtime.store();
     let role: RoleId = "researcher".into();
@@ -2084,7 +2092,8 @@ async fn people_can_turn_memory_off_per_thread_forget_and_clear() {
             ScriptedTurn::Text("## 怎么和这个团队配合\n某次张三要求写三位小数。".into()),
         ],
         memory_on(),
-    );
+    )
+    .await;
     f.spawn("a1", false);
     let store = f.runtime.store();
     let role: RoleId = "researcher".into();
@@ -2145,7 +2154,7 @@ async fn people_can_turn_memory_off_per_thread_forget_and_clear() {
 #[tokio::test]
 async fn distilling_respects_the_switch_the_pass_limit_and_channel_threads() {
     // 没开记忆：什么都不做。
-    let off = fixture(vec![ScriptedTurn::Text("好".into())], memory_off());
+    let off = fixture(vec![ScriptedTurn::Text("好".into())], memory_off()).await;
     off.spawn("a1", false);
     one_turn(&off, None, "你好").await;
     let later = ip_core::now_ms() + 7 * HOUR_MS;
@@ -2155,7 +2164,7 @@ async fn distilling_respects_the_switch_the_pass_limit_and_channel_threads() {
     // 只对别的岗位开：这个岗位的对话不提炼。
     let mut other = memory_on();
     other.memory.roles = vec!["ops".into()];
-    let f = fixture(vec![ScriptedTurn::Text("好".into())], other);
+    let f = fixture(vec![ScriptedTurn::Text("好".into())], other).await;
     f.spawn("a1", false);
     one_turn(&f, None, "你好").await;
     assert_eq!(
@@ -2166,7 +2175,7 @@ async fn distilling_respects_the_switch_the_pass_limit_and_channel_threads() {
     // 三个凉下来的对话，其中一个是外部渠道进来的；每轮最多提炼一份。
     let mut config = memory_on();
     config.memory.max_threads_per_pass = 1;
-    let f = fixture(vec![ScriptedTurn::Text("标题：例行\n\n照常处理。".into())], config);
+    let f = fixture(vec![ScriptedTurn::Text("标题：例行\n\n照常处理。".into())], config).await;
     f.spawn("a1", false);
     let store = f.runtime.store();
     let role = "researcher".into();
@@ -2225,7 +2234,7 @@ async fn threads_delegated_from_channel_threads_follow_include_channels() {
         let mut config = memory_on();
         config.memory.include_channels = include_channels;
         config.memory.max_threads_per_pass = 10;
-        let f = fixture(vec![ScriptedTurn::Text("标题：例行\n\n照常处理。".into())], config);
+        let f = fixture(vec![ScriptedTurn::Text("标题：例行\n\n照常处理。".into())], config).await;
         f.spawn("a1", false);
         f.spawn("a2", false);
         let store = f.runtime.store();
@@ -2319,7 +2328,8 @@ async fn corrections_cannot_be_noted_in_threads_delegated_from_a_channel() {
             ScriptedTurn::Text("好".into()),
         ],
         memory_on(),
-    );
+    )
+    .await;
     f.spawn("a1", false);
     f.spawn("a2", false);
     let store = f.runtime.store();
@@ -2356,7 +2366,7 @@ async fn corrections_cannot_be_noted_in_threads_delegated_from_a_channel() {
 
 #[tokio::test]
 async fn channel_origin_follows_the_task_chain_and_fails_closed() {
-    let f = fixture(vec![ScriptedTurn::Text("好".into())], memory_on());
+    let f = fixture(vec![ScriptedTurn::Text("好".into())], memory_on()).await;
     let store = f.runtime.store();
     let now = ip_core::now_ms();
     let link = |thread: &ThreadId, origin: &ThreadId| ip_core::Task {
@@ -2431,7 +2441,11 @@ async fn distilling_is_charged_to_the_role_and_yields_when_budget_is_low() {
     );
     let mut config = memory_on();
     config.memory.max_threads_per_pass = 10;
-    let runtime = Runtime::new(Store::open(dir.path().join("ip.db")).unwrap(), models, config);
+    let runtime = Runtime::new(
+        ip_store::testing::store_at(dir.path().join("ip.db")).await,
+        models,
+        config,
+    );
     // 预算够 5 次调用。剩余不到 25% 时不再提炼。
     let mut r = role("fake/m");
     r.budget_per_day_usd = Some(0.000_5);
@@ -2482,7 +2496,7 @@ async fn failed_distilling_backs_off_and_retries() {
     let mut config = memory_on();
     // 端点不存在：每次提炼都会失败。
     config.memory.extract_model = Some("nowhere/m".into());
-    let f = fixture(vec![ScriptedTurn::Text("好".into())], config);
+    let f = fixture(vec![ScriptedTurn::Text("好".into())], config).await;
     f.spawn("a1", false);
     let store = f.runtime.store();
     let role = "researcher".into();

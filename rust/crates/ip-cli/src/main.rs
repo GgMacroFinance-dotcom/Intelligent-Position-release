@@ -231,12 +231,20 @@ async fn pull(config: PathBuf, only: Option<String>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// 连上配置里的数据库。和运行中的服务同时写同一个库没问题（事件序号由数据库里的锁排好）。
+async fn open_store(config: &ip_server::Config) -> anyhow::Result<ip_store::Store> {
+    let db = config
+        .database
+        .resolve(&|var| std::env::var(var).ok())
+        .map_err(anyhow::Error::msg)?;
+    Ok(ip_store::Store::connect(&db).await?)
+}
+
 /// `ip device pair`：直接把配对码写进数据库，运行中的服务换令牌时读得到。
 async fn device(command: DeviceCommand) -> anyhow::Result<()> {
     let DeviceCommand::Pair { config, name, url } = command;
     let config = ip_server::Config::load(&config)?;
-    std::fs::create_dir_all(&config.data_dir)?;
-    let store = ip_store::Store::open(config.data_dir.join("ip.db"))?;
+    let store = open_store(&config).await?;
     let pairing = ip_server::devices::create_pairing(&store, &name, url.as_deref(), ip_core::now_ms())
         .await
         .map_err(anyhow::Error::msg)?;
@@ -267,9 +275,8 @@ async fn context(command: ContextCommand) -> anyhow::Result<()> {
     if !config.roles.iter().any(|r| r.id == role) {
         anyhow::bail!("配置里没有岗位 {role}");
     }
-    // 服务还没启动过时数据目录不存在，先建出来，这样可以在第一次启动前就把笔记写好。
-    std::fs::create_dir_all(&config.data_dir)?;
-    let store = ip_store::Store::open(config.data_dir.join("ip.db"))?;
+    // 服务还没启动过时库里还没有表，连上时会建好，这样可以在第一次启动前就把笔记写好。
+    let store = open_store(&config).await?;
     match command {
         ContextCommand::Show { .. } => {
             for (layer, title, max) in [

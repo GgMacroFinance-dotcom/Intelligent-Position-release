@@ -674,9 +674,9 @@ pub(crate) mod tests {
         assert_eq!(decrypt(&body, &ua, &auth), b"When I grow up, I want to be a watermelon");
     }
 
-    fn push() -> (tempfile::TempDir, WebPush) {
+    async fn push() -> (tempfile::TempDir, WebPush) {
         let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(dir.path().join("ip.db")).unwrap();
+        let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
         (dir, WebPush::new(store, Some("mailto:ops@example.com".into())))
     }
 
@@ -688,7 +688,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn vapid_tokens_verify_with_the_hosts_public_key() {
-        let (_dir, p) = push();
+        let (_dir, p) = push().await;
         let key = p.public_key().await.unwrap().public_key;
         let url = reqwest::Url::parse("https://fcm.googleapis.com/fcm/send/abc").unwrap();
         let header = p.vapid_header(&url, 1_000).await.unwrap();
@@ -715,7 +715,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn only_known_push_services_can_be_subscribed() {
-        let (_dir, p) = push();
+        let (_dir, p) = push().await;
         let (_ua, key, auth) = browser_keys();
         for ok in [
             "https://fcm.googleapis.com/fcm/send/abc",
@@ -768,7 +768,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn configured_push_hosts_are_allowed() {
-        let (_dir, p) = push();
+        let (_dir, p) = push().await;
         let p = WebPush::new(p.store, None).with_hosts(&["Push.Example.com".into()]);
         let (_ua, key, auth) = browser_keys();
         p.subscribe("dev_1", "https://push.example.com/w/abc", &key, &auth, 0)
@@ -785,9 +785,9 @@ pub(crate) mod tests {
         assert_eq!(p.count("dev_1"), 1);
     }
 
-    #[test]
-    fn presence_expires() {
-        let (_dir, p) = push();
+    #[tokio::test]
+    async fn presence_expires() {
+        let (_dir, p) = push().await;
         p.presence("dev_1", true, 1_000);
         assert!(p.is_active("dev_1", 1_000 + ACTIVE_MS - 1));
         assert!(!p.is_active("dev_1", 1_000 + ACTIVE_MS));

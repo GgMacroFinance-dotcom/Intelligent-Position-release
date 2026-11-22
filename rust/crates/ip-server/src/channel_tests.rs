@@ -13,7 +13,6 @@ use ip_core::{
 };
 use ip_models::{ModelRegistry, ScriptedModel, ScriptedTurn, ToolCall};
 use ip_runtime::{AgentSetup, Runtime, RuntimeConfig};
-use ip_store::Store;
 use serde_json::json;
 
 use crate::App;
@@ -70,7 +69,7 @@ fn role(id: &str, model: &str) -> Role {
 /// 协调员 coord-1（模型脚本 `coord`）和 `macros` 个宏观研究员 macro-1、macro-2……（共用脚本 `research`）。
 /// 脚本用完后会重复最后一轮，所以最后一轮要是文字。
 pub(crate) async fn build(db: &Path, coord: Vec<ScriptedTurn>, research: Vec<ScriptedTurn>, macros: usize) -> App {
-    let store = Store::open(db).unwrap();
+    let store = ip_store::testing::store_at(db).await;
     let mut models = ModelRegistry::new();
     models.insert("coord", Arc::new(ScriptedModel::new(coord)));
     models.insert("research", Arc::new(ScriptedModel::new(research)));

@@ -80,6 +80,7 @@ pub async fn check(config: &Config, env: &(dyn Fn(&str) -> Option<String> + Sync
     }
 
     check_data_dir(config, &mut r);
+    check_database(config, &present, &mut r).await;
     match config.sandbox.mode {
         SandboxMode::Bubblewrap => match ip_tools::Sandbox::bubblewrap(config.sandbox.network).await {
             Ok(_) => r.push(Status::Ok, "工具沙箱", "bubblewrap 可用"),
@@ -208,9 +209,21 @@ fn check_data_dir(config: &Config, r: &mut Report) {
             return;
         }
     }
-    match ip_store::Store::open(dir.join("ip.db")) {
-        Ok(_) => r.push(Status::Ok, "数据目录", format!("{} 可写，数据库能打开", dir.display())),
-        Err(e) => r.push(Status::Fail, "数据目录", format!("打开数据库失败：{e}")),
+    r.push(Status::Ok, "数据目录", format!("{} 可写", dir.display()));
+}
+
+/// 连得上 PostgreSQL、迁移能跑。会建 schema 和表（和第一次启动一样）。
+async fn check_database(config: &Config, present: &(dyn Fn(&str) -> Option<String> + Sync), r: &mut Report) {
+    let db = match config.database.resolve(&|var| present(var)) {
+        Ok(db) => db,
+        Err(e) => {
+            r.push(Status::Fail, "数据库", e);
+            return;
+        }
+    };
+    match ip_store::Store::connect(&db).await {
+        Ok(_) => r.push(Status::Ok, "数据库", format!("连上了，schema {}", db.schema)),
+        Err(e) => r.push(Status::Fail, "数据库", format!("连不上：{e}")),
     }
 }
 
@@ -421,22 +434,26 @@ channels:
         std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
         let endpoint = fake_endpoint().await;
         let slack = FakeSlack::start().await;
-        let config = Config::from_yaml(&yaml(
+        let mut config = Config::from_yaml(&yaml(
             dir.path(),
             &endpoint,
             &slack.api_url(),
             &codex.display().to_string(),
         ))
         .unwrap();
+        let (_db, database) = crate::config::test_database();
+        config.database = database;
 
         let all = |var: &str| match var {
             "EP_KEY" => Some("good".to_string()),
+            ip_store::testing::URL_ENV => std::env::var(var).ok(),
             _ => Some(format!("{var}-value")),
         };
         let r = check(&config, &all).await;
         assert!(!r.failed(), "{}", r.render());
         assert_eq!(status_of(&r, "访问令牌").status, Status::Ok);
         assert_eq!(status_of(&r, "数据目录").status, Status::Ok);
+        assert_eq!(status_of(&r, "数据库").status, Status::Ok);
         assert_eq!(status_of(&r, "工具沙箱").status, Status::Warn);
         // m1 在列表里，m2 不在；用引擎的 ops 岗位的模型不检查。
         let ep = status_of(&r, "端点 ep");

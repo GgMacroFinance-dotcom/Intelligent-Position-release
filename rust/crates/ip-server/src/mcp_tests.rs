@@ -486,7 +486,7 @@ async fn agent_gets_tools_of_a_server_that_reconnects() {
     );
 
     let dir = tempfile::tempdir().unwrap();
-    let store = ip_store::Store::open(dir.path().join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
     let model = Arc::new(ip_models::ScriptedModel::new([
         ip_models::ScriptedTurn::Text("第一轮".into()),
         ip_models::ScriptedTurn::Text("第二轮".into()),

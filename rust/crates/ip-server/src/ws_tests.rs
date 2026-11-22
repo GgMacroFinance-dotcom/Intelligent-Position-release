@@ -5,7 +5,6 @@ use futures_util::{SinkExt, StreamExt};
 use ip_core::{Agent, ModelSlot, OrgSpec, Role};
 use ip_models::{ModelRegistry, Price, ScriptedModel, ScriptedTurn, Usage};
 use ip_runtime::{AgentSetup, Runtime, RuntimeConfig};
-use ip_store::Store;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
@@ -39,7 +38,7 @@ async fn start_with_schedules(
     turns: Vec<ScriptedTurn>,
 ) -> Server {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
     let mut models = ModelRegistry::new();
     let usage = Usage {
         prompt_tokens: 1000,
@@ -943,24 +942,26 @@ fn rejects_inconsistent_config() {
 #[tokio::test]
 async fn builds_app_from_config_without_secrets_leaking_into_yaml() {
     let dir = tempfile::tempdir().unwrap();
+    let (_db, database) = crate::config::test_database();
     let text = EXAMPLE.replace(
         "api_key_env: DEEPSEEK_API_KEY, ",
         "api_key_env: IP_TEST_KEY_THAT_IS_NOT_SET, ",
     );
     std::fs::write(dir.path().join("ip.yaml"), &text).unwrap();
-    let c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    let mut c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    c.database = database.clone();
     assert_eq!(c.data_dir, dir.path().join("./data"));
     let err = App::from_config(&c).await.err().expect("缺少密钥应报错");
     assert!(format!("{err:#}").contains("IP_TEST_KEY_THAT_IS_NOT_SET"), "{err:#}");
 
     let text = EXAMPLE.replace("api_key_env: DEEPSEEK_API_KEY, ", "");
     std::fs::write(dir.path().join("ip.yaml"), &text).unwrap();
-    let c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    let mut c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    c.database = database.clone();
     let app = App::from_config(&c).await.unwrap();
     assert_eq!(app.runtime().agents().len(), 2);
     assert!(dir.path().join("data/workspaces/macro-1").is_dir());
     assert!(!dir.path().join("data/workspaces/macro-2").exists());
-    assert!(dir.path().join("data/ip.db").exists());
     drop(app);
 
     // 指定工作目录：相对路径按配置文件所在目录换算；目录不存在时启动报错。
@@ -969,7 +970,8 @@ async fn builds_app_from_config_without_secrets_leaking_into_yaml() {
         "{ id: macro-1, role: macro, name: 小宏, workspace: proj }",
     );
     std::fs::write(dir.path().join("ip.yaml"), &text).unwrap();
-    let c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    let mut c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    c.database = database.clone();
     assert_eq!(
         c.agents[0].workspace.as_deref(),
         Some(dir.path().join("proj").as_path())
@@ -984,6 +986,7 @@ async fn builds_app_from_config_without_secrets_leaking_into_yaml() {
 #[tokio::test]
 async fn app_starts_when_an_mcp_server_is_unreachable() {
     let dir = tempfile::tempdir().unwrap();
+    let (_db, database) = crate::config::test_database();
     let text = EXAMPLE.replace("api_key_env: DEEPSEEK_API_KEY, ", "").replacen(
         "agents:",
         "mcp_servers:\n  broken: { command: /nonexistent/mcp-server, roles: [macro] }\n  \
@@ -991,7 +994,8 @@ async fn app_starts_when_an_mcp_server_is_unreachable() {
         1,
     );
     std::fs::write(dir.path().join("ip.yaml"), &text).unwrap();
-    let c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    let mut c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    c.database = database.clone();
     let app = App::from_config(&c).await.unwrap();
     assert_eq!(app.runtime().agents().len(), 2);
     let hub = app.mcp.as_ref().unwrap();
@@ -1180,7 +1184,7 @@ async fn send_without_agent_follows_router() {
     assert_eq!(rules["data"]["from_console"], true);
 
     // 重启后沿用控制台保存的规则。
-    let store = Store::open(s._dir.path().join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(s._dir.path().join("ip.db")).await;
     let runtime = Runtime::new(store, ModelRegistry::new(), RuntimeConfig::default());
     for a in s.app.runtime().agents() {
         let role = s.app.org.roles[0].clone();
@@ -1515,7 +1519,7 @@ fn schedules_are_validated() {
 #[tokio::test]
 async fn memory_background_task_distills_cooled_threads() {
     let dir = tempfile::tempdir().unwrap();
-    let store = Store::open(dir.path().join("ip.db")).unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
     let mut models = ModelRegistry::new();
     let model = Arc::new(ScriptedModel::new(vec![
         ScriptedTurn::Text("好的".into()),

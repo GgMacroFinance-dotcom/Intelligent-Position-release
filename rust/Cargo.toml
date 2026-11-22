@@ -37,7 +37,9 @@ regex = { version = "1", default-features = false, features = ["std", "unicode",
 hyper-util = { version = "0.1.21", default-features = false, features = ["client-proxy"] }
 reqwest = { version = "0.13", features = ["json"] }
 ts-rs = { version = "12", features = ["serde-json-impl"] }
-rusqlite = { version = "0.41", features = ["bundled"] }
+# PostgreSQL（D-6，docs/ip/postgres-migration-plan.md）。不开 TLS 以外的可选功能。
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+deadpool-postgres = { version = "0.14", default-features = false, features = ["rt_tokio_1"] }
 serde-saphyr = "2"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "v7", "serde"] }

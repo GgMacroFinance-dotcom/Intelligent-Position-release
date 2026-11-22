@@ -6,6 +6,27 @@
 #   docker compose run --rm ip check --config /srv/ip/ip.yaml
 #   docker compose up -d --build
 services:
+  # 存储用的 PostgreSQL（docs/ip/postgres-migration-plan.md）。团队上下文系统以后也连这一个，用自己的 schema。
+  # 不映射到主机端口，只有同一个 compose 网络里的容器连得到。
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ip
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?在 .env 里设 POSTGRES_PASSWORD}
+      # deploy/postgres-init/01-roles.sh 第一次启动时用它们建 ip_app、tcms_app 两个角色。
+      IP_DB_PASSWORD: ${IP_DB_PASSWORD:?在 .env 里设 IP_DB_PASSWORD}
+      TCMS_DB_PASSWORD: ${TCMS_DB_PASSWORD:-}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./deploy/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ip"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    stop_grace_period: 60s
+
   ip:
     build:
       context: .
@@ -17,6 +38,12 @@ services:
     image: intelligent-position:latest
     restart: unless-stopped
     env_file: .env
+    environment:
+      # 密码用 openssl rand -hex 24 生成，只有十六进制字符，直接放进连接串不用转义。
+      IP_DATABASE_URL: postgres://ip_app:${IP_DB_PASSWORD}@postgres:5432/ip
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       # 只给本机。要从别处访问控制台，放在 HTTPS 反向代理后面，或者用 ssh -L 转发。
       - "127.0.0.1:7878:7878"
@@ -47,3 +74,4 @@ services:
 volumes:
   ip-data:
   public-data:
+  pg-data:

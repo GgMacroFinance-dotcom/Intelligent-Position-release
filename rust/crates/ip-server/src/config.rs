@@ -1,7 +1,8 @@
 //! `ip.yaml`：服务的全部配置，一个文件描述整个组织。
 //!
 //! ```yaml
-//! data_dir: ./data                 # 相对路径以配置文件所在目录为准
+//! data_dir: ./data                 # 员工工作目录等；相对路径以配置文件所在目录为准
+//! database: { url_env: IP_DATABASE_URL, schema: ip }  # PostgreSQL；连接串（含密码）放在环境变量里
 //! auth_token_env: IP_TOKEN         # 访问令牌所在的环境变量；监听非本机地址时必填
 //! allowed_origins: [https://ip.example.com]  # 反向代理改写了 Host 时，控制台对外的地址
 //! push: { contact: mailto:ops@example.com }   # Web Push 的联系方式，推送服务有问题时找谁；Safari 要有
@@ -34,6 +35,10 @@ use serde::Deserialize;
 pub struct Config {
     #[serde(default = "default_data_dir")]
     pub data_dir: PathBuf,
+    /// 存储用的 PostgreSQL（`docs/ip/postgres-migration-plan.md`）。省略时连接串从 `IP_DATABASE_URL` 读，
+    /// 表放在 schema `ip`。
+    #[serde(default)]
+    pub database: DatabaseConfig,
     #[serde(default)]
     pub auth_token_env: Option<String>,
     /// 除同源外，还允许从哪些地址打开的控制台连 `/ws`（`scheme://主机[:端口]`）。
@@ -117,6 +122,68 @@ fn push_host_ok(host: &str) -> bool {
 
 fn default_data_dir() -> PathBuf {
     PathBuf::from("data")
+}
+
+/// 连哪个 PostgreSQL。连接串里有密码，所以 `ip.yaml` 只写环境变量的名字。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DatabaseConfig {
+    /// 连接串所在的环境变量，如 `postgres://ip_app:密码@127.0.0.1:5432/ip`。
+    #[serde(default = "default_database_url_env")]
+    pub url_env: String,
+    /// I.P. 的表放在这个 schema 里。和团队上下文系统共用一个库时，它用 `tcms`。
+    #[serde(default = "default_database_schema")]
+    pub schema: String,
+    /// 读连接池的大小；写入另有一条连接。
+    #[serde(default = "default_database_max_connections")]
+    pub max_connections: usize,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            url_env: default_database_url_env(),
+            schema: default_database_schema(),
+            max_connections: default_database_max_connections(),
+        }
+    }
+}
+
+impl DatabaseConfig {
+    /// 从环境变量读出连接串。`env` 是读环境变量的函数，`ip check` 测试时可以换掉。
+    pub fn resolve(&self, env: &dyn Fn(&str) -> Option<String>) -> Result<ip_store::DbConfig, String> {
+        let url = env(&self.url_env)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| format!("环境变量 {} 没有设置（PostgreSQL 连接串）", self.url_env))?;
+        let mut config = ip_store::DbConfig::new(url);
+        config.schema.clone_from(&self.schema);
+        config.max_connections = self.max_connections;
+        Ok(config)
+    }
+}
+
+/// 测试用：一个临时 schema 和指向它的配置。返回的 `TestDb` 活着时 schema 留着。
+#[cfg(test)]
+pub(crate) fn test_database() -> (ip_store::testing::TestDb, DatabaseConfig) {
+    let db = ip_store::testing::TestDb::new();
+    let config = DatabaseConfig {
+        url_env: ip_store::testing::URL_ENV.into(),
+        schema: db.config().schema.clone(),
+        max_connections: 2,
+    };
+    (db, config)
+}
+
+fn default_database_url_env() -> String {
+    "IP_DATABASE_URL".into()
+}
+
+fn default_database_schema() -> String {
+    ip_store::DbConfig::DEFAULT_SCHEMA.into()
+}
+
+fn default_database_max_connections() -> usize {
+    ip_store::DbConfig::DEFAULT_MAX_CONNECTIONS
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
