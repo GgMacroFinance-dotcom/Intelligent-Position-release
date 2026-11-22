@@ -127,6 +127,7 @@ stop_gw
 start_gw
 orl="http://127.0.0.1:$port/openrouter/api/v1"
 cp "$here/fixtures/ip-prices.yaml" "$work/ip.yaml"
+chmod 600 "$work/ip.yaml"
 printf '{"model-b": "vendor/model-b"}' >"$work/prices-map.json"
 prices() { python3 "$here/model_prices.py" --config "$work/ip.yaml" --openrouter-url "$orl" "$@"; }
 expect 价格缺了     1 "local/model-a：配置里还没有价格" prices --map "$work/prices-map.json"
@@ -144,6 +145,12 @@ if ls "$work"/ip.yaml.bak-* >/dev/null 2>&1 && grep -q "model-b: { input: 0.1, c
   echo "ok   写回的内容（有备份、新价格写进去、别的行原样）"
 else
   echo "FAIL 写回的内容不对"; sed 's/^/     /' "$work/ip.yaml"; fail=1
+fi
+mode=$(python3 -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$work/ip.yaml")
+if [ "$mode" = 600 ]; then
+  echo "ok   写回后权限没变（还是 600）"
+else
+  echo "FAIL 写回后权限变成了 $mode，应为 600"; fail=1
 fi
 expect 价格没变     0 "价格没有变化" prices --map "$work/prices-map.json"
 stop_gw
