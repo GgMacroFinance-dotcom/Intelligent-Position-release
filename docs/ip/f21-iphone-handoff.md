@@ -1,37 +1,42 @@
-# F-21 之五：iPhone 的锁屏推送（交接给在 Mac 上做的工程师）
+# F-21 之五：iPhone 的锁屏推送（交接给有 Mac 和 iPhone 的工程师）
 
-2026-11-21 写。方案见 `docs/ip/m2-spec.md` D-35。主机、中转、Android 已经做完，iPhone 只差 App 这一半。
+2026-11-21 写，2026-11-22 改：代码已经写完（方案见 `docs/ip/m2-spec.md` D-35），剩下的是用维护者的苹果开发者账号签名、在真 iPhone 上收一次真推送。没做这一步之前，不写“可用”。
 
 ## 已经有的
 
 | 部分 | 在哪 | 状态 |
 | --- | --- | --- |
-| 主机放行中转（`ip.yaml` 的 `push.hosts`，负载上限 2800 字节） | `rust/crates/ip-server/src/webpush.rs` | PR #40 已合并 |
-| 推送中转 `ip-relay` | `rust/crates/ip-relay/` | PR #41 已合并 |
-| Android：登记、开关、FCM 收推送、解密弹通知 | `apps/flutter/lib/src/push/lock_push.dart`，`apps/flutter/android/app/src/main/kotlin/dev/intelligent_position/ip_app/` | 和这份说明同一个 PR |
+| 主机放行中转（`ip.yaml` 的 `push.hosts`，负载上限 2800 字节） | `rust/crates/ip-server/src/webpush.rs` | 已合并（#40） |
+| 推送中转 `ip-relay` | `rust/crates/ip-relay/` | 已合并（#41） |
+| Android：登记、开关、FCM 收推送、解密弹通知 | `apps/flutter/lib/src/push/lock_push.dart`，`apps/flutter/android/app/src/main/kotlin/dev/intelligent_position/ip_app/` | 已合并，只在假中转上测过 |
+| iPhone：登记、开关、APNs 令牌、通知扩展解密改写、点通知 | `apps/flutter/ios/`（见下） | 本 PR，编过、解密测试跑过，没签名、没收过真推送 |
 
-中转对 APNs 已经按 iOS 的需要发：`mutable-content: 1` 的通知，标题“intelligent-position”、正文“有一条新通知”是解不开时的兜底，密文放在 `userInfo["ip"]`（base64，标准字母表、带填充），`apns-collapse-id` 是主机的 `Topic`，`apns-priority` 10 是“要我处理的”、5 是其余的。
+中转对 APNs 按 iOS 的需要发：`mutable-content: 1` 的通知，标题“intelligent-position”、正文“有一条新通知”是解不开时的兜底，密文放在 `userInfo["ip"]`（标准 base64，带填充），`apns-collapse-id` 是主机的 `Topic`（由标签算出），`apns-priority` 10 是“要我处理的”、5 是其余的。
 
-## iPhone 要做的
+## iPhone 这一半怎么做的
 
-1. **Dart 这边几乎不用改**：`lock_push.dart` 的 `PushChannel` 是平台无关的接口。`platformPushChannel()` 里加 iOS：可以直接复用 `AndroidPushChannel`（改名成 `NativePushChannel`），只是 `platform` 返回 `apns`。方法通道名 `ip/push`，约定和 Android 一样：
-   - `available` → Bool：这个构建能不能收推送（有 `aps-environment` 权利、`IP_PUSH_RELAY` 给了）。
-   - `registration` → `{token, p256dh, auth}`：`token` 是 APNs 设备令牌的**小写十六进制**（中转只认十六进制）；`p256dh` 是 65 字节未压缩 P-256 公钥、`auth` 是 16 字节随机数，都是 base64url 不带填充。没有就生成一套存起来。
-   - `reset`：删掉密钥，调 `unregisterForRemoteNotifications`。
-   - `takeTapped` → String?：App 是被点推送通知打开的，返回 `thread_id`（没有对话时空串），只给一次。
-   - 原生调 Dart：`tapped(threadId)`、`tokenChanged`。
-2. **Runner（`ios/Runner/AppDelegate.swift`）**：`registerForRemoteNotifications`，在 `didRegisterForRemoteNotificationsWithDeviceToken` 里拿令牌回给 `registration`；令牌和上次不同时调 `tokenChanged`。
-3. **密钥**：用 CryptoKit 的 `P256.KeyAgreement.PrivateKey` 生成，存在钥匙串里，放在 App 和通知扩展共用的钥匙串分组（`keychain-access-groups` 权利），扩展才读得到。`kSecAttrAccessibleAfterFirstUnlock`，锁屏时也要能读。
-4. **通知扩展（新建 Notification Service Extension target）**：`didReceive` 里取 `userInfo["ip"]`，按 RFC 8291 解密（`aes128gcm`，只有一条记录）：
-   - 格式：盐 16 字节 | 记录大小 4 | 密钥 id 长度 1（=65）| 发送方临时公钥 65 | 密文。
-   - `ecdh = sharedSecretFromKeyAgreement(发送方公钥)`；`IKM = HKDF(salt: auth, ikm: ecdh, info: "WebPush: info\0" + 自己的公钥 + 发送方公钥, 32)`；`CEK = HKDF(salt: 盐, ikm: IKM, info: "Content-Encoding: aes128gcm\0", 16)`；`NONCE = HKDF(…, "Content-Encoding: nonce\0", 12)`；AES-128-GCM 解开，去掉末尾的 0 和最后的分隔符 `0x02`。
-   - 解出 JSON `{title, body, tag, thread_id?, silent?}`：改写通知的标题、正文，`threadIdentifier` 用 `thread_id`，`userInfo` 里带上 `thread_id` 供点开用。
-   - `silent` 是“已在别处处理”：iOS 不能不显示，用 `removeDeliveredNotifications` 撤掉同一件事的旧通知，再显示这条（collapse-id 相同，会替换）。
-   - Kotlin 版可以照抄逻辑：`WebPushCrypto.kt`。测试用 RFC 8291 附录 A 的例子，数值在 `android/app/src/test/.../WebPushCryptoTest.kt`。
-5. **点通知**：`UNUserNotificationCenterDelegate` 的 `didReceive response` 取 `thread_id` 调 `tapped`。注意 `flutter_local_notifications` 也会把自己设成 delegate，两边要串起来（先看它的 `userInfo` 是不是自己的通知）。
-6. **权利和配置**：`aps-environment`（开发版 `development`）、`keychain-access-groups`；Bundle ID 要和中转的 `IP_RELAY_APNS_TOPIC` 一致；开发版 App 要配 `IP_RELAY_APNS_SANDBOX=1` 的中转（或者另起一个）。都要维护者的苹果开发者账号签名。
-7. **文档**：做完在同一个 PR 里改 `apps/flutter/README.md`（锁屏推送一条、验证到哪一步）、`docs/ip/apps-plan.md` F-21 那一行、`docs/ip/backlog.md` 和 `rust/README.md` 的勾选项；`rust/CONTRIBUTING.md` 敏感路径的“推送”一类加上 iOS 存私钥、解密的文件。
+- **Dart**：`lock_push.dart` 的 `NativePushChannel`（原来的 `AndroidPushChannel`）两个平台共用，iPhone 的 `platform` 是 `apns`。方法通道 `ip/push`：`available`、`registration`（`{token, p256dh, auth}`，令牌是小写十六进制）、`reset`、`takeTapped`；原生调 Dart 的 `tapped`、`tokenChanged`。
+- **App（`ios/Runner/`）**：`AppDelegate.swift` 在启动时把自己设成通知中心的代理（flutter_local_notifications 的说明也要这一步；之前没设，照插件的代码 F-16 的本地通知在 iPhone 上点了收不到回调，没在真机上试过），锁屏推送的通知自己处理，其余的经 `super` 交给插件。`IpPush.swift`：`registerForRemoteNotifications`，等令牌最多 30 秒；锁屏推送开着时每次启动重新要一次，令牌变了调 `tokenChanged`；点通知时 App 还没起来就先存着等 `takeTapped`。App 在前台时到的推送不弹（和 F-16 一样）。
+- **共用（`ios/Shared/`，App 和通知扩展都编进去）**：`WebPushCrypto.swift` 照 RFC 8291 解密（CryptoKit，和 `WebPushCrypto.kt` 同一套逻辑），`alertId` 和 Dart 的一样；`PushKeychain.swift` 存私钥（32 字节）和 `auth`（16 字节），放在钥匙串分组 `<Team ID>.dev.intelligentposition.ipApp.push`，属性是“首次解锁后、只在这台设备”；Team ID 运行时从钥匙串读出来（探测项落在哪个分组），不用在构建设置里写；`PushNotice.swift` 是改写后的通知长什么样、怎么认出同一件事。
+- **通知扩展（`ios/NotificationService/`，target `NotificationService`，Bundle ID `dev.intelligentposition.ipApp.NotificationService`）**：解开后改写标题、正文，`threadIdentifier` 用 `thread_id`，`userInfo` 记下对话和标签；解不开、超时显示兜底。iOS 不让通知扩展什么都不显示，所以 `silent` 是撤掉同一件事的旧通知（App 自己弹的按 `alertId` 的十进制 id，之前的推送按记下的标签），再显示一条不响铃、不亮屏（`interruptionLevel = .passive`）的；同一件事已经显示过时（App 在后台还连着时弹过），新到的推送撤掉那条、自己不响铃。
+- **权利**：`Runner/Runner.entitlements` 是 `aps-environment`（`development`）和两个钥匙串分组（第一个是 App 自己的，主机令牌照旧只有 App 读得到；第二个和扩展共用）；`NotificationService/NotificationService.entitlements` 只有共用分组。工程文件里 Runner 依赖并嵌入扩展（“Embed Foundation Extensions”在“Thin Binary”之前）。
 
-## 验证
+## 验证到哪一步
 
-没在真 iPhone、真 APNs 上收到过之前，不写“可用”。能做的：通知扩展的解密用 RFC 8291 的例子写 XCTest；`flutter build ios --no-codesign` 编过；有账号后在真机上配对、开锁屏推送、杀掉 App，让主机推一条审批卡。
+- Swift 的解密测试（`RunnerTests/WebPushCryptoTests.swift`，6 个，用 RFC 8291 附录 A 的例子，和 `WebPushCryptoTest.kt` 同一组数）：2026-11-22 在 Linux 容器里用 Swift 6.0.3 和 swift-crypto（接口和 CryptoKit 一样）跑过，全过。钥匙串、通知扩展、AppDelegate 这些只有苹果平台才有的代码在 Linux 上编不了。
+- CI 的 `flutter-ios` 工作流（`.github/workflows/flutter-ios.yml`，改到 `apps/flutter/ios/` 时在 macOS 上跑）：`flutter build ios --debug --no-codesign`、`flutter build ios --debug --simulator`，在模拟器上跑 `WebPushCryptoTests` 和 `PushNoticeTests`（共 8 个）。结果见本 PR 的 CI。
+- `flutter test`：`NativePushChannel` 的方法通道约定用模拟的原生端测过。
+- 没签名，没在真 iPhone、真 APNs 上收过推送。
+
+## 剩下要做的（要维护者的苹果开发者账号）
+
+1. 苹果开发者后台：建 App ID `dev.intelligentposition.ipApp`（打开 Push Notifications、Keychain Sharing）和 `dev.intelligentposition.ipApp.NotificationService`（Keychain Sharing）；建一把 APNs 的 `.p8` 签名密钥。用 Xcode 的自动签名时这些大多会自动建。
+2. Xcode 打开 `apps/flutter/ios/Runner.xcworkspace`，给 `Runner` 和 `NotificationService` 两个 target 选团队。不要把团队 ID 提交进仓库（`DEVELOPMENT_TEAM` 留在本地）。
+3. 中转：`IP_RELAY_APNS_KEY_FILE`、`IP_RELAY_APNS_KEY_ID`、`IP_RELAY_APNS_TEAM_ID`、`IP_RELAY_APNS_TOPIC=dev.intelligentposition.ipApp`；开发版 App 要 `IP_RELAY_APNS_SANDBOX=1`（或者另起一个）。主机的 `ip.yaml` 把中转的域名写进 `push.hosts`。
+4. 真机：`flutter run --release --dart-define=IP_PUSH_RELAY=https://<中转>`，配对主机，允许通知，“我”页看“锁屏推送”变成开着。然后：
+   - 锁屏、从多任务里划掉 App，让主机推一条审批卡：锁屏上显示审批的标题和正文（不是“有一条新通知”），点开进那个对话。
+   - 在控制台批掉这张卡：手机上那条换成“已在别处处理”，不响铃、不亮屏。
+   - 推一条没有对话的（比如任务受阻）：点开去“待办”。
+   - “我”页关掉锁屏推送：主机上的订阅删掉，之后的通知不再推到这台手机。
+   - 重启手机、不解锁时推一条：显示兜底“有一条新通知”（钥匙串还读不到），解锁后再推的正常。
+5. 跑通后改 `apps/flutter/README.md` 的“验证到哪一步”、`docs/ip/backlog.md` 和 `docs/ip/apps-plan.md` 的 F-21（⑥）、`rust/README.md` 的勾选项，写明在哪台 iPhone、哪个 iOS 版本上跑通的。
