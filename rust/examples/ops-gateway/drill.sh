@@ -1,7 +1,7 @@
 #!/bin/sh
 # 故障演练：对着假中转站（fake_gateway.py）和假主机命令（fake-bin/）逐个注入故障，
 # 检查 gateway_check.py 能不能报出来；再演练 release_check.py（新版本）、upstream_models.py（上游新增模型）
-# 和 usage_report.py（日报）。全部场景都符合预期时退出码为 0。
+# 、model_prices.py（模型价格）和 usage_report.py（日报）。全部场景都符合预期时退出码为 0。
 # 用法：sh drill.sh。只用本机，不连真中转站，不要密钥（探测令牌是假的 sk-fake-probe）。
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -122,6 +122,38 @@ expect 上游不用密钥时 2 "密钥不对" python3 "$here/upstream_models.py"
 expect 上游密钥不对 2 "密钥不对" env UPSTREAM_KEY=wrong python3 "$here/upstream_models.py" \
   --base-url "http://127.0.0.1:$port" --upstream-url "$up" --upstream-key-env UPSTREAM_KEY
 stop_gw
+
+# 模型价格：假 OpenRouter 目录对比 harness 配置的 prices，人确认后写回。
+start_gw
+orl="http://127.0.0.1:$port/openrouter/api/v1"
+cp "$here/fixtures/ip-prices.yaml" "$work/ip.yaml"
+printf '{"model-b": "vendor/model-b"}' >"$work/prices-map.json"
+prices() { python3 "$here/model_prices.py" --config "$work/ip.yaml" --openrouter-url "$orl" "$@"; }
+expect 价格缺了     1 "local/model-a：配置里还没有价格" prices --map "$work/prices-map.json"
+expect 同名好几个   1 "好几个同名的（other/model-b、vendor/model-b）" prices
+before=$(cat "$work/ip.yaml")
+prices --map "$work/prices-map.json" >/dev/null 2>&1
+if [ "$(cat "$work/ip.yaml")" = "$before" ]; then
+  echo "ok   不确认不写（没加 --write 时配置没动）"
+else
+  echo "FAIL 不确认不写：没加 --write 配置却变了"; fail=1
+fi
+expect 确认后写回   0 "已写回" prices --map "$work/prices-map.json" --write
+if ls "$work"/ip.yaml.bak-* >/dev/null 2>&1 && grep -q "model-b: { input: 0.1, cached_input: 0.01, output: 0.5 }" "$work/ip.yaml" \
+  && grep -q "# 价格：美元 / 百万 token" "$work/ip.yaml" && grep -q "default: local/model-a   # 本机上游" "$work/ip.yaml"; then
+  echo "ok   写回的内容（有备份、新价格写进去、别的行原样）"
+else
+  echo "FAIL 写回的内容不对"; sed 's/^/     /' "$work/ip.yaml"; fail=1
+fi
+expect 价格没变     0 "价格没有变化" prices --map "$work/prices-map.json"
+stop_gw
+start_gw --fault or_price=vendor/model-a:12 --fault or_gone=vendor/model-b
+orl="http://127.0.0.1:$port/openrouter/api/v1"
+expect 价格变了     1 "fake/model-a：价格变了 { input: 10, cached_input: 1, cache_write: 12.5, output: 50 } → { input: 12," \
+  prices --map "$work/prices-map.json"
+expect OpenRouter下架 1 "vendor/model-b 在 OpenRouter 上没有" prices --map "$work/prices-map.json"
+stop_gw
+expect OpenRouter查不了 2 "查不了 OpenRouter" prices --openrouter-url "http://127.0.0.1:$port/none"
 
 # 日报：假 psql 在 SQLite 上跑同样的 SQL。
 day_start=$(python3 -c 'import datetime as d; tz=d.timezone(d.timedelta(hours=8)); print(int(d.datetime.combine(d.date(2026,11,22), d.time(), tz).timestamp()))')

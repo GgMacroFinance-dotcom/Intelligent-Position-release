@@ -1,0 +1,23 @@
+# 演练用的 harness 配置片段：只有 model_prices.py 会读的部分。
+server:
+  bind: 127.0.0.1:0
+
+endpoints:
+  fake:
+    base_url: http://127.0.0.1:1/v1
+    # 价格：美元 / 百万 token
+    prices:
+      model-a: { input: 10, cached_input: 1, cache_write: 12.5, output: 50 }
+  local:
+    base_url: http://127.0.0.1:2/v1
+    api: responses
+
+roles:
+  - id: coordinator
+    model:
+      default: fake/model-a
+  - id: worker
+    model: { default: fake/model-b }
+  - id: ops
+    model:
+      default: local/model-a   # 本机上游，同一个模型
