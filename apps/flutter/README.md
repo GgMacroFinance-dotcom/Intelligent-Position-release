@@ -161,5 +161,5 @@ flutter test integration_test -d <设备> \
 - 待办和看报告（F-14）：同一台主机上把手写的报告放进员工工作目录，在真的 Linux 版（手机宽度）里从完成的任务结果打开报告、在报告里打开上一份、把受阻的任务改成已取消，主机上核对过状态。
 - 任务页和岗位页（F-15）：真的 Linux 版（手机宽度）里用真键盘新建了任务（选负责人、选截止日期），主机上署了设备名、另开了执行对话；岗位页显示了主机算的当天费用和缓存命中，从岗位页点开和员工的新对话。
 - 锁屏推送（F-21 之四）：`flutter test` 里 7 个测试用假的推送通道和假中转走登记、换令牌、开关、点通知；Kotlin 的解密用 RFC 8291 附录 A 的例子在 JVM 上核对过（`./gradlew :app:testDebugUnitTest`，4 个）。没用真的 Firebase 项目、没在真手机上收过推送。
-- 锁屏推送（F-21 之五，iPhone）：2026-11-22，Swift 的解密测试（RFC 8291 附录 A 的例子，6 个）在 Linux 容器里用 Swift 6.0.3 和接口相同的 swift-crypto 跑过；`flutter test` 里用模拟的原生端测过方法通道 `ip/push` 的约定。CI 的 `flutter-ios` 工作流在 macOS 上编 iOS 版、在模拟器上跑 8 个 Swift 测试，结果见引入它的 PR。没签名，没在真 iPhone、真 APNs 上收过推送；真机上怎么验在 `docs/ip/f21-iphone-handoff.md`。
-- Android：2026-11-21 在容器里装了 Android SDK，`flutter build apk --debug` 编过（改锁屏推送之前和之后各一次），没在模拟器或真手机上跑过。iOS、macOS、Windows 没编过也没跑过（容器里没有 Xcode）；CI 的安装包任务没触发过。真手机、真主机上的 HTTPS、Tailscale 都没试过。
+- 锁屏推送（F-21 之五，iPhone）：2026-11-22，Swift 的解密测试（RFC 8291 附录 A 的例子，6 个）在 Linux 容器里用 Swift 6.0.3 和接口相同的 swift-crypto 跑过；`flutter test` 里用模拟的原生端测过方法通道 `ip/push` 的约定。CI 的 `flutter-ios` 工作流（macOS、Flutter 3.47.9）第一次跑（#50）：`flutter build ios --debug --no-codesign` 和 `--simulator` 都编过（App 带着通知扩展），8 个 Swift 测试（解密 6 个、通知改写 2 个）在 iPhone 模拟器上全过。没签名，没在真 iPhone、真 APNs 上收过推送；真机上怎么验在 `docs/ip/f21-iphone-handoff.md`。
+- Android：2026-11-21 在容器里装了 Android SDK，`flutter build apk --debug` 编过（改锁屏推送之前和之后各一次），没在模拟器或真手机上跑过。iOS 只在 CI 上编过、在模拟器上跑过 Swift 单元测试，App 没在模拟器或真机上打开过；macOS、Windows 没编过也没跑过（容器里没有 Xcode）；CI 的安装包任务没触发过。真手机、真主机上的 HTTPS、Tailscale 都没试过。

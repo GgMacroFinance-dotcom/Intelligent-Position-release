@@ -24,7 +24,7 @@
 ## 验证到哪一步
 
 - Swift 的解密测试（`RunnerTests/WebPushCryptoTests.swift`，6 个，用 RFC 8291 附录 A 的例子，和 `WebPushCryptoTest.kt` 同一组数）：2026-11-22 在 Linux 容器里用 Swift 6.0.3 和 swift-crypto（接口和 CryptoKit 一样）跑过，全过。钥匙串、通知扩展、AppDelegate 这些只有苹果平台才有的代码在 Linux 上编不了。
-- CI 的 `flutter-ios` 工作流（`.github/workflows/flutter-ios.yml`，改到 `apps/flutter/ios/` 时在 macOS 上跑）：`flutter build ios --debug --no-codesign`、`flutter build ios --debug --simulator`，在模拟器上跑 `WebPushCryptoTests` 和 `PushNoticeTests`（共 8 个）。结果见本 PR 的 CI。
+- CI 的 `flutter-ios` 工作流（`.github/workflows/flutter-ios.yml`，改到 `apps/flutter/ios/` 时在 macOS 上跑）：`flutter build ios --debug --no-codesign`、`flutter build ios --debug --simulator`，在模拟器上跑 `WebPushCryptoTests` 和 `PushNoticeTests`（共 8 个）。2026-11-22 第一次跑（#50）：两种都编过，8 个全过。App 没在模拟器或真机上打开过。
 - `flutter test`：`NativePushChannel` 的方法通道约定用模拟的原生端测过。
 - 没签名，没在真 iPhone、真 APNs 上收过推送。
 
