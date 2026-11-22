@@ -14,14 +14,15 @@ sandbox:
 max_steps: 16                     # 一轮里最多调用模型的次数
 context_budget_chars: 60000       # 上下文超过这么多字时，把较早的对话压缩成摘要；0 不压缩
 
-# 岗位记忆（docs/ip/context-memory-design.md）：默认关。打开后，后台从结束的对话里提炼摘要（闲置 6 小时后，
+# 岗位记忆（docs/ip/context-memory-design.md）：默认开，所有岗位都开；不想要就写 memory: { enabled: false }。
+# 开着时，后台从结束的对话里提炼摘要（闲置 6 小时后，
 # 费用记在岗位账上），再按岗位合并成岗位记忆摘要，放进这个岗位每个员工的系统提示词；员工多了 memory_search、
 # memory_read、memory_note 三个工具。控制台“记忆”页可以看、改、抹掉、清空，也能按对话关掉记忆；
 # 命令行用 ip context show 查看，摘要也可以人来写：ip context set --config ip.yaml --role macro-researcher memory --file 摘要.txt
 # 2026-11-15 的真实模型实测见 docs/ip/memory-2026-11-15-real-run.md：合并用岗位自己的模型（gpt-6-luna）就够，换 gpt-6-astra 约贵 25 倍。
 # 决策者笔记不受这个开关影响，写了就生效：ip context set --config ip.yaml --role macro-researcher notes --file 笔记.txt
 # memory:
-#   enabled: true
+#   enabled: true                # 默认就是 true；写 false 关掉
 #   roles: [macro-researcher]     # 省略表示所有岗位
 #   notes_max_chars: 4000
 #   summary_max_chars: 10000
@@ -113,9 +114,10 @@ roles:
   # 执行层第二个岗位：运维测试。工作目录指向要维护的项目（见 agents 里的 workspace）。
   - id: ops-tester
     name: 运维测试
-    # budget_per_day_usd: 2        # 这个岗位配了 Codex 引擎时，还要在 engines 里写 price
+    # budget_per_day_usd: 2        # 这个岗位配了外部引擎（Codex、Claude Code）时，还要在 engines 里写 price
     description: |
-      维护服务器和数据管道，编写并运行测试，发现问题后定位原因并给出修复。
+      维护服务器和数据管道，编写并运行测试，发现问题后定位原因并给出修复。首要职责是维护模型中转站
+      （New API 类网关，巡检和演练脚本见 examples/ops-gateway/）；工作目录里有 AGENTS.md 时先读它，部署信息和规矩以它为准。
       工作流程：
       1. 先复现：用 shell 跑出问题（测试命令、出错的脚本、日志），记下命令和关键输出。复现不了就如实说明，不要猜。
       2. 定位：读代码和日志找到根因，说清楚是哪一行、为什么错；不要用“偶发”“环境问题”当结论。
@@ -162,6 +164,34 @@ schedules:
     to: { role: macro-researcher }
     text: 写一份上周的宏观周报：CPI、PPI、PMI、利率有新数据的都覆盖到，按岗位说明的报告结构写进 reports/。
     enabled: false                # 确认模型费用后改成 true
+  - id: daily-gateway-check
+    description: 每天早上巡检模型中转站
+    cron: "0 8 * * *"
+    utc_offset: "+08:00"
+    to: { role: ops-tester }
+    text: 按 AGENTS.md 的“巡检”一节跑 gateway_check.py。正常就记一行；有警告或故障就查明原因、写报告，用 ask_human 给出推荐的处理。
+    enabled: false                # 员工的工作目录准备好（AGENTS.md、baseline.json、探测令牌）后改成 true
+  - id: daily-upstream-models
+    description: 每天检查上游有没有新模型
+    cron: "30 8 * * *"
+    utc_offset: "+08:00"
+    to: { role: ops-tester }
+    text: 按 AGENTS.md 的“上游新模型”一节跑 upstream_models.py。有新增的查官方价格，用 ask_human 请人确认上架；没有变化就记一行。
+    enabled: false
+  - id: weekly-new-api-release
+    description: 每周一检查 New API 有没有新发布
+    cron: "0 9 * * 1"
+    utc_offset: "+08:00"
+    to: { role: ops-tester }
+    text: 按 AGENTS.md 的“新版本”一节跑 release_check.py。有更新就写升级方案，用 ask_human 请人定升不升。
+    enabled: false
+  - id: nightly-gateway-report
+    description: 每晚 23:00 报告当天中转站的用量和报错
+    cron: "0 23 * * *"
+    utc_offset: "+08:00"
+    to: { role: ops-tester }
+    text: 按 AGENTS.md 的“日报”一节跑 usage_report.py，把要点写成几句话回复，附上报告路径。
+    enabled: false
   - id: daily-data-check
     description: 工作日检查公开数据是否按时更新
     cron: "30 9 * * 1-5"
@@ -200,7 +230,7 @@ data_sources:
 #     # agent: macro-1                 # 可选：这个渠道的消息都交给固定员工，不走路由
 # 路由规则可以按 Slack 用户写：when: { from: ["slack:U012ABCDEF"] }（显示名谁都能改，所以只认用户 id）。
 
-# 外部引擎：把某个岗位的每一轮交给 Codex，不走内置循环（见 docs/ip/m2-spec.md 第 6 节）。
+# 外部引擎：把某个岗位的每一轮交给 Codex 或 Claude Code，不走内置循环（见 docs/ip/m2-spec.md 第 6 节）。
 # Codex 用自己的 shell 和改文件工具，跑在它自带的沙箱里；组织工具（create_task、update_task、ask_human 等）
 # 通过本服务的 /mcp 回调，每轮一个令牌。这个岗位的员工需要工作目录（不能 tools: false）。
 # engines:
@@ -210,10 +240,23 @@ data_sources:
 #     # model: <Codex 模型名>        # 省略时用 Codex 的默认模型
 #     api_key_env: CODEX_API_KEY     # 密钥只放环境变量
 #     sandbox: workspace-write       # read-only | workspace-write
-#     network: false                 # Codex 里执行的命令能否联网
+#     network: false                 # Codex 里执行的命令能否联网；维护中转站（examples/ops-gateway）要 true
 #     turn_timeout_secs: 1800
 #     # price: { input: 2, cached_input: 0.1, cache_write: 2.5, output: 10 }   # 美元 / 百万 token；设了 budget_per_day_usd 时必填。
 #     #   这是 Codex 默认模型 gpt-6.1-sol 的官方价（2026-11-14 核对）；换了 model 就换成那个模型的价
+#
+# 也可以交给 Claude Code（见 docs/ip/m2-spec.md D-36）。它没有 Codex 那样的系统沙箱，靠权限规则限定：
+# 文件工具只能动工作目录，Claude Code 认为安全的简单命令自动放行，别的命令要写进 allowed_tools 才能跑。
+# 放行的命令不受工作目录限制，能执行项目里的代码，只在可信的项目上放行。
+#   ops-tester:
+#     kind: claude_code
+#     command: claude                # 可执行文件
+#     # model: <模型名>              # 省略时用 Claude Code 的默认模型
+#     api_key_env: ANTHROPIC_API_KEY # 必填，密钥只放环境变量
+#     access: workspace-write        # read-only | workspace-write
+#     allowed_tools: ["Bash(cargo test:*)"]   # 预先放行的权限规则，原样交给 claude --allowedTools
+#     turn_timeout_secs: 1800
+#     # price: { input: 0, cached_input: 0, cache_write: 0, output: 0 }   # 美元 / 百万 token；设了 budget_per_day_usd 时必填
 
 # 外部 MCP 服务器：工具以 mcp__<名字>__<工具> 出现在员工的工具列表里。有两种接法：
 #   url      远程服务器（Streamable HTTP）。必须是 https，只有本机地址可以用 http；

@@ -302,16 +302,16 @@ async fn check_engine(
     present: &(dyn Fn(&str) -> Option<String> + Sync),
     r: &mut Report,
 ) {
-    let ip_engines::EngineConfig::Codex(codex) = engine;
-    let item = format!("岗位 {role} 的 Codex 引擎");
-    if let Some(var) = &codex.api_key_env
+    let item = format!("岗位 {role} 的 {} 引擎", engine.label());
+    let command = engine.command();
+    if let Some(var) = engine.api_key_env()
         && present(var).is_none()
     {
         r.push(Status::Fail, item, format!("环境变量 {var} 没有设置"));
         return;
     }
     // 和真正派活时一样不带 harness 的环境变量（里面有模型和渠道的密钥），只给 PATH 和 HOME。
-    let mut run = tokio::process::Command::new(&codex.command);
+    let mut run = tokio::process::Command::new(command);
     run.arg("--version")
         .env_clear()
         .stdin(std::process::Stdio::null())
@@ -325,24 +325,20 @@ async fn check_engine(
     match tokio::time::timeout(Duration::from_secs(20), run).await {
         Ok(Ok(out)) if out.status.success() => {
             let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            r.push(Status::Ok, item, format!("{} 可以运行：{version}", codex.command));
+            r.push(Status::Ok, item, format!("{} 可以运行：{version}", command));
         }
         Ok(Ok(out)) => r.push(
             Status::Fail,
             item,
             format!(
                 "{} --version 失败（{}）：{}",
-                codex.command,
+                command,
                 out.status,
                 String::from_utf8_lossy(&out.stderr).trim()
             ),
         ),
-        Ok(Err(e)) => r.push(Status::Fail, item, format!("找不到或运行不了 {}：{e}", codex.command)),
-        Err(_) => r.push(
-            Status::Fail,
-            item,
-            format!("{} --version 超过 20 秒没有返回", codex.command),
-        ),
+        Ok(Err(e)) => r.push(Status::Fail, item, format!("找不到或运行不了 {}：{e}", command)),
+        Err(_) => r.push(Status::Fail, item, format!("{} --version 超过 20 秒没有返回", command)),
     }
 }
 

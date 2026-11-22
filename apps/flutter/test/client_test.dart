@@ -71,6 +71,98 @@ void main() {
     await c.dispose();
   });
 
+  test('改任务状态、列报告、读报告的请求', () async {
+    final task = {
+      'id': 'k1',
+      'title': 't',
+      'description': '',
+      'status': 'in_progress',
+      'role': null,
+      'assignee': null,
+      'thread_id': null,
+      'origin_thread_id': null,
+      'result': null,
+      'depth': 0,
+      'due_ms': null,
+      'created_by': {'kind': 'system'},
+      'created_at_ms': 1,
+      'updated_at_ms': 2,
+    };
+    final h = FakeHost()
+      ..handlers.addAll({
+        'update_task': (_) => task,
+        'list_reports': (_) => [
+          {'agent_id': 'macro-1', 'path': 'reports/a.md', 'bytes': 3, 'modified_ms': 1},
+        ],
+        'read_report': (req) => {
+          'agent_id': req['agent_id'],
+          'path': req['path'],
+          'text': '# A',
+          'modified_ms': 1,
+          'truncated': false,
+        },
+      });
+    final c = clientFor(h)..connect();
+    await pumpEventQueue();
+    expect((await c.updateTask('k1', status: 'in_progress')).status, 'in_progress');
+    expect(h.requests.last, {'id': 1, 'type': 'update_task', 'task_id': 'k1', 'status': 'in_progress'});
+    expect((await c.listReports()).single.agentId, 'macro-1');
+    expect(h.requests.last, {'id': 2, 'type': 'list_reports', 'limit': 200});
+    expect((await c.readReport('macro-1', 'reports/a.md')).text, '# A');
+    expect(h.requests.last['path'], 'reports/a.md');
+    await c.dispose();
+  });
+
+  test('关闭时不等对方回关闭帧', () async {
+    final h = FakeHost();
+    final c = clientFor(h)..connect();
+    await pumpEventQueue();
+    // 假连接的 close() 永远不完成，像一台不回关闭帧的主机。
+    final never = Completer<void>();
+    final socket = h.last;
+    h.closeHook = () => never.future;
+    await c.close().timeout(const Duration(seconds: 1));
+    expect(c.status, ConnStatus.closed);
+    expect(socket.closeCalled, isTrue);
+    await c.dispose();
+  });
+
+  test('新建任务、今天的花费的请求', () async {
+    final h = FakeHost()
+      ..handlers.addAll({
+        'create_task': (req) => {
+          'id': 'k9',
+          'title': req['title'],
+          'description': req['description'] ?? '',
+          'status': 'open',
+          'role': null,
+          'assignee': req['assignee'],
+          'thread_id': null,
+          'origin_thread_id': null,
+          'result': null,
+          'depth': 0,
+          'due_ms': req['due_ms'],
+          'created_by': {'kind': 'human', 'name': '张三的手机'},
+          'created_at_ms': 1,
+          'updated_at_ms': 1,
+        },
+        'spend_today': (_) => {
+          'date': '2026-11-21',
+          'roles': <String, Object>{},
+          'routing_usd': 0,
+          'tokens': <String, Object>{},
+          'routing_tokens': {'prompt_tokens': 0, 'completion_tokens': 0, 'cached_tokens': 0, 'cache_write_tokens': 0},
+        },
+      });
+    final c = clientFor(h)..connect();
+    await pumpEventQueue();
+    final t = await c.createTask('写周报', assignee: 'macro-1', dueMs: 99);
+    expect(t.dueMs, 99);
+    expect(h.requests.last, {'id': 1, 'type': 'create_task', 'title': '写周报', 'assignee': 'macro-1', 'due_ms': 99});
+    expect((await c.spendToday()).date, '2026-11-21');
+    await c.dispose();
+  });
+
   test('事件按序号记下，断开后带 since 和 epoch 重连', () async {
     final h = FakeHost();
     final c = clientFor(h)..connect();

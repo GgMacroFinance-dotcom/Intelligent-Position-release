@@ -272,8 +272,11 @@ impl App {
             let home_root = config.data_dir.join("engines");
             let engine: Arc<dyn ip_runtime::engine::Engine> = match ec {
                 ip_engines::EngineConfig::Codex(c) => ip_engines::CodexEngine::new(c.clone(), api_key, home_root),
+                ip_engines::EngineConfig::ClaudeCode(c) => {
+                    ip_engines::ClaudeCodeEngine::new(c.clone(), api_key, home_root)
+                }
             };
-            tracing::info!(role = %role, "岗位使用外部引擎");
+            tracing::info!(role = %role, engine = ec.label(), "岗位使用外部引擎");
             engines.insert(role.clone(), engine);
         }
         let org = config.org();
@@ -333,10 +336,10 @@ impl App {
             .await
             .map_err(anyhow::Error::msg)
             .context("读通知设置")?;
-        app.push = Arc::new(crate::webpush::WebPush::new(
-            app.runtime.store().clone(),
-            config.push.contact.clone(),
-        ));
+        app.push = Arc::new(
+            crate::webpush::WebPush::new(app.runtime.store().clone(), config.push.contact.clone())
+                .with_hosts(&config.push.hosts),
+        );
         app.push
             .load()
             .await

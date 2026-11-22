@@ -1,15 +1,22 @@
 name: flutter
 
-# 各平台 App（apps/flutter，backlog F-13，docs/ip/apps-plan.md 第 9 节）。改了它才跑检查，只用 Linux。
+# 各平台 App（apps/flutter，backlog F-13，docs/ip/apps-plan.md 第 9 节）。改了它、或者 Rust 导出的协议类型
+# （rust/web/src/types，App 的 wire.dart 从它生成，F-20）才跑检查，只用 Linux。
 # 五个平台的安装包只在手动触发或打 app-v* 标签时打：macOS、Windows 的 Actions 分钟数贵。
 on:
   pull_request:
-    paths: ["apps/flutter/**", ".github/workflows/flutter.yml"]
+    paths: ["apps/flutter/**", "rust/web/src/types/**", ".github/workflows/flutter.yml"]
   push:
     branches: [main]
-    paths: ["apps/flutter/**", ".github/workflows/flutter.yml"]
+    paths: ["apps/flutter/**", "rust/web/src/types/**", ".github/workflows/flutter.yml"]
     tags: ["app-v*"]
   workflow_dispatch:
+    inputs:
+      build:
+        description: 安装包范围
+        type: choice
+        default: all
+        options: [all, macos-preview]
 
 concurrency:
   group: flutter-${{ github.ref }}
@@ -25,6 +32,7 @@ defaults:
 
 jobs:
   check:
+    if: inputs.build != 'macos-preview'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -43,14 +51,17 @@ jobs:
         run: flutter test
       - name: Dependency licenses
         run: dart run tool/check_licenses.dart
-      # 原生插件（安全存储、打开链接）的 C++ 代码也要编得过。
+      # 协议类型从 Rust 生成（F-20）：rust/web/src/types 改了却没重新生成 wire.dart 时失败。
+      - name: Protocol types up to date
+        run: dart run tool/gen_protocol.dart --check
+      # 原生插件（安全存储、打开链接、托盘）的 C++ 代码也要编得过。托盘（F-17）要 appindicator。
       - name: Install system libraries
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libsecret-1-dev ninja-build
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libsecret-1-dev libayatana-appindicator3-dev ninja-build
       - name: Build Linux
         run: flutter build linux --release
 
   installers:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/app-v')
+    if: (github.event_name == 'workflow_dispatch' && inputs.build != 'macos-preview') || startsWith(github.ref, 'refs/tags/app-v')
     needs: check
     strategy:
       fail-fast: false
@@ -87,7 +98,7 @@ jobs:
           cache: true
       - name: Install system libraries
         if: runner.os == 'Linux' && matrix.target == 'linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libsecret-1-dev ninja-build
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libsecret-1-dev libayatana-appindicator3-dev ninja-build
       - run: flutter pub get --enforce-lockfile
       # 没有签名证书：Android 用调试签名，macOS 第一次打开要右键“打开”，Windows 会弹 SmartScreen 提示。
       - run: flutter build ${{ matrix.target }} --release
@@ -95,4 +106,67 @@ jobs:
         with:
           name: ip-app-${{ matrix.os }}-${{ strategy.job-index }}
           path: apps/flutter/${{ matrix.out }}
+          if-no-files-found: error
+
+  macos-preview:
+    if: github.event_name == 'workflow_dispatch' && inputs.build == 'macos-preview'
+    runs-on: macos-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Build macOS test host
+        run: flutter build macos --debug --no-pub
+      - name: Test first launch and saved window frame
+        run: |
+          xcodebuild test -workspace macos/Runner.xcworkspace -scheme Runner \
+            -configuration Debug -destination "platform=macOS,arch=$(uname -m)" \
+            -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/window.xcresult" \
+            -only-testing:RunnerTests/RunnerTests/testFirstLaunchFitsVisibleScreen \
+            -only-testing:RunnerTests/RunnerTests/testRestoresSavedSizeAndPosition
+          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/window.xcresult" > "$RUNNER_TEMP/window-tests.json"
+          python3 - "$RUNNER_TEMP/window-tests.json" <<'PY'
+          import json, sys
+          def cases(nodes):
+              for node in nodes:
+                  if node.get("nodeType") == "Test Case":
+                      yield node["name"].removesuffix("()"), node["result"]
+                  yield from cases(node.get("children", []))
+          with open(sys.argv[1]) as report:
+              results = dict(cases(json.load(report)["testNodes"]))
+          print(results)
+          if results != {"testFirstLaunchFitsVisibleScreen": "Passed", "testRestoresSavedSizeAndPosition": "Passed"}:
+              sys.exit("Expected both AppKit window tests to pass")
+          PY
+      - name: Build macOS release
+        run: flutter build macos --release --no-pub
+      - name: Create and verify disk image
+        run: |
+          app="build/macos/Build/Products/Release/intelligent-position.app"
+          executable="$app/Contents/MacOS/intelligent-position"
+          file "$executable"
+          lipo -archs "$executable"
+          codesign --verify --deep --strict "$app"
+          stage="$(mktemp -d)"
+          ditto "$app" "$stage/intelligent-position.app"
+          ln -s /Applications "$stage/Applications"
+          mkdir -p build/preview
+          image="build/preview/Intelligent-Position-${GITHUB_SHA:0:8}.dmg"
+          hdiutil create -volname "Intelligent Position" -srcfolder "$stage" -format UDZO "$image"
+          hdiutil verify "$image"
+          (cd build/preview && shasum -a 256 *.dmg > SHA256SUMS)
+          cat build/preview/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Intelligent-Position-macOS-${{ github.sha }}
+          path: apps/flutter/build/preview/
+          compression-level: 0
+          retention-days: 30
           if-no-files-found: error

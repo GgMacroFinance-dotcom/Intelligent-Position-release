@@ -10,30 +10,78 @@ import '../app_state.dart';
 import '../protocol/client.dart';
 import '../protocol/models.dart';
 import 'common.dart';
-import 'home_page.dart' show ConnectionBanner;
 
 /// 列表和对话并排的最小宽度。
 const double kWideChat = 840;
 
-class ChatPage extends StatelessWidget {
-  const ChatPage({super.key, required this.onOpenThread, required this.onNewChat});
+class ChatPage extends StatefulWidget {
+  const ChatPage({
+    super.key,
+    required this.active,
+    required this.threadOpen,
+    required this.onOpenThread,
+    required this.onNewChat,
+    required this.onShowDetail,
+    required this.onBack,
+  });
 
+  final bool active;
+  final bool threadOpen;
   final void Function(String threadId) onOpenThread;
   final VoidCallback onNewChat;
+  final VoidCallback onShowDetail;
+  final VoidCallback onBack;
+
+  @override
+  State<ChatPage> createState() => _ChatPageState();
+}
+
+class _ChatPageState extends State<ChatPage> {
+  final _navigator = GlobalKey<NavigatorState>();
+  static const _detail = ValueKey('thread-detail');
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, box) {
-        if (box.maxWidth < kWideChat) return ThreadList(onOpen: onOpenThread, onNew: onNewChat);
+        final split = box.maxWidth >= kWideChat;
+        final list = ThreadList(onOpen: widget.onOpenThread, onNew: widget.onNewChat);
         return Row(
           children: [
-            SizedBox(
-              width: 320,
-              child: ThreadList(onOpen: onOpenThread, onNew: onNewChat),
+            if (split) ...[SizedBox(width: 320, child: list), const VerticalDivider(width: 1)],
+            Expanded(
+              child: NavigatorPopHandler<void>(
+                enabled: widget.active,
+                onPopWithResult: (_) {
+                  if (widget.active) _navigator.currentState!.maybePop();
+                },
+                child: Navigator(
+                  key: _navigator,
+                  requestFocus: widget.active,
+                  onDidRemovePage: (page) {
+                    if (page.key == _detail && !split && widget.threadOpen) widget.onBack();
+                  },
+                  pages: [
+                    if (!split)
+                      MaterialPage<void>(
+                        key: const ValueKey('thread-list'),
+                        child: Material(child: list),
+                      ),
+                    if (split || widget.threadOpen)
+                      MaterialPage<void>(
+                        key: _detail,
+                        child: Focus(
+                          canRequestFocus: false,
+                          onFocusChange: (focused) {
+                            if (focused && widget.active && !widget.threadOpen) widget.onShowDetail();
+                          },
+                          child: Material(child: ThreadScreen(compact: !split)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
-            const VerticalDivider(width: 1),
-            const Expanded(child: ThreadView()),
           ],
         );
       },
@@ -74,26 +122,23 @@ class ThreadList extends StatelessWidget {
   }
 }
 
-/// 窄屏上点开的一屏对话。
+/// 分栏只改变标题和列表，同一条详情路由保留滚动位置、输入法和草稿。
 class ThreadScreen extends StatelessWidget {
-  const ThreadScreen({super.key});
+  const ThreadScreen({super.key, required this.compact});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final id = state.threadId;
     final agent = id == null ? null : state.threadAgent[id];
-    return Scaffold(
-      appBar: AppBar(title: Text(id == null ? '新对话' : (agent == null ? '对话' : state.agentName(agent)))),
-      body: const SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            ConnectionBanner(),
-            Expanded(child: ThreadView()),
-          ],
-        ),
-      ),
+    return Column(
+      children: [
+        if (compact)
+          AppBar(primary: false, title: Text(id == null ? '新对话' : (agent == null ? '对话' : state.agentName(agent)))),
+        const Expanded(child: ThreadView()),
+      ],
     );
   }
 }
@@ -138,7 +183,11 @@ class _ThreadViewState extends State<ThreadView> {
       for (final m in state.messages) _message(state, m),
       for (final MapEntry(key: agentId, value: text) in state.drafts.entries)
         if (id == null || state.threadAgent[id] == null || state.threadAgent[id] == agentId)
-          _Bubble(who: state.agentName(agentId), note: '正在输入…', child: MessageMarkdown(text)),
+          _Bubble(
+            who: state.agentName(agentId),
+            note: '正在输入…',
+            child: MessageMarkdown(text, reportHint: agentId),
+          ),
       if (id != null && state.turnNote[id] != null)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -181,7 +230,11 @@ class MessageTile extends StatelessWidget {
         who: who,
         note: time,
         human: m.author is HumanAuthor,
-        child: m.author is HumanAuthor ? SelectableText(text) : MessageMarkdown(text),
+        child: switch (m.author) {
+          HumanAuthor() => SelectableText(text),
+          AgentAuthor(:final agentId) => MessageMarkdown(text, reportHint: agentId),
+          SystemAuthor() => MessageMarkdown(text),
+        },
       ),
       ToolCallBody(:final name, :final input) => _Folded(title: '调用工具 $name', text: _pretty(input)),
       ToolResultBody(:final ok, :final output) => _Folded(title: ok ? '工具结果' : '工具失败', text: output, failed: !ok),

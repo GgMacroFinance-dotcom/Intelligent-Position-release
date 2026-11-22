@@ -161,6 +161,14 @@ Codex 自带一份 bubblewrap，也靠这三项才能在容器里跑；不用 Co
     contact: mailto:ops@example.com
   ```
 
+- 手机 App 的锁屏推送经推送中转送到 APNs、FCM（m2-spec D-35，还在开发）。自己搭中转的，把中转的域名写进 `push.hosts`，主机才肯往那里发：
+
+  ```yaml
+  push:
+    contact: mailto:ops@example.com
+    hosts: [push.example.com]
+  ```
+
 - 主机第一次用到推送时生成自己的密钥，存在数据库里。删了数据库或换了主机，各设备打开控制台时会自动重新订阅。
 - 以上只用假推送服务测过，没在真的手机上收过推送。
 
@@ -185,6 +193,34 @@ Codex 自带一份 bubblewrap，也靠这三项才能在容器里跑；不用 Co
 **手机和电脑 App（Flutter）**：[`apps/flutter`](../../apps/flutter/README.md) 是 Android、iOS、macOS、Windows、Linux 都能用的 App（2026-11-21 起，backlog F-13）。打开后填控制台的对外地址和上面生成的配对码（或者粘贴配对链接）就能连上，令牌存在系统的安全存储里；主机必须配了 `auth_token_env`，不用改别的。现在能看待办、处理审批卡、和员工对话；通知、托盘、任务页还在做。安装包还没发布，要在仓库的 Actions 里手动运行 `flutter` 工作流打出来；只在 Linux 上跑过。
 
 **不想把控制台放在公网：用 Tailscale**。主机和手机、电脑装上 Tailscale 并登进同一个 tailnet，打开 MagicDNS，就能用 `http://<主机名>.<tailnet>.ts.net:7878` 访问，流量在 WireGuard 隧道里加密。这时 `docker-compose.yml` 里的端口映射可以只绑 tailnet 的地址，`ip.yaml` 里照样要设 `auth_token_env`（监听非本机地址时必须设）。想要 `https://`（装 PWA 需要）可以用 `tailscale serve --https=443 http://127.0.0.1:7878`，Tailscale 会给 `*.ts.net` 签证书。以上 Tailscale 的用法照官方文档写，没有在这个项目里实测过。
+
+## 资源上限
+
+工具沙箱隔离了文件系统、网络和进程，但现在不限资源：员工的一条 shell 命令在超时之前可以不停 fork、吃光内存，或者往 `/tmp` 写大文件（沙箱里的 `/tmp` 是 tmpfs，占的是内存）。命令是模型写的，模型的输入里有网页、MCP 工具结果、渠道消息这些外部内容，所以不只是模型自己写错的问题（backlog E-15）。
+
+`docker-compose.yml` 给容器设了三项上限，防的是这些命令拖垮整台主机：
+
+| 项 | 默认值 | 防什么 | 在 `.env` 里用哪个变量改 |
+| --- | --- | --- | --- |
+| `pids_limit` | 1024 | fork 炸弹把主机的进程数用光 | `IP_PIDS_LIMIT` |
+| `mem_limit`、`memswap_limit` | 2g | 吃光内存、往 `/tmp` 写大文件，触发主机的 OOM、杀掉主机上别的进程；两项取同一个值，超出的部分不会换到 swap 上 | `IP_MEM_LIMIT` |
+| `cpus` | 1 | 死循环占满主机所有核 | `IP_CPUS` |
+
+**怎么按主机调**：
+
+- 默认值按 2 核 4 GB 的小主机取，给主机自己和 Docker 留出一半。主机更大、要跑 Codex 或编译项目时调高，比如 4 核 16 GB 的主机可以设 `IP_MEM_LIMIT=8g`、`IP_CPUS=3`。
+- `IP_CPUS` 不能大于主机的核数（`nproc` 看），否则容器起不来。
+- `IP_PIDS_LIMIT` 算的是容器里所有的进程和线程：服务自己的线程、MCP 子进程（比如 macro-mcp 的 Node.js）、Codex、员工的命令。员工多、Codex 并发跑编译时，`docker stats` 的 `PIDS` 一列接近上限就调高。
+- `IP_MEM_LIMIT` 至少给服务、MCP 子进程和最大的一条命令留够；`docker stats` 的 `MEM USAGE` 经常接近上限，或者 `docker inspect` 里 `OOMKilled` 是 `true`，就调高。
+- 改完 `.env` 后执行 `docker compose up -d` 让新值生效；`docker inspect --format '{{.HostConfig.Memory}} {{.HostConfig.PidsLimit}} {{.HostConfig.NanoCpus}}' <容器名>` 看实际生效的值。
+
+**这是容器整体的兜底，不是每条命令的上限。** 服务进程和所有员工的命令共用这一份额度，所以：
+
+- 一条命令把进程数或内存用光时，服务自己也可能开不了新线程，或者被容器里的 OOM 杀掉（所有员工都在这一个进程里）。容器设了 `restart: unless-stopped`，被杀后会自动重启，但正在进行的那几轮会中断。上限保住的是主机，保不住服务本身。
+- 员工的工作目录在 `ip-data` 卷里，写在主机磁盘上，这三项都管不到磁盘；数据库也在这个卷里，写满磁盘会影响数据库。
+- 每条命令自己的上限（用 `prlimit` 限内存、文件大小和进程数，`/tmp` 的 tmpfs 加 `--size`，`ip check` 报告上限是否生效）是 backlog E-15 的第二步，还没做，见 backlog E-14。
+
+compose 的写法用 `docker compose config` 在 Compose v5.7.1 上校验过，默认值和用变量覆盖都能解析；还没在真的容器里跑过耗尽资源的命令。
 
 ## 日常维护
 

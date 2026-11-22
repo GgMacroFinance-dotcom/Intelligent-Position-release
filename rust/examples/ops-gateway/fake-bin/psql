@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+# 假的 psql，只给演练用：从标准输入读 SQL，在 FAKE_DB 指的 SQLite 文件上执行，照 psql -At 的格式输出（列之间用 |）。
+# 参数一律忽略。补上 PostgreSQL 有、SQLite 没有的 chr()。
+import os
+import sqlite3
+import sys
+
+db = sqlite3.connect(os.environ["FAKE_DB"])
+db.create_function("chr", 1, chr)
+sql = sys.stdin.read()
+for stmt in (s for s in sql.split(";") if s.strip()):
+    for row in db.execute(stmt):
+        print("|".join("" if v is None else str(v) for v in row))

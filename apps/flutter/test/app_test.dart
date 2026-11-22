@@ -152,6 +152,66 @@ void main() {
     await h.stop(tester);
   });
 
+  testWidgets('扣除侧栏后进入单栏，跨断点保留会话、草稿与返回操作', (tester) async {
+    final h = Harness();
+    await h.savePaired();
+    await h.start(tester, size: const Size(880, 760));
+    await tester.tap(find.text('对话'));
+    await tester.pumpAndSettle();
+    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.byTooltip('发送'), findsNothing);
+    await tester.tap(find.text('最近 CPI 怎么样'));
+    await tester.pumpAndSettle();
+    final thread = h.state.threadId;
+    expect(thread, isNotNull);
+    expect(find.byType(BackButton), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '未发出的草稿');
+    final editor = tester.widget<TextField>(find.byType(TextField)).controller;
+
+    for (final width in [1280.0, 880.0, 390.0, 800.0]) {
+      tester.view.physicalSize = Size(width, 760);
+      await tester.pumpAndSettle();
+      expect(h.state.threadId, thread);
+      expect(tester.widget<TextField>(find.byType(TextField)).controller, same(editor));
+      expect(editor!.text, '未发出的草稿');
+      expect(find.byType(BackButton), width == 1280 ? findsNothing : findsOneWidget);
+    }
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('最近 CPI 怎么样'), findsOneWidget);
+    expect(find.byTooltip('发送'), findsNothing);
+
+    await tester.tap(find.text('待办'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('查看对话'));
+    await tester.pumpAndSettle();
+    expect(h.state.threadId, 't1');
+    expect(find.byTooltip('发送'), findsOneWidget);
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新对话'));
+    await tester.pumpAndSettle();
+    expect(h.state.threadId, isNull);
+    expect(find.byTooltip('发送'), findsOneWidget);
+    await h.stop(tester);
+  });
+
+  testWidgets('宽屏默认输入框中的草稿在收窄后仍可编辑', (tester) async {
+    final h = Harness();
+    await h.savePaired();
+    await h.start(tester, size: const Size(1280, 800));
+    await tester.tap(find.text('对话'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '尚未创建对话');
+    await tester.pump();
+    tester.view.physicalSize = const Size(390, 800);
+    await tester.pumpAndSettle();
+    expect(find.byType(BackButton), findsOneWidget);
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, '尚未创建对话');
+    await h.stop(tester);
+  });
+
   testWidgets('主机吊销了这台设备：提示重新配对，不再重连', (tester) async {
     final h = Harness();
     await h.savePaired();

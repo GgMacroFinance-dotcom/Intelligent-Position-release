@@ -40,7 +40,7 @@ WebSocket 接口在 `/ws`。发一条消息：
 `/mcp` 是给 Codex 这类外部引擎用的 MCP 服务端（Streamable HTTP），开放的是组织工具、本岗位的数据工具和外部 MCP 工具，不含 shell 和文件工具。
 它只认运行时为每一轮签发的令牌（`Runtime::grant_turn`），不认上面的访问令牌，并且只接受本机地址的请求。详见[《M2 规格》](../docs/ip/m2-spec.md) D-17 到 D-19。
 
-启动前可以先检查配置：`ip check --config ip.yaml` 逐项检查模型端点的 key、工具沙箱、数据源、MCP 服务器、Codex 和 Slack 令牌能不能用，有失败时退出码为 1。它不发消息、不调模型。用真实账号验收的步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)。
+启动前可以先检查配置：`ip check --config ip.yaml` 逐项检查模型端点的 key、工具沙箱、数据源、MCP 服务器、外部引擎（Codex、Claude Code）和 Slack 令牌能不能用，有失败时退出码为 1。它不发消息、不调模型。用真实账号验收的步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)。
 
 质量评测：`ip eval --config ip.yaml --set evals/macro-smoke.yaml` 用真实模型跑评测集里的固定问题，每次用一个新的临时数据目录。
 检查项都用程序判定：本轮正常结束、调了取数工具、写了报告、报告里的数字能在工具结果里找到（允许四舍五入、单位换算和两数之差）、
@@ -96,7 +96,8 @@ docker compose up -d --build
 | `ip-data` | 数据源与只读取数工具（`data_catalog`、`data_series`，同比 / 环比），按岗位授权 | M1 |
 | `ip-browser` | 浏览器自动化、截图预处理 | M2 |
 | `ip-connectors` | 外部渠道的通用接口（`Channel`、`Hub`）和测试用的假渠道、假 Slack 服务器；Slack 渠道（Socket Mode）已接入，飞书、邮件以后接在这里 | M2 |
-| `ip-engines` | 外部引擎：把岗位的每一轮交给外部编程智能体；目前有 Codex（`codex exec --json`，组织工具经 `/mcp` 回调），Claude Code 待做 | M2 |
+| `ip-engines` | 外部引擎：把岗位的每一轮交给外部编程智能体；有 Codex（`codex exec --json`）和 Claude Code（`claude -p --output-format stream-json`，D-36），组织工具经 `/mcp` 回调 | M2 |
+| `ip-relay` | 手机 App 锁屏推送的中转（独立程序 `ip-relay`）：收主机发来的 Web Push 密文，原样转给 APNs、FCM；设备推送令牌封在订阅地址里，不用数据库（D-35） | App |
 
 ## M0 任务清单
 
@@ -127,10 +128,18 @@ docker compose up -d --build
 - [x] 设备配对（backlog F-7，`docs/ip/m2-spec.md` D-30）：`ip device pair --name <设备名> [--url <控制台地址>]` 或控制台“设备”页生成 6 位配对码（2 分钟、一次性，终端和页面都能出二维码），设备用 `POST /pair` 换自己的令牌（库里只存 SHA-256）；`/ws` 认设备令牌，设备发的消息、做的审批署设备名；“设备”页看在线、改名、吊销（立即断开）。只在测试和 Playwright 里核对过
 - [x] 设备权限（backlog F-8，`docs/ip/m2-spec.md` D-31）：每台设备“日常”或“管理”一档，新配对的是“日常”。`/ws` 按请求类型放行、默认拒绝：“日常”能对话、审批、处理任务、看报告，路由规则、定时任务、记忆、设备管理要“管理”；共用令牌等同“管理”。“设备”页改权限，连着的设备下一个请求就按新权限算。只在测试和 Playwright 里核对过
 - [x] 通知规则（backlog F-9，`docs/ip/m2-spec.md` D-32）：服务端从运行时事件里挑出要告诉人的事（审批卡、员工提问、一轮失败、任务受阻为“要我处理”，员工回复、任务完成为“全部”），预览先脱敏再去掉代码块和表格、取头两句。每台设备自己设级别、按岗位静音、静音到、要不要预览；`/ws` 按设置推 `alert`，审批在别处处理过就推 `dismiss` 撤掉。控制台不在前台时弹系统通知，点开去那个对话（`#/chat/<对话 id>`）。`ip bench notify` 量每个事件过规则的吞吐和预览耗时，接入 CI。只在测试和 Playwright 里用假模型核对过；关掉页面后的推送在 F-10
-- [x] Web Push（backlog F-10，`docs/ip/m2-spec.md` D-33）：主机第一次用到时生成 VAPID 密钥，控制台“设备与通知”页点“开启推送”后，页面关着、手机锁屏也能收到上面那些通知。按 RFC 8291 加密、RFC 8292 签名，直接发给浏览器厂商的推送服务，只认 FCM、苹果、Mozilla、Windows 这几家的地址；推送服务回 404、410 的订阅自动删。页面在前台时不推；审批在别处处理过，推一条同标签、静音的“已在别处处理”盖掉旧的。`ip.yaml` 可选 `push.contact`（`mailto:` 或 `https://`）。`ip bench notify` 加了加密并签名一条推送的耗时。加密逐字节对过 RFC 8291 的例子；整条链路只用假推送服务和 Playwright 核对过，没在真的推送服务上跑过
+- [x] Web Push（backlog F-10，`docs/ip/m2-spec.md` D-33）：主机第一次用到时生成 VAPID 密钥，控制台“设备与通知”页点“开启推送”后，页面关着、手机锁屏也能收到上面那些通知。按 RFC 8291 加密、RFC 8292 签名，直接发给浏览器厂商的推送服务，只认 FCM、苹果、Mozilla、Windows 这几家的地址；推送服务回 404、410 的订阅自动删。页面在前台时不推；审批在别处处理过，推一条同标签、静音的“已在别处处理”盖掉旧的。`ip.yaml` 可选 `push.contact`（`mailto:` 或 `https://`）和 `push.hosts`（另外放行的推送服务，手机 App 的推送中转用，D-35；负载上限 2800 字节）。`ip bench notify` 加了加密并签名一条推送的耗时。加密逐字节对过 RFC 8291 的例子；整条链路只用假推送服务和 Playwright 核对过，没在真的推送服务上跑过
 - [x] 桌面 App（backlog F-11，`apps/desktop/`，`docs/ip/m2-spec.md` D-34）：Tauri 2 壳里自带一份控制台，填主机地址和配对码连上，令牌放系统钥匙串；关窗口留在托盘、托盘显示待办数、系统通知、开机启动。`/ws` 在配了令牌时接受桌面 App 的来源。真的 App 只在 Linux 虚拟屏幕上跑过配对和连主机，托盘、通知和 macOS、Windows 没验过，见 `apps/desktop/README.md`
 - [x] 各平台 App（backlog F-13，`apps/flutter/`，`docs/ip/apps-plan.md` 第 9 节）：2026-11-21 维护者定改用 Flutter，一份代码出 Android、iOS、macOS、Windows、Linux。第一步：连接主机（地址加配对码或粘贴配对链接，设备令牌放系统安全存储）、待办（员工提问、审批卡、受阻的任务）、对话（流式回复、Markdown）；`/ws` 客户端照控制台的做法断线补发。服务端没改，原生 App 不带 `Origin`。真的 Linux 版连本机 `ip serve` 跑通过端到端测试（模型是假的）；Android、iOS、macOS、Windows 没编过，见 `apps/flutter/README.md`
-- [x] App 的 Bot 星图（backlog F-22，`docs/ip/apps-plan.md` 9.7）：照维护者给的 Obsidian 图谱样稿，背景星空；幕僚长是中心的太阳，其他员工是八大行星和知名恒星，离太阳越近越紧急，图标越大越重要，理由在点开的气泡里给人看。真的 Linux 版连本机 `ip serve` 核对过（模型是假的），真手机没试过
+- [x] App 的 Bot 星图（backlog F-22，`docs/ip/apps-plan.md` 9.7）：照维护者给的 Obsidian 图谱样稿，背景星空；幕僚长是中心的太阳，其他员工是八大行星和知名恒星，离太阳越近越紧急，图标越大越重要，理由在点开的气泡里给人看。真的 Linux 版连本机 `ip serve` 核对过（模型是假的），真手机没试过。桌面窗口恢复、会话断点和星图手势的验证见 [Flutter App](../apps/flutter/README.md#桌面交互验证)
+- [x] App 的待办补齐和看报告（backlog F-14）：受阻的任务能直接改状态，“最近 7 天”列完成的任务和新报告；消息、任务结果、报告里提到的 `reports/<文件名>.md` 能点开看。真的 Linux 版连本机 `ip serve` 点过（模型是假的，报告是手写的），真手机没试过
+- [x] App 的任务页和岗位页（backlog F-15）：任务分未完成、已结束，状态能改，能新建；岗位页看今天的费用对比每日预算、缓存命中、员工和最近的报告。导航改成待办、星图、对话、任务、岗位，“我”挪到顶栏。真的 Linux 版连本机 `ip serve` 点过（模型是假的），真手机没试过
+- [x] App 的系统通知（backlog F-16）：App 不在前台时主机的 `alert` 弹成系统通知，`dismiss` 撤掉，点开去那个对话或待办；报 `presence`；“我”页改这台设备的通知设置。只在假主机、假通知上测过，Linux 版编过，真的系统通知还没在任何平台上弹过；锁屏推送要等 F-21
+- [x] App 桌面版的托盘（backlog F-17）：关窗口藏到托盘、托盘显示待办数、托盘菜单开关开机启动和退出、只开一个。Linux 版在 Xvfb 里跑过关窗口、再打开、`--hidden` 启动；托盘图标本身、macOS、Windows 没跑过。Tauri 版（`apps/desktop/`）按 apps-plan Q-10 等 macOS、Windows 各装过一次后再删
+- [x] App 里“管理”权限的页（backlog F-18）：设备、定时任务、记忆、路由规则四页，从“我”页进去，日常权限看不到。只在假主机上测过
+- [x] App 扫码配对（backlog F-19）：Android、iOS、macOS 用摄像头扫配对二维码，扫到后照常先确认主机再配对；本机解码，不用谷歌 ML Kit。只在假相机上测，真相机没扫过
+- [x] App 的协议类型从 Rust 生成（backlog F-20）：`apps/flutter/tool/gen_protocol.dart` 从 `web/src/types/*.ts` 生成 `wire.dart`，flutter CI 检查生成结果已提交；App 解析回复、事件和发请求都经过生成的类型，Rust 改了协议字段 Dart 就编不过
+- [ ] 手机锁屏推送（backlog F-21，`docs/ip/m2-spec.md` D-35）：主机放行 `push.hosts` 里的推送服务，负载上限 2800 字节；推送中转 `ip-relay`（`POST /register` 换订阅地址，`POST /w/<封条>` 转给 APNs 或 FCM，令牌失效回 410，限流，`ip bench relay` 接入 CI）。Android App 经 FCM 收推送、原生代码解密弹通知（`apps/flutter`，解密对过 RFC 8291 的例子）。只用假的 APNs、FCM 和假的推送通道测过；中转还没部署，iPhone 还没接
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片
 - [x] 路由 v2（二）：语义匹配（可选）：规则都没命中时请模型按岗位职责判断，把握够就分派，不够时把判断作为审批卡片的推荐项
@@ -147,10 +156,11 @@ docker compose up -d --build
 - [x] 费用补全：语义分派调用模型的费用单列记账（不占岗位预算）；岗位页显示各岗位今日已用 / 上限；执行员工这一轮失败（费用用满、模型出错、步数超限）时，派给它的任务标为受阻并写回派活的对话，不自动叫回协调员重派，避免一圈圈重试花钱
 - [x] 提示词缓存命中率能量出来（backlog D-2 的第一步）：账本按岗位累计当天的 token 用量（输入、其中命中前缀缓存的、输出），每轮结束时记一次，成功和失败的轮次都记，没登记价格的模型也记，语义分派单列，重启不清零；`spend_today` 返回 `tokens` 和 `routing_tokens`，控制台岗位页显示各岗位今日缓存命中率，`ip eval` 每题和合计都打印。命中率 = 命中缓存的输入 token / 全部输入 token。2026-11-14 用真实模型量过（[实测记录](../docs/ip/prompt-cache-2026-11-14.md)）：研究员 84%–97%，协调员 34%（请求短，钱主要花在输出上）
 - [x] 运维测试岗位流程骨架：岗位说明写明复现 → 定位 → 最小修改 → 复跑验证 → 报告（`reports/<日期>-<主题>.md`）→ 交回，动线上先 `ask_human`；员工可用 `workspace` 指定工作目录（指向要维护的项目）；`examples/ops-demo` 是故意留了 bug 的小项目，用假模型跑通了跑测试失败 → 修复 → 复跑通过 → 写报告
+- [x] 运维测试岗位维护模型中转站的工具（backlog D-4 ①）：`examples/ops-gateway` 里的巡检（状态、版本、鉴权、计价漂移、模型探测、TLS、容器、服务、磁盘、备份）、New API 新版本检查、上游新模型检查、每晚用量和报错日报，岗位手册模板，`ip.example.yaml` 加了四个定时任务（默认关）。`drill.sh` 用假中转站和假主机命令跑 31 个场景，CI 跑；日报的 SQL 在 PostgreSQL 16 上核对过。没在真中转站上跑过
 - [x] 定时任务：`ip.yaml` 的 `schedules`（五段 cron + `utc_offset` 时区），到点给岗位或员工发一条消息、开一段新对话，不写 `to` 时按路由规则分派；停机期间错过的不补跑；上次运行结果存数据库；控制台任务页显示下次运行时间，可立即运行
 - [x] MCP 远程接入和 Finance Macro Data API：`mcp_servers` 可以写 `url` 连远程服务器（Streamable HTTP，令牌用 `bearer_token_env`；必须是 https，只有本机地址可以用 http）。宏观研报岗位的美国和全球数据改为直接调 Finance Macro Data API（which-api 仓库的 `packages/macro-mcp`，12 个工具），中国数据仍用 `ip data pull` 拉的国家统计局序列。用本机启动的同一版服务（0.2.0）联调过：握手、列工具、取 FRED 实时数据都通。2026-11-11 的真实验收里，真实模型经 Render 上的测试部署取到了数（见下面宏观研报岗位的真实验收一条）
 - [x] Finance Macro Data API 开源（backlog C-2）：9 个美国宏观数据工具放进仓库根目录的 `macro-mcp/`（MIT，Node.js 18.17 以上，零依赖），示例配置改成本机 stdio 启动。和 WhichAPI 托管版的差别：不带 API 目录工具；FRED 不直连，经 WhichAPI 托管服务取，要 `WHICHAPI_API_KEY`；快照不带 ICE BofA 的三个面板（2026-11-16 起这些序列可以用 `get_fred_series` 取，只用模拟的回复测过）。包自己的测试进 CI（`macro-mcp` 工作流）；经 WhichAPI 取 FRED 这条路包自己的测试用的是模拟；2026-11-14 的评测里配真实模型真实跑过（[记录](../docs/ip/evals/2026-11-14-e8/README.md)）
-- [x] 中国数据进 Finance Macro Data API（backlog E-2）：`macro-mcp` 有国家统计局 4 个工具：`search_china_indicators` 按中文名搜指标，`browse_china_catalog` 浏览目录，`get_china_indicator` 取任一指标（月度、季度、年度），`get_china_series` 是 CPI、PPI、PMI、M2 的快捷入口，存的 id 失效时按名字重新找到。代码和 which-api 托管版是同一份（which-api PR #14）。2026-11-15 在境内网络上真实跑通；境外网络能否访问没测
+- [x] 中国数据进 Finance Macro Data API（backlog E-2）：`macro-mcp` 有国家统计局 4 个工具：`search_china_indicators` 按中文名搜指标，`browse_china_catalog` 浏览目录，`get_china_indicator` 取任一指标（月度、季度、年度），`get_china_series` 是 CPI、PPI、PMI、M2 的快捷入口，存的 id 失效时按名字重新找到。代码和 which-api 托管版是同一份（which-api PR #14）。2026-11-15 在境内网络上真实跑通；2026-11-21 经 Render 上的托管版从境外真实取到数（[记录](../docs/ip/acceptance-2026-11-21-hosted-nbs.md)），境外主机本机启动开源版没测
 - [x] FRED 走官方 API（backlog C-2）：WhichAPI 托管服务改调 FRED 官方 API（which-api PR #13，key 配在 Render 上）；`macro-mcp` 的 `get_fred_series` 把 `units` 转发过去，算同比用 `pc1`，岗位说明写明不要自己算。托管服务这条路在本机用真实 key 跑通过；Render 上部署后的调用 2026-11-15 直接请求过一次，取到了数（见[发布前清单](../docs/ip/release-checklist.md)）
 - [x] 示例配置的模型：协调员用 `openai/gpt-6-astra`，执行岗位用 `openai/gpt-6-luna`，配了价格，协调员和宏观研究员设了每日费用上限（价格 2026-11-14 按 OpenAI 的模型文档核对过，补了 `cached_input` 和 `cache_write`，用之前再核对）
 - [x] 模型端点支持 OpenAI Responses 接口：端点写 `api: responses`（可选 `reasoning_effort`），其余端点默认仍走 Chat Completions。gpt-6-astra、gpt-6-luna 在 Chat Completions 里不能同时带工具和推理，只能走 Responses
@@ -163,13 +173,16 @@ docker compose up -d --build
 
 - [x] `ip-core` 新增两个字段：系统消息带类型 `notice`，外部渠道只转发“这轮失败”；人的消息可带来源渠道 `via`，路由规则 `from` 对渠道用户只按用户 id 匹配，改显示名冒用不了
 - [x] 通用渠道接口、绑定表、投递器、假渠道和渠道测试：`ip_server::channels::start` 把一个渠道接到服务上；收消息时去重、按名单准入、找或建会话绑定、分派，同一会话的追问粘住原来的员工；投递器从事件日志读，只发员工回复、“这轮失败”、卡片和卡片选定结果，失败重试、顺序不乱、重启不重发；卡片按 `approvers` 决定谁能点。用假渠道跑通了 T1–T11
-- [x] Slack 渠道（Socket Mode）：`ip.yaml` 的 `channels` 配置，主机不需要公网入口；在频道里 @机器人 或私信开启会话，回复和审批卡片都在同一个线程里，卡片用按钮选，选定后原卡片更新；应用清单在 `examples/slack/manifest.yaml`。用假 Slack 服务器跑通了，真实工作区待验收。收到的事件先存进数据库再向 Slack 确认，处理暂时失败时退避重试，进程在确认后退出也会在重启后接着处理；渠道去重改在处理成功之后（D-28，#69，只用假 Slack 测过）
+- [x] Slack 渠道（Socket Mode）：`ip.yaml` 的 `channels` 配置，主机不需要公网入口；在频道里 @机器人 或私信开启会话，回复和审批卡片都在同一个线程里，卡片用按钮选，选定后原卡片更新；应用清单在 `examples/slack/manifest.yaml`。用假 Slack 服务器跑通了，真实工作区待验收。收到的事件先存进数据库再向 Slack 确认，处理暂时失败时退避重试，进程在确认后退出也会在重启后接着处理；渠道去重改在处理成功之后（D-28，#69，只用假 Slack 测过）。主机只能经代理出网时，Socket Mode 按 `HTTPS_PROXY`/`NO_PROXY` 走代理的 CONNECT 隧道，代理地址可带用户名密码（D-37，backlog E-12，只用本地假代理和假 Slack 测过）
 - [x] MCP 服务端：组织工具开放给外部引擎，每轮一个令牌
 - [x] 引擎接口和 Codex 引擎（先只给运维测试岗位）：`ip.yaml` 的 `engines` 按岗位配置；每轮起一个 `codex exec --json` 进程，同一对话用 `resume` 续接、只交新消息；超时整组终止；用量计入岗位预算。用假 codex 跑通了；真实 Codex 的验收见下面“真实验收：Codex”一条
+- [x] Claude Code 引擎（backlog E-6，`docs/ip/m2-spec.md` D-36）：`engines` 里写 `kind: claude_code`。每轮起一个 `claude -p --bare --restricted --output-format stream-json` 进程，同一对话用 `--resume` 续接、只交新消息，系统提示词放文件传；文件工具只能动工作目录，要人批准的一律拒绝，`allowed_tools` 预先放行命令；组织工具经 `/mcp` 回调，令牌从环境变量展开、不进参数；按 `usage` 和价格记账（不用续接时累计的 `total_cost_usd`）。和 Codex 共用进程管理。用本机 Claude Code 2.1.330 连假的模型接口核对过参数和输出格式，`ip serve` 里派任务、经 `/mcp` 交回、续接、放行和拒绝命令都走通；没用真的 Claude 模型跑过
 - [x] Docker 部署：`rust/Dockerfile`、`docker-compose.yml`、`deploy/env.example`；镜像带 bubblewrap，可选带 Codex；以 uid 10001 运行，数据放命名卷，端口只绑本机。在容器里用假模型跑通了沙箱里的 shell，`ip check`、健康检查、令牌校验都测过；真实模型、Slack、Codex 和其他验收一起做。见[《用 Docker 部署》](../docs/ip/deploy-docker.md)
+- [x] Docker 部署的资源上限（backlog E-15 第一步）：`docker-compose.yml` 给容器整体设 `pids_limit`、`mem_limit`、`cpus`，可用 `.env` 覆盖；只用 `docker compose config` 校验过写法。这是容器整体的兜底
+- [ ] 每条 shell 命令的资源上限（backlog E-15 第二步）：`prlimit` 限内存、文件大小和进程数，`/tmp` 加 `--size`，`ip check` 报告是否生效
 - [x] 质量评测 `ip eval`（backlog B-1）：评测集 `evals/macro-smoke.yaml` 两个固定问题（有数据的、一半取不到的），检查项全由程序判定；2026-11-12 用 `gpt-6-luna` 真实跑两遍，都是 2/2 通过，每遍不到 0.01 美元，结果在 `docs/ip/evals/2026-11-12-luna/`
-- [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（容器只能经代理出网，backlog E-12）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
-- [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账还没修（E-10）
+- [x] 真实验收：Slack 线程 → 协调员 → 宏观研究员 → 报告回到 Slack（backlog A-3，2026-11-16，[记录](../docs/ip/acceptance-2026-11-16-slack.md)）：真实工作区里线程回复、续问、派活和汇总、选择卡片、别人点被拒、名单外频道不理会、重启后续接都符合。Socket Mode 是经本机转发器连的（当时容器只能经代理出网、Socket Mode 不走代理，backlog E-12；现在已能直接走代理，经真实代理没验）；取数工具连不上数据源，回复里没有真实数据；私有频道和私信没验。步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)
+- [x] 真实验收：Codex 跑通 `examples/ops-demo`（backlog A-4，2026-11-14，[记录](../docs/ip/acceptance-2026-11-14-codex.md)）：`codex-cli 0.169.0` 修好 bug、写报告、经 `/mcp` 的 `update_task` 交回任务，追问时续接原会话。没经 Slack，从控制台发的消息。验收中修了 Codex 引擎的 MCP 工具审批、中途 `error` 和 `"error": null` 被当成失败、缓存写入没记账；续接会话时用量重复记账 2026-11-16 修了（E-10，只用假 codex 测过）
 
 **M0 验收**：在云主机上用一个可执行文件启动；通过 WebSocket 和一个岗位对话，它能在沙箱里跑 shell 命令；中文能搜到历史消息；启动、内存、并发三项达到方案里的性能目标。
 
@@ -177,7 +190,7 @@ docker compose up -d --build
 
 设计见 [`docs/ip/context-memory-design.md`](../docs/ip/context-memory-design.md)，分 7 步做。
 
-- [x] 第 1 步：系统提示词多两层，决策者笔记和岗位记忆摘要，按岗位存在设置表里，排在稳定内容之后；`memory` 配置（默认关，可限定岗位，两层各有字数上限）；`ip context show / set / clear` 查看和修改，服务运行时也能改，下一轮生效；`ip bench store` 加了每轮读这两层的耗时。只用假模型测过
+- [x] 第 1 步：系统提示词多两层，决策者笔记和岗位记忆摘要，按岗位存在设置表里，排在稳定内容之后；`memory` 配置（当时默认关，2026-11-16 起默认开，可限定岗位，两层各有字数上限）；`ip context show / set / clear` 查看和修改，服务运行时也能改，下一轮生效；`ip bench store` 加了每轮读这两层的耗时。只用假模型测过
 - [x] 第 2 步：后台任务从凉下来的对话里按岗位提炼摘要（默认闲置 6 小时后，每轮最多 2 份）。交给模型前和存库前都做密钥脱敏；费用记在岗位当天的账上，预算剩余不到 25% 时不提炼；失败退避重试；外部渠道的对话默认不进记忆，从渠道对话派出去的执行对话（顺着任务的派活来源往上查）也一样（#67）。`ip context show` 能看到提炼结果。只用假模型测过
 - [x] 第 3 步：同一个后台任务里，每轮提炼之后按岗位把对话摘要合并成岗位记忆摘要，员工下一轮开工就带上。选中的对话摘要（默认 30 天内用过或生成的，最多 256 份）和上次合并时一样就不调模型；没变的只给标题，新增和改过的给全文；失败或没有输出时保留旧的一版。默认用岗位自己的模型，可用 `memory.consolidation_model` 另指定。分批合并时，暂缓更新的摘要保留已合并版本的来源记录，后续过期或移除仍能清理。只用假模型测过
 - [x] 第 4 步：开了记忆的岗位多两个只读工具。`memory_search` 在本岗位的对话记忆里按词查找，`memory_read` 读一份全文；岗位取自调用者本人，别的岗位的搜不到也读不到。读成功记一次使用，合并时用得多的优先、长期没人读的淘汰。`ip bench store` 加了搜索耗时（2000 份时 p95 约 8 毫秒）。只用假模型测过

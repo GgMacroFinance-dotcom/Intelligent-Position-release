@@ -44,8 +44,13 @@ class FakeSocket implements FrameSocket {
     await _in.close();
   }
 
+  bool closeCalled = false;
+
   @override
-  Future<void> close() => drop();
+  Future<void> close() {
+    closeCalled = true;
+    return host.closeHook?.call() ?? drop();
+  }
 }
 
 class FakeHost {
@@ -57,6 +62,9 @@ class FakeHost {
 
   /// 这些类型的请求不回复。
   final silent = <String>{};
+
+  /// 客户端关连接时调用；给了就用它的结果代替真的断开（模拟不回关闭帧的主机）。
+  Future<void> Function()? closeHook;
 
   /// 下一次连接要抛的错；null 时正常连上。
   Object? failNext;
@@ -130,7 +138,7 @@ void installDefaults(FakeHost h) {
         'id': 'macro',
         'name': '宏观研究',
         'description': '宏观研报',
-        'model': {'primary': 'fake/m'},
+        'model': {'default': 'fake/m', 'escalate': null},
         'budget_per_day_usd': null,
       },
     ],
@@ -146,6 +154,38 @@ void installDefaults(FakeHost h) {
     },
     'list_approvals': (_) => [approval('a1')],
     'list_tasks': (_) => <Object>[],
+    'list_reports': (_) => <Object>[],
+    'spend_today': (_) => {
+      'date': '2026-11-21',
+      'roles': {'macro': 0.0123},
+      'routing_usd': 0.0004,
+      'tokens': {
+        'macro': {'prompt_tokens': 10000, 'completion_tokens': 800, 'cached_tokens': 8000, 'cache_write_tokens': 0},
+      },
+      'routing_tokens': {'prompt_tokens': 500, 'completion_tokens': 20, 'cached_tokens': 0, 'cache_write_tokens': 0},
+    },
+    'get_notify_settings': (_) => {
+      'level': 'needs_me',
+      'muted_roles': <Object>[],
+      'mute_until_ms': null,
+      'preview': true,
+    },
+    'set_notify_settings': (req) => req['settings'],
+    'presence': (_) => null,
     'history': (req) => [message('m1', req['thread_id'] as String, human: '张三的手机', text: '最近 CPI 怎么样')],
   });
 }
+
+Json alertFrame({String tag = 'approval:a1', String? thread = 't1', String level = 'needs_me'}) => {
+  'type': 'alert',
+  'alert': {
+    'kind': 'approval',
+    'level': level,
+    'title': '等你决定',
+    'body': '这条消息该交给谁？',
+    'tag': tag,
+    'thread_id': ?thread,
+    'role_id': 'macro',
+    'at_ms': 1000,
+  },
+};

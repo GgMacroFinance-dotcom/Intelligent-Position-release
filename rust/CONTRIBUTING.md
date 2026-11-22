@@ -18,6 +18,7 @@
 | MCP | `crates/ip-mcp/` |
 | 外部渠道 | `crates/ip-connectors/`、`crates/ip-server/src/channels.rs` |
 | 外部引擎 | `crates/ip-engines/`、`crates/ip-runtime/src/engine.rs` |
+| 推送 | `crates/ip-server/src/webpush.rs`（推送密钥、只往已知推送服务发）；推送中转 `crates/ip-relay/`（持有 APNs、FCM 凭据）；Flutter App 存推送私钥、解密的 `apps/flutter/android/app/src/main/kotlin/dev/intelligent_position/ip_app/`（`IpPush.kt`、`WebPushCrypto.kt`）和 `apps/flutter/lib/src/push/` |
 
 拿不准算不算，就按敏感路径处理。
 

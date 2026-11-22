@@ -18,9 +18,26 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   # 员工回复按 Markdown 渲染。BSD-3-Clause。
   flutter_markdown_plus: ^1.0.12
+  # 自定义 Markdown 语法：正文里提到的 reports/<文件名>.md 变成能点的链接。flutter_markdown_plus 本来就带着它。BSD-3-Clause。
+  markdown: ^7.3.1
   # 链接用系统浏览器打开，只认 http、https、mailto。BSD-3-Clause。
   url_launcher: ^6.3.3
-
+  # 系统通知（F-16）：主机的 alert 弹成系统通知，五个平台都支持。BSD-3-Clause。
+  # Linux 上它经 dbus 包（MPL-2.0，原样使用）连通知服务，tool/check_licenses.dart 按包放行。
+  # 23.x 要 compileSdk 37，先用 22.x。
+  flutter_local_notifications: ^22.3.3
+  # 桌面托盘（F-17）：关窗口留在托盘、托盘显示待办数。MIT。
+  # 0.6 以后改用 nativeapi，要在构建时编 C++，先用 0.5.x。Linux 上要系统的 libayatana-appindicator3。
+  tray_manager: ^0.5.2
+  # 桌面窗口（F-17）：拦下关窗口改成藏到托盘、从托盘叫出来。MIT。和 tray_manager 一样先用 0.5.x。
+  window_manager: ^0.5.1
+  # 扫配对二维码（F-19）：Android、iOS 的相机。官方插件，BSD-3-Clause；Android 走 CameraX（Apache-2.0）。
+  # 不用 mobile_scanner：它在 Android 上带谷歌的 ML Kit（闭源、另有条款）。
+  camera: ^0.12.2
+  # macOS 的相机（官方 camera 插件不支持 macOS）。MIT。
+  camera_macos: ^0.1.1
+  # 从相机画面解二维码，纯 Dart（ZXing 的移植）。BSD-3-Clause。
+  zxing2: ^0.2.4
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -33,3 +50,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # 托盘图标：Windows 要 .ico，其余用 .png。
+  assets:
+    - assets/tray/

@@ -1,0 +1,24 @@
+[package]
+name = "ip-relay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "手机 App 锁屏推送的中转：收主机发来的 Web Push 密文，原样转给 APNs 和 FCM（m2-spec D-35）"
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# 封条（AES-256-GCM）、APNs 的 ES256 和 Google 服务账号的 RS256 签名。和 ip-server 用同一个 aws-lc-rs。
+aws-lc-rs = { version = "1", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+base64 = "0.22"
+
+[lints]
+workspace = true

@@ -1,6 +1,13 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- 连用户自己的主机（/pair、/ws）。调试版本来就有，发行版要写明。 -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- 扫配对二维码（F-19）。没有相机的设备也能装，只是不能扫。 -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <!-- camera 插件为录像带进来的两个权限，扫码用不到，去掉。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
     <application
         android:label="intelligent-position"
         android:name="${applicationName}"
@@ -27,6 +34,19 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 锁屏推送（F-21）：FCM 叫起这个服务，解密后弹通知（IpPush.kt）。 -->
+        <service
+            android:name=".IpPushService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
+        <!-- 没有 google-services.json，不让 Firebase 在启动时自己初始化；配了时由 IpPush.ensureFirebase 初始化。 -->
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider"
+            tools:node="remove"/>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

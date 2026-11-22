@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.18（2026-11-16）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.22（2026-11-21）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -37,7 +37,7 @@
 | M2-3 | MCP 服务端：把组织工具开放给外部引擎（第 5 节） | Claude | — | 已实现（#21） |
 | M2-4 | 引擎接口和 Codex 引擎，只给运维测试岗位用（第 6 节） | Claude | M2-3 | 已实现（#22），先用假 codex 验证；2026-11-14 用真实 Codex 跑通过一次示例项目（M2-6） |
 | M2-5 | 真实验收：在 Slack 线程里提需求，经协调员派给宏观研究员，交回报告，结论回到 Slack 线程（同时完成 M0、M1 的真实验收） | Claude | M2-2、维护者提供 Slack 工作区（按 `examples/slack/manifest.yaml` 建好应用）、两个 Slack 令牌和模型 API key | 完成（2026-11-16，[记录](acceptance-2026-11-16-slack.md)）：真实工作区里手册第 4 节的 Slack 链路都符合。经本机转发器连接（Socket Mode 不走代理），回复里没有真实数据，私有频道和私信没验 |
-| M2-6 | 真实验收：用真实 Codex 跑 `examples/ops-demo`，经历跑测试失败 → 修复 → 复跑通过 → 写报告 → 交回 | Claude | M2-4、维护者提供 Codex API key | 完成（2026-11-14，`codex-cli 0.169.0`，见 `docs/ip/acceptance-2026-11-14-codex.md`）。消息从控制台发，没经 Slack；还没在真实项目上跑过；续接会话时用量重复记账没修（backlog E-10） |
+| M2-6 | 真实验收：用真实 Codex 跑 `examples/ops-demo`，经历跑测试失败 → 修复 → 复跑通过 → 写报告 → 交回 | Claude | M2-4、维护者提供 Codex API key | 完成（2026-11-14，`codex-cli 0.169.0`，见 `docs/ip/acceptance-2026-11-14-codex.md`）。消息从控制台发，没经 Slack；还没在真实项目上跑过；续接会话时用量重复记账 2026-11-16 修了（backlog E-10，只用假 codex 测过） |
 
 M2-1 和 M2-3 改的文件基本不重叠，可以同时做。
 
@@ -45,7 +45,7 @@ M2-1 和 M2-3 改的文件基本不重叠，可以同时做。
 
 - 飞书、邮件：通用接口留出位置，等有真实用户再接。
 - `ip-browser` 自研版：需要浏览器的岗位先在 `mcp_servers` 里配 Playwright MCP。注意 MCP 子进程不在沙箱里。
-- Claude Code 引擎：以后套用第 6 节的同一个 `Engine` 接口。
+- Claude Code 引擎：原来不在本阶段，2026-11-21 做了，套用第 6 节的同一个 `Engine` 接口（D-36，backlog E-6）。
 - Slack 里逐字输出：第一版回复写完一次发出，见 Q-07。
 
 ---
@@ -403,6 +403,20 @@ handle.attempts();                                                    // deliver
 - 第一版只支持一个 ip 进程连一个 Slack 应用（Q-08）。
 - 不用第三方 Slack SDK。用到的接口只有七八个，自己写一层薄封装：`tokio-tungstenite`（rustls）加现有的 `reqwest`。
 - 实现在 `ip-connectors/src/slack.rs`。每个信封先回 `envelope_id` 确认，再交给后台任务按顺序处理，处理慢的消息不会耽误确认。断线后按 1、2、4…… 秒退避重连，最多等 30 秒；收到 `disconnect` 立即重连。
+- 主机只能经代理出网时，WebSocket 连接按环境变量走代理，见 D-37。
+
+### D-37 Socket Mode 经 HTTP 代理连接 · 提议（backlog E-12）
+
+问题（2026-11-16 真实验收发现）：Web API 调用（`reqwest`）读 `HTTPS_PROXY`，Socket Mode 的 WebSocket（`tokio_tungstenite::connect_async`）不读。只能经代理出网的主机上 `ip check` 能过，`ip serve` 连不上 Slack。
+
+- **读哪些环境变量**：和 reqwest 用同一套规则，都由 hyper-util 的 `Matcher::from_env` 解析（reqwest 本来就依赖 hyper-util，没有新增 crate）。`wss://` 看 `HTTPS_PROXY`/`https_proxy`，`ws://` 看 `HTTP_PROXY`/`http_proxy`，都没设时用 `ALL_PROXY`/`all_proxy`；`NO_PROXY`/`no_proxy` 里的主机直连（规则同 curl：域名后缀、IP、CIDR、`*`）。进程启动、创建 Slack 渠道时读一次。`ip.yaml` 没有新配置项。
+- **怎么连**：要走代理时先连代理，发 `CONNECT <主机>:<端口> HTTP/1.1`，代理回 2xx 后在这条隧道上做 TLS 和 WebSocket 握手。TLS 是端到端的，代理只看到主机名和端口。连代理加等它回应最多 30 秒。
+- **认证**：代理地址里带用户名密码（`http://用户:密码@主机:端口`，特殊字符用百分号编码）时，用 `Proxy-Authorization: Basic …` 发给代理。日志和报错里只写代理的主机和端口，不写凭据。连上时的日志写明是直连还是经哪个代理。
+- **TLS 信任**：tokio-tungstenite（`rustls-tls-native-roots`）和 reqwest（rustls-platform-verifier）在 Linux 上都用 rustls-native-certs 读根证书，`SSL_CERT_FILE`、`SSL_CERT_DIR` 两边都认。容器用自定义 CA 时，设好这两个变量，Web API 和 WebSocket 一起生效。
+- **报错**：代理回 407 时，分“没给用户名密码”和“用户名密码不对”两种提示；回 403 时提示检查代理的放行名单；其他状态码原样带上；连不上代理、超时、代理地址是 `https://` 或 `socks5://`（暂不支持，只支持 `http://` 代理）都单独说明。这些都是连接失败，照常退避重连。
+- **本机转发器**：2026-11-16 验收时用的本机转发器不再是必须的，只作为代理不允许 `CONNECT` 时的退路。
+- 实现在 `ip-connectors/src/ws_proxy.rs`。
+- 测试：`ws_proxy` 的单元测试用本地假代理（接受 `CONNECT`、转发到本地假 WebSocket 服务器）测经代理连通、Basic 认证、`NO_PROXY` 直连、按协议选代理、407 和 403 的报错（不含凭据）、不支持的代理协议、代理连不上；Slack 测试 `socket_mode_connects_through_http_proxy` 经假代理连假 Slack，事件照常收到和确认。都是假代理、假 Slack；真实 Slack 经真实代理还没验。
 
 ### D-12 会话怎么划分 · 已实现（#25）
 
@@ -536,7 +550,7 @@ channels:
 
 ---
 
-## 6. Codex 引擎（`ip-engines`）
+## 6. 外部引擎：Codex、Claude Code（`ip-engines`）
 
 ### D-20 引擎接口 · 已实现（#22）
 
@@ -558,6 +572,7 @@ pub struct TurnContext<'a> {
     pub thread: &'a ThreadId,
     pub workspace: Option<&'a Path>,
     pub session: Option<&'a str>,     // 引擎在这个对话里已有的会话；None 表示第一轮
+    pub session_usage: Usage,         // 这个会话到上一轮为止累计报告的用量；没有会话时全是 0（v0.20）
     pub system_prompt: &'a str,       // 组织规则、岗位说明、同事名单
     pub input: &'a str,               // 上一轮之后的新消息（不含员工自己写的），已整理成文字
     pub mcp: Option<McpGrant>,        // 本轮的 /mcp 地址和令牌（D-18）
@@ -565,6 +580,7 @@ pub struct TurnContext<'a> {
 }
 
 pub struct TurnReport { pub steps: u32, pub usage: Usage, pub cost_usd: f64,
+                        pub session_usage: Option<Usage>,   // 会话到这一轮为止的累计用量；None 表示这一轮没拿到（v0.20）
                         pub session_id: Option<String>, pub error: Option<String> }
 ```
 
@@ -617,7 +633,7 @@ engines:
 - 提示词在单独的任务里写进标准输入：提示词超过管道缓冲、而进程又不读时，不会卡在超时保护之外。
 - 参数顺序（`exec` 的选项放在 `resume` 之前）和 JSONL 格式，原来是按 2026-11 的资料写的。2026-11-14 用真实 Codex（`codex-cli 0.169.0`）验收（M2-6）时核对过：参数顺序可用，输出解析改了四处（给组织工具的 MCP 服务器加 `default_tools_approval_mode="approve"`；中途的顶层 `error` 事件只当警告，成败看 `turn.failed` 和 `turn.completed`；空的 `"error": null` 不算出错；`cache_write_input_tokens` 计入用量）。见 `docs/ip/acceptance-2026-11-14-codex.md`。只在这一个版本上跑过。
 
-### D-23 引擎会话表 · 已实现（#22）
+### D-23 引擎会话表 · 已实现（#22）；累计用量四列是提议（v0.20，等工程师审查）
 
 ```sql
 CREATE TABLE IF NOT EXISTS engine_sessions (
@@ -627,6 +643,11 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
     session_id    TEXT NOT NULL,   -- Codex 的会话 id（thread.started 事件里给出），resume 时用
     last_message  TEXT NOT NULL,   -- 已交给引擎的最后一条消息；下一轮从它之后取新消息
     updated_at_ms INTEGER NOT NULL,
+    -- 这个会话到上一轮为止累计报告的用量（v0.20）
+    used_prompt_tokens      INTEGER NOT NULL DEFAULT 0,
+    used_cached_tokens      INTEGER NOT NULL DEFAULT 0,
+    used_cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    used_completion_tokens  INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, thread_id)
 ) WITHOUT ROWID;
 ```
@@ -634,6 +655,11 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 - 这张表是运行状态，不写事件日志：每轮都会更新，写进日志只会让日志膨胀。
 - `last_message` 只在一轮成功后前移，并且取这一轮开始时对话里的最后一条消息。所以这一轮进行中新来的消息不会被跳过，失败的一轮下次会重新交一遍。
 - 岗位换了引擎种类时，旧会话不再续接，从头开始。
+- 累计用量（v0.20，backlog E-10）：`codex exec resume` 的 `turn.completed` 报的是整个会话的累计用量，不是这一轮的。运行时把已存的累计值经 `TurnContext::session_usage` 交给引擎，引擎报回这一轮的差值（`usage`、`cost_usd`，记账用）和新的累计值（`session_usage`，存回这张表）。
+  - 报的数每一项都不小于已存的累计值时，这一轮是两者之差。有一项更小，说明报的不是累计值，按这一轮的用量全额记，累计值往上加：宁可多记也不漏记。
+  - Codex 另开了会话（`thread.started` 给的 id 和续接的不一样）时，基线是 0。
+  - 失败的一轮不前移 `last_message`，但累计用量照存，否则下一轮会把这一轮已经记过的用量再记一次。
+  - 旧库打开时自动补上这四列，默认 0；旧会话的下一轮会按全量记一次（多记这一次），之后正常。
 
 ### D-24 Codex 输出怎么记进对话 · 已实现（#22）
 
@@ -675,6 +701,107 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
   - 异常退出时，失败原因带上 stderr。
   - 假 codex 用 curl 调 `/mcp` 的 `update_task` 交回任务：任务完成，结果回到派活的对话。
   - `engines` 配置的解析和各项校验。
+
+
+### D-36 Claude Code 引擎 · 已实现（backlog E-6）
+
+和 Codex 一样套 D-20 的 `Engine` 接口，每轮起一个进程，跑完就退出。排队、超时整组终止、收 stderr 这些和 Codex 共用一份（`ip-engines/src/process.rs`），只是参数和输出格式不同。参数和输出格式按 Claude Code 2.1.330 写成，用它连假的模型接口核对过（见本节最后）；换版本时要重新核对。
+
+```yaml
+engines:
+  ops-tester:
+    kind: claude_code
+    command: claude                # 可执行文件，默认 claude
+    model: <模型名>                # 传给 --model；省略时用 Claude Code 的默认模型
+    api_key_env: ANTHROPIC_API_KEY # 必填：--bare 只认 API key，不读登录状态和钥匙串
+    # base_url: https://...        # 兼容 Anthropic 接口的网关，以 ANTHROPIC_BASE_URL 交给 Claude Code
+    access: workspace-write        # read-only | workspace-write
+    allowed_tools: ["Bash(cargo test:*)"]   # 预先放行的权限规则，原样交给 --allowedTools
+    turn_timeout_secs: 1800
+    max_concurrency: 4
+    price: { input: 0, cached_input: 0, cache_write: 0, output: 0 }   # 美元 / 百万 token
+```
+
+配置校验：D-21 的几条照样适用。另外，`model` 和 `allowed_tools` 里的每一条不能为空、不能以 `-` 开头、不能含控制字符，否则会被当成别的参数；`base_url` 要以 `https://` 或 `http://` 开头。
+
+**每轮的参数**
+
+- `-p --bare --restricted --output-format stream-json --verbose`。
+  - `--bare`：不读 CLAUDE.md、钩子、插件、自动记忆，认证只认 `ANTHROPIC_API_KEY`。
+  - `--restricted`：不读用户、项目、本地的设置文件，文件工具只能动工作目录，Bash 要在 `--tools` 里点名才有。
+- `--permission-mode acceptEdits --permission-prompts none`：工作目录里的改动自动接受；要人批准的一律拒绝，因为没有人能回答。
+- `--tools Bash,Edit,Read`，`access: read-only` 时只有 `Read`。`--bare` 下内置工具只有这三个，`--tools` 写别的也不会有。
+- `--strict-mcp-config`：不读工作目录里的 `.mcp.json`。有 `/mcp` 时再加：
+  - `--mcp-config '{"mcpServers":{"ip":{"type":"http","url":"<地址>","headers":{"Authorization":"Bearer ${IP_MCP_TOKEN}"}}}}'`。令牌不写进参数（`ps` 看得到），由 Claude Code 从环境变量展开。
+  - `--allowedTools mcp__ip`：组织工具已经由本轮令牌限定范围，一律放行。
+- `allowed_tools` 里的每一条：`--allowedTools <规则>`。
+- `--append-system-prompt-file <data_dir>/engines/<员工 id>/prompts/<对话 id>.md`：每轮把系统提示词写进这个文件，一轮结束后删掉。续接时也给，因为 Claude Code 记下第一轮的提示词后会沿用，压缩上下文后才重新生成。
+- `--model <model>`（配置了时）。
+- 之后几轮：`--resume <会话 id>`，会话 id 取自 `system`/`init` 事件。
+
+和 Codex 不同，系统提示词不进标准输入，标准输入里只有上一轮之后的新消息，第一轮也一样。
+
+环境变量全部清空，只给这几个：
+
+- `PATH`。
+- `HOME`：`data_dir/engines/<员工 id>`。
+- `CLAUDE_CONFIG_DIR`：`HOME` 下面的 `claude`，会话记录也在里面。
+- `ANTHROPIC_API_KEY`，以及配了时的 `ANTHROPIC_BASE_URL`。
+- `IP_MCP_TOKEN`。
+- `DISABLE_AUTOUPDATER=1`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`：不自动升级，不发遥测和错误报告。
+
+**输出怎么记进对话**
+
+| stream-json 事件 | 怎么处理 |
+| --- | --- |
+| `system`，subtype `init` | 记下 `session_id`。`mcp_servers` 里没连上的记成警告，这一轮没正常结束时附在失败原因里 |
+| `assistant` 的 `text` 块 | 写成 `Body::Text` |
+| `assistant` 的 `tool_use` 块 | 写成工具调用。内置工具记成 `claude.<工具>`（如 `claude.Bash`），MCP 工具照原名 `mcp__ip__<工具>` |
+| `user` 的 `tool_result` 块 | 写成工具结果，`is_error` 为真算失败，输出截断到 16 KB。被拒绝的调用也在这里，原因写在结果里 |
+| `thinking` 块 | 不记 |
+| 带 `parent_tool_use_id` 的消息（子智能体内部） | 不记 |
+| `result` | 用量按 `usage` 和 `price` 折算，全部输入是 `input_tokens` 加上 `cache_read_input_tokens` 和 `cache_creation_input_tokens`。`is_error` 为真或 subtype 以 `error` 开头就是失败：原因取 `result`，没有就取 subtype；非零退出时附上 stderr 最后一行 |
+| 没有 `result`，以及超时 | 和 Codex 一样（D-24） |
+
+不用 `total_cost_usd` 记账：续接时它是整个会话的累计，每轮都记会重复。`usage` 只算这一次进程，直接计费；引擎会话表里的累计用量（D-23）在上一轮的基础上加上它。Codex 续接时报的用量本身就是累计值，那边按上一轮存下的累计值做差（backlog E-10）。
+
+**能做什么**
+
+Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限规则：
+
+- 工作目录外的读写、没放行的命令都会被拒绝。核对过 `touch /tmp/…`、`python3 -c …`、读 `/etc/hostname` 三种。
+- Claude Code 认为安全的简单命令（如 `echo hi > a.txt && cat a.txt`）在 `acceptEdits` 下自动放行。
+- `allowed_tools` 放行的命令不受工作目录限制，还能执行工作目录里的代码。比如 `Bash(cargo test:*)` 会跑项目里的测试代码，等于放行了这个项目能做的任何事。只在可信的项目上放行；要隔离，就把 ip 跑在容器里（`docs/ip/deploy-docker.md`）。
+- Claude Code 自带的沙箱（Linux 上用 bubblewrap）第一版不用：要另外装，云主机上也没验过。
+- 和 Codex 一样，不带 harness 的代理变量，只能经代理出网的主机上连不上 Anthropic。
+- 续接时找不到会话（比如删了 `data_dir/engines`），这个对话之后每轮都会失败，原因写在“这轮失败”里。Codex 也一样。
+
+**怎么核对的（2026-11-21）**
+
+用本机的 Claude Code 2.1.330，连一个假的 Anthropic 消息接口（本机的 Python 脚本，按触发词回固定内容，不调真模型）：
+
+- 单独跑 `claude`，核对了这些：
+  - 上面的参数都能用，`${IP_MCP_TOKEN}` 会被展开，`--append-system-prompt-file` 生效；
+  - 工作目录里 `.claude/settings.json` 写的钩子和放行规则都不生效；
+  - 越界的命令和读取被拒绝；
+  - 接口报错、续接时找不到会话时的输出；
+  - 续接时 `usage` 和 `total_cost_usd` 的差别。
+- 再用 `ip serve` 配 `claude_code` 引擎，从 `/ws` 操作：
+  - 派任务后，员工经 `/mcp` 的 `update_task` 交回了任务。这一步是真的 Claude Code 作为 MCP 客户端连 ip 的 `/mcp`。
+  - 新对话里跑了简单命令，也跑了放行的 `sh test.sh`。续接同一对话时，模型收到了前几轮的消息。
+  - 没放行的命令被拒绝。
+
+没用真的 Claude 模型跑过，也没在真实项目上跑过。
+
+**测试**
+
+- 单元测试（`ip-engines/src/claude_code.rs`）：配置默认值和校验；首轮、续接、只读时的参数；stream-json 各类事件的解析，样例取自 2.1.330 的真实输出。
+- 端到端测试（`ip-server/src/engine_tests.rs`，和 Codex 共用假引擎脚本）：
+  - 首轮和续接的参数、标准输入、提示词文件、环境变量、工作目录；
+  - 输出记进对话；
+  - 按价格计费，不按累计的 `total_cost_usd`；
+  - 接口报错、缺少 `result`、找不到会话三种失败的原因；
+  - 照 `--mcp-config` 用 curl 调 `/mcp` 的 `update_task` 交回任务。
 
 ---
 
@@ -802,6 +929,31 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 - 通知：桌面 App 不订 Web Push（D-33），关窗口后常驻托盘、连接不断，照 D-32 的 `alert` 弹系统通知，窗口在前台时不弹。点通知现在只能把窗口叫出来。
 - 测试：来源检查加了一条（配了令牌时接受这三个来源，没配时不接受，相近的写法不接受）；壳的主机地址规整有单元测试。真的 App 在 Linux（Xvfb、GNOME 钥匙串）上跑过配对、存令牌、连上、重开读回令牌；其余用 Playwright 加假的壳核对。macOS、Windows 没跑过。
 
+### D-35 手机 App 的锁屏推送 · 提议（backlog F-21）
+
+背景：Flutter 手机 App（`apps-plan.md` 第 9 节）开着、在后台还没被系统杀掉时，照 D-32 的 `alert` 弹本地通知（F-16）；锁屏久了、App 被杀以后，连接断了就收不到。原生 App 订不了浏览器的 Web Push（D-33），要走苹果的 APNs 和谷歌的 FCM。维护者 2026-11-21 定：项目运营一个推送中转，官方 App 装上就能收（Q-11）。
+
+思路：**主机照旧发 Web Push**（RFC 8291 加密、RFC 8292 的 VAPID，D-33），中转在主机眼里就是又一个推送服务。手机 App 自己生成 Web Push 的密钥对，向中转登记拿到订阅地址，再用 D-33 已有的 `subscribe_push` 告诉主机。中转只见密文，解密在手机上做。协议不变：不加请求、不改帧。
+
+- **中转（`ip-relay`，新的独立程序，代码在本仓库）**：
+  - `POST /register {platform: "apns" | "fcm", token}`：`token` 是手机从 APNs 或 FCM 拿到的设备推送令牌。回 `{endpoint}`，地址是 `https://<中转>/w/<封条>`，封条是用中转自己的密钥（AES-256-GCM，从环境变量读）加密的 `{platform, token}`。中转不需要数据库，不存令牌。
+  - `POST /w/<封条>`：照 Web Push 推送服务的样子收。请求体是 `aes128gcm` 的密文，原样转出去：APNs 用 `mutable-content` 的通知，由 iOS 的通知扩展（Notification Service Extension）解密后显示；FCM 用数据消息，由 Android App 的后台处理解密后弹通知。`Urgency: high` 的用高优先级，`Topic` 转成 APNs 的 `apns-collapse-id` 和 FCM 的 `collapse_key`，`TTL` 照转。成功回 201；APNs、FCM 说令牌失效时回 410，主机照 D-33 删掉这个订阅。
+  - 只做转发：不解密、不记推送内容和令牌，日志只记次数和错误码。按来源地址和封条限流，单个请求体最多 3000 字节。
+  - 凭据：APNs 用 `.p8` 签名密钥（Team ID、Key ID、App 的 Bundle ID），FCM 用 HTTP v1 接口和服务账号。全部经环境变量给中转（`IP_RELAY_*`，清单在 `crates/ip-relay/src/main.rs` 开头），不进仓库。封条密钥用 `ip-relay keygen` 生成；换了它，旧地址全部失效，App 下次打开时重新登记。
+  - 基准 `ip bench relay`：打开封条、读请求头、拼好转给 APNs 的请求体，一条的中位数不超过 0.2 毫秒（不含网络往返）。
+- **主机**：
+  - `webpush.rs` 的白名单多认中转的主机名。官方中转的域名定下来后写进默认名单；自己搭中转的人在 `ip.yaml` 里加 `push: { hosts: [push.example.com] }`。只写主机名，照样只认 `https://`、不带端口和用户名、不跟随跳转；不让 App 登记任意地址，免得把主机当跳板连内网（和 D-33 同一个理由）。
+  - 负载上限从 3000 字节降到 2800：APNs 和 FCM 的消息上限都是 4 KB，密文转成 base64 再加上外层字段要放得下。
+- **App**：
+  - 连上主机、要到系统通知权限后，拿设备推送令牌（iOS 向 APNs 要，Android 向 FCM 要），生成 P-256 密钥对和 16 字节的 `auth`，向中转登记，再 `subscribe_push`。私钥放系统安全存储；iOS 的通知扩展要读到它，放在 App 和扩展共用的钥匙串分组里。不上传。
+  - 收到后按 F-16 的规则弹通知：同标签替换；`silent` 的“已在别处处理”直接按标签撤掉原来那条（原生 App 能做到，浏览器做不到）。点通知去那个对话，没有对话的去“待办”。
+  - 推送令牌、中转地址变了就重新登记、重新 `subscribe_push`（同一台设备同一个地址替换）。在“我”页关掉锁屏推送、断开主机时 `unsubscribe_push`；设备被吊销时主机已经会删它的订阅（D-33）。
+- **不重复打扰**：App 已经按 D-33 报 `presence`（F-16），在前台时主机不推。App 在后台但连接还在时，`alert` 和推送都会到：两边用同一个通知 id（标签的 FNV-1a，和 F-16 一样），后到的只替换、不再响铃（Android 的 `setOnlyAlertOnce`）。
+- **Android 的实现**（F-21 之四）：收 FCM、解密、弹通知都在原生代码里（`IpPush.kt`、`WebPushCrypto.kt`），App 被杀掉后 FCM 叫起服务就能弹，不用启动 Flutter。中转在 FCM 的数据消息里另带 `urgency`（`high` 或 `normal`），App 按它选“要我处理的”或“员工回复和任务完成”通知渠道。私钥用 Android Keystore 里的一把 AES 密钥包起来，存在应用私有的 SharedPreferences。Firebase 的配置不进仓库（没有 `google-services.json`），构建时用 `-PIP_FCM_*` 给；中转地址用 `--dart-define=IP_PUSH_RELAY` 给。
+- **要维护者准备的**：苹果开发者账号（APNs 密钥，并用它给 iOS App 签名，Q-12）；一个 Firebase 项目（FCM 服务账号，Android App 的 `google-services.json`）；跑中转的主机和域名。没有这些之前，中转和 App 只用假的 APNs、FCM 测。
+- **Android 的依赖**：收 FCM 要谷歌 Play 服务（闭源）。官方 App 接受这一点；以后可以加 UnifiedPush 给没有 Play 服务的手机，主机这边不用再改。
+- 测试：主机加白名单的单元测试（`push.hosts` 里的认、相近的写法不认）和配置检查；`/ws` 集成测试用假中转走一遍 App 式的订阅。中转用假的 APNs、FCM 测登记、封条解不开、转发的字段、令牌失效回 410、限流。App 用假的推送通道测登记、换令牌、关掉、收到后解密弹通知和撤销。没有在真的 APNs、FCM 和真手机上跑过之前，不写“可用”。
+
 ---
 
 ## 修订记录
@@ -826,3 +978,7 @@ CREATE TABLE IF NOT EXISTS engine_sessions (
 | 2026-11-16 | v0.16 | 新增 D-32（提议，backlog F-9）：通知规则、每台设备的通知设置、`alert` 和 `dismiss` 两种服务端帧 |
 | 2026-11-16 | v0.17 | 新增 D-33（提议，backlog F-10）：Web Push、`push_key`、`subscribe_push`、`unsubscribe_push`、`presence` 四个请求，`ip.yaml` 的 `push.contact` |
 | 2026-11-16 | v0.18 | 新增 D-34（提议，backlog F-11）：配了令牌时 `/ws` 和 `/pair` 接受桌面 App 的来源 |
+| 2026-11-21 | v0.19 | 新增 D-35（提议，backlog F-21）：手机 App 的锁屏推送照 Web Push 发给项目运营的中转 `ip-relay`，中转转给 APNs、FCM；`ip.yaml` 加 `push.hosts`，推送负载上限降到 2800 字节。`/ws` 协议不变 |
+| 2026-11-21 | v0.20 | 修 Codex 续接会话时用量重复记账（backlog E-10，提议，等工程师审查）：D-23 的引擎会话表加四列累计用量，D-20 的 `TurnContext` 加 `session_usage`、`TurnReport` 加 `session_usage`；每轮只记和上一轮累计值的差。只用假 codex 测过，累计值的数字取自 2026-11-14 真实 Codex 的核对 |
+| 2026-11-21 | v0.21 | 新增 D-36（已实现，backlog E-6）：Claude Code 引擎（`kind: claude_code`），和 Codex 共用进程管理；第 6 节改名为“外部引擎” |
+| 2026-11-21 | v0.22 | 新增 D-37（提议，backlog E-12）：Socket Mode 的 WebSocket 按 `HTTPS_PROXY`/`NO_PROXY` 等环境变量经 HTTP 代理的 CONNECT 隧道连接，规则和 Web API 一致；支持代理 Basic 认证；D-11 加一句指向 D-37。只用本地假代理和假 Slack 测过 |

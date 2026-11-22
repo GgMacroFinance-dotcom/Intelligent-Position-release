@@ -5,6 +5,7 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_state.dart';
+import 'report.dart';
 
 /// 把 [AppState] 挂在树上，下面的页面用 `AppScope.of(context)` 拿，状态一变就重建。
 class AppScope extends InheritedNotifier<AppState> {
@@ -42,11 +43,14 @@ void showError(BuildContext context, String text) {
 }
 
 /// 员工和系统写的文字按 Markdown 显示（和网页控制台 F-3 一样）：不执行 HTML，链接只开 http、https、mailto，
-/// 不加载图片（只显示图片说明），表格在气泡里横向滚动。
+/// 不加载图片（只显示图片说明），表格在气泡里横向滚动。提到的 `reports/<文件名>.md` 能点开（F-14）。
 class MessageMarkdown extends StatelessWidget {
-  const MessageMarkdown(this.text, {super.key});
+  const MessageMarkdown(this.text, {super.key, this.reportHint});
 
   final String text;
+
+  /// 可能写了文中报告的员工（写这条消息的员工、任务的负责人），找报告时先看他的。
+  final String? reportHint;
 
   @override
   Widget build(BuildContext context) {
@@ -55,7 +59,11 @@ class MessageMarkdown extends StatelessWidget {
       data: text,
       selectable: true,
       softLineBreak: true,
-      onTapLink: (_, href, _) => openExternal(context, href),
+      inlineSyntaxes: [ReportCodeRefSyntax(), ReportRefSyntax()],
+      onTapLink: (_, href, _) {
+        final report = reportPathOf(href);
+        report != null ? openReport(context, report, hint: reportHint) : openExternal(context, href);
+      },
       imageBuilder: (uri, title, alt) => Text('[图片：${alt ?? title ?? uri}]', style: theme.textTheme.bodySmall),
       styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
         tableColumnWidth: const IntrinsicColumnWidth(),

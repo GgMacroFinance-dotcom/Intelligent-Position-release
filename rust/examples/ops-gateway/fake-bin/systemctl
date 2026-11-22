@@ -1,0 +1,10 @@
+#!/bin/sh
+# 假的 systemctl：只认 is-active，FAKE_INACTIVE 里列的服务报 failed。
+# 用户级服务（--user -M 用户@）报成 用户:服务，和 FAKE_INACTIVE 里的写法对上。
+prefix=
+if [ "$1" = --user ]; then prefix="${3%@}:"; shift 3; fi
+[ "$1" = is-active ] || exit 1
+for s in ${FAKE_INACTIVE:-}; do
+  if [ "$s" = "$prefix$2" ]; then echo failed; exit 3; fi
+done
+echo active

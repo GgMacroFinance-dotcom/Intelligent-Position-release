@@ -7,6 +7,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'models.dart';
+import 'router.dart';
+import 'wire.dart' as w;
 
 /// 这份 App 说的 `/ws` 协议版本，和服务端 `events.rs` 的 `PROTOCOL_VERSION` 对应。
 const int kProtocol = 1;
@@ -243,7 +245,7 @@ class IpClient {
     }
   }
 
-  /// 发请求，返回回复里的 `data`。
+  /// 发请求，返回回复里的 `data`。App 里用下面 `IpRequests` 的方法，它们用生成的请求类型拼（F-20）。
   Future<Object?> request(Json request) {
     final socket = _socket;
     if (socket == null || status != ConnStatus.open) return Future.error(const RequestError('尚未连接'));
@@ -271,7 +273,8 @@ class IpClient {
     _sub = null;
     _failPending('连接已关闭');
     _setStatus(ConnStatus.closed);
-    await socket?.close();
+    // 不等对方回关闭帧：主机不回的话会一直卡在这里，“断开并忘掉”也就卡住了。
+    unawaited(socket?.close());
   }
 
   Future<void> dispose() async {
@@ -280,42 +283,169 @@ class IpClient {
   }
 }
 
-/// App 用到的请求，回复解析成类型。请求类型的说明见 `rust/crates/ip-server/src/protocol.rs`。
+/// App 用到的请求，回复解析成类型。请求用从 Rust 生成的 `wire.Request`（F-20）拼，字段名写错、
+/// Rust 那边改了请求的字段，这里都会编不过。请求类型的说明见 `rust/crates/ip-server/src/protocol.rs`。
 extension IpRequests on IpClient {
-  Future<List<T>> _list<T>(Json req, T Function(Json) f) async => [
-    for (final e in (await request(req) as List? ?? const [])) f(e as Json),
+  /// 发一个请求，返回回复里的 `data`。
+  Future<Object?> rpc(w.Request req) => request(req.toJson() as Json);
+
+  Future<Json> _object(w.Request req) async => await rpc(req) as Json;
+
+  Future<List<T>> _list<T>(w.Request req, T Function(Json) f) async => [
+    for (final e in (await rpc(req) as List? ?? const [])) f(e as Json),
   ];
 
-  Future<WhoAmI> whoAmI() async => WhoAmI.fromJson(await request({'type': 'who_am_i'}) as Json);
+  Future<List<String>> _strings(w.Request req) async => [
+    for (final e in (await rpc(req) as List? ?? const [])) e as String,
+  ];
 
-  Future<List<Role>> listRoles() => _list({'type': 'list_roles'}, Role.fromJson);
+  Future<WhoAmI> whoAmI() async => WhoAmI.fromJson(await _object(const w.RequestWhoAmI()));
 
-  Future<List<Agent>> listAgents() => _list({'type': 'list_agents'}, Agent.fromJson);
+  Future<List<Role>> listRoles() => _list(const w.RequestListRoles(), Role.fromJson);
+
+  Future<List<Agent>> listAgents() => _list(const w.RequestListAgents(), Agent.fromJson);
 
   Future<List<ThreadSummary>> listThreads({int limit = 100}) =>
-      _list({'type': 'list_threads', 'limit': limit}, ThreadSummary.fromJson);
+      _list(w.RequestListThreads(limit: limit), ThreadSummary.fromJson);
 
   Future<List<Message>> history(String threadId, {int limit = 200}) =>
-      _list({'type': 'history', 'thread_id': threadId, 'limit': limit}, Message.fromJson);
+      _list(w.RequestHistory(threadId: threadId, limit: limit), Message.fromJson);
 
   /// 有没有路由规则：有就默认自动分派。
-  Future<bool> hasRules() async {
-    final view = await request({'type': 'list_rules'}) as Json;
-    return ((view['spec'] as Json?)?['rules'] as List?)?.isNotEmpty ?? false;
-  }
+  Future<bool> hasRules() async => (await listRules()).spec.rules.isNotEmpty;
 
   Future<List<Approval>> listApprovals({int limit = 50}) =>
-      _list({'type': 'list_approvals', 'limit': limit}, Approval.fromJson);
+      _list(w.RequestListApprovals(limit: limit), Approval.fromJson);
 
-  Future<List<Task>> listTasks({int limit = 200}) => _list({'type': 'list_tasks', 'limit': limit}, Task.fromJson);
+  Future<List<Task>> listTasks({int limit = 200}) => _list(w.RequestListTasks(limit: limit), Task.fromJson);
 
-  Future<Approval> resolveApproval(String approvalId, int choice) async => Approval.fromJson(
-    await request({'type': 'resolve_approval', 'approval_id': approvalId, 'choice': choice}) as Json,
+  Future<Approval> resolveApproval(String approvalId, int choice) async =>
+      Approval.fromJson(await _object(w.RequestResolveApproval(approvalId: approvalId, choice: choice)));
+
+  /// 改任务的状态（`open`、`in_progress`、`blocked`、`done`、`cancelled`），回复改完的任务。
+  /// 用设备令牌连上时主机按设备名署名。
+  Future<Task> updateTask(String taskId, {String? status, String? result}) async => Task.fromJson(
+    await _object(
+      w.RequestUpdateTask(
+        taskId: taskId,
+        status: status == null ? null : w.TaskStatus.fromJson(status),
+        result: result,
+      ),
+    ),
   );
+
+  /// 新建任务。指定负责人时主机另开一个对话把任务交给他；都不指定时留给人分配。
+  /// 用设备令牌连上时主机按设备名署名。
+  Future<Task> createTask(String title, {String? description, String? assignee, String? role, int? dueMs}) async =>
+      Task.fromJson(
+        await _object(
+          w.RequestCreateTask(title: title, description: description, assignee: assignee, role: role, dueMs: dueMs),
+        ),
+      );
+
+  // ---------- 路由规则（F-18；看和试一试日常权限也能用，改要“管理”） ----------
+
+  Future<RulesView> listRules() async => RulesView.fromJson(await _object(const w.RequestListRules()));
+
+  /// 试一试：这句话会分给谁，不发送。
+  Future<RouteDecision> route(String text) async => RouteDecision.fromJson(await _object(w.RequestRoute(text: text)));
+
+  /// 保存一整套路由规则，校验通过后立即生效并持久化，回复保存后的规则。`acceptedDraft` 是这次采纳的草案。
+  Future<RouterSpec> saveRules(RouterSpec spec, {String? acceptedDraft}) async =>
+      RouterSpec.fromJson(await _object(w.RequestSaveRules(spec: spec.toWire(), acceptedDraft: acceptedDraft)));
+
+  Future<List<RuleDraft>> listRuleDrafts() => _list(const w.RequestListRuleDrafts(), RuleDraft.fromJson);
+
+  /// 忽略一条草案，回复剩下的草案。
+  Future<List<RuleDraft>> dismissRuleDraft(String draftId) =>
+      _list(w.RequestDismissRuleDraft(draftId: draftId), RuleDraft.fromJson);
+
+  // ---------- 记忆（“管理”权限，F-18） ----------
+
+  Future<MemoryView> _memory(w.Request req) async => MemoryView.fromJson(await _object(req));
+
+  Future<MemoryView> getMemory(String roleId) => _memory(w.RequestGetMemory(roleId: roleId));
+
+  /// 整体改写决策者笔记或岗位记忆摘要，空文本等于清空这一层。
+  Future<MemoryView> saveMemoryText(String roleId, MemoryLayer layer, String text) =>
+      _memory(w.RequestSaveMemoryText(roleId: roleId, layer: layer.toWire(), text: text));
+
+  /// 抹掉一个对话在这个岗位下的记忆。
+  Future<MemoryView> forgetThreadMemory(String roleId, String threadId) =>
+      _memory(w.RequestForgetThreadMemory(roleId: roleId, threadId: threadId));
+
+  /// 删一条人要求的更正。
+  Future<MemoryView> deleteMemoryNote(String roleId, int noteId) =>
+      _memory(w.RequestDeleteMemoryNote(roleId: roleId, noteId: noteId));
+
+  /// 清空一个岗位的记忆（摘要、各对话的记忆、更正；决策者笔记不动）。
+  Future<MemoryView> clearMemory(String roleId) => _memory(w.RequestClearMemory(roleId: roleId));
+
+  /// 关掉了记忆的对话。
+  Future<List<String>> listMemoryOffThreads() => _strings(const w.RequestListMemoryOffThreads());
+
+  /// 关掉或重新打开一个对话的记忆，回复改完后关掉了记忆的对话。
+  Future<List<String>> setThreadMemory(String threadId, {required bool enabled}) =>
+      _strings(w.RequestSetThreadMemory(threadId: threadId, enabled: enabled));
+
+  // ---------- 定时任务（“管理”权限，F-18） ----------
+
+  Future<List<Schedule>> listSchedules() => _list(const w.RequestListSchedules(), Schedule.fromJson);
+
+  /// 立即运行一次（不影响原定的下次运行）。
+  Future<SendResult> runSchedule(String scheduleId) async =>
+      SendResult.fromJson(await _object(w.RequestRunSchedule(scheduleId: scheduleId)));
+
+  // ---------- 设备管理（“管理”权限，F-18） ----------
+
+  Future<List<DeviceInfo>> listDevices() => _list(const w.RequestListDevices(), DeviceInfo.fromJson);
+
+  /// 生成一个 2 分钟内有效的 6 位配对码；`linkBase` 是控制台的地址，给了就附上扫码地址和二维码。
+  Future<NewPairing> createPairing(String name, {String? linkBase}) async =>
+      NewPairing.fromJson(await _object(w.RequestCreatePairing(name: name, linkBase: linkBase)));
+
+  Future<List<DeviceInfo>> renameDevice(String deviceId, String name) =>
+      _list(w.RequestRenameDevice(deviceId: deviceId, name: name), DeviceInfo.fromJson);
+
+  Future<List<DeviceInfo>> setDeviceScope(String deviceId, Scope scope) =>
+      _list(w.RequestSetDeviceScope(deviceId: deviceId, scope: scope.toWire()), DeviceInfo.fromJson);
+
+  /// 吊销一台设备，它的连接立即断开。
+  Future<List<DeviceInfo>> revokeDevice(String deviceId) =>
+      _list(w.RequestRevokeDevice(deviceId: deviceId), DeviceInfo.fromJson);
+
+  /// 这台设备的通知设置（共用令牌连上时是共用的那份）。
+  Future<NotifySettings> getNotifySettings() async =>
+      NotifySettings.fromJson(await _object(const w.RequestGetNotifySettings()));
+
+  /// 改这台设备的通知设置，回复保存后的设置。日常权限就能改（改的是自己的）。
+  Future<NotifySettings> setNotifySettings(NotifySettings s) async =>
+      NotifySettings.fromJson(await _object(w.RequestSetNotifySettings(settings: s.toWire())));
+
+  /// 告诉主机 App 在不在前台（m2-spec D-33）：在前台时主机不给这台设备推送，30 秒没报 `true` 就当不在。
+  Future<void> presence(bool active) => rpc(w.RequestPresence(active: active));
+
+  /// 登记锁屏推送的订阅（m2-spec D-33、D-35）：`endpoint` 是推送中转给的地址，`p256dh`、`auth` 是这台手机的
+  /// Web Push 公钥。同一个地址再登记是更新。日常权限就能用。
+  Future<void> subscribePush(String endpoint, String p256dh, String auth) =>
+      rpc(w.RequestSubscribePush(endpoint: endpoint, p256dh: p256dh, auth: auth));
+
+  /// 删掉一个推送订阅。
+  Future<void> unsubscribePush(String endpoint) => rpc(w.RequestUnsubscribePush(endpoint: endpoint));
+
+  /// 今天（UTC）各岗位和语义分派的模型费用。
+  Future<SpendToday> spendToday() async => SpendToday.fromJson(await _object(const w.RequestSpendToday()));
+
+  /// 员工写的报告，新改的在前。省略 `agentId` 时列所有员工的。
+  Future<List<ReportInfo>> listReports({String? agentId, int limit = 200}) =>
+      _list(w.RequestListReports(agentId: agentId, limit: limit), ReportInfo.fromJson);
+
+  /// 读一份报告；`path` 是 `list_reports` 给的 `reports/<文件名>.md`。
+  Future<ReportText> readReport(String agentId, String path) async =>
+      ReportText.fromJson(await _object(w.RequestReadReport(agentId: agentId, path: path)));
 
   /// 省略 `agentId` 时由路由规则决定；省略 `threadId` 时开一个新对话。
   /// 用设备令牌连上时，主机按设备名署名，不用带 `author`（apps-plan 4.4）。
-  Future<SendResult> send(String text, {String? agentId, String? threadId}) async => SendResult.fromJson(
-    await request({'type': 'send', 'text': text, 'agent_id': ?agentId, 'thread_id': ?threadId}) as Json,
-  );
+  Future<SendResult> send(String text, {String? agentId, String? threadId}) async =>
+      SendResult.fromJson(await _object(w.RequestSend(text: text, agentId: agentId, threadId: threadId)));
 }
