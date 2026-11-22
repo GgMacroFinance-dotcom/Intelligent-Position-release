@@ -88,7 +88,9 @@ class _MemoryPageState extends State<MemoryPage> {
   Future<void> _setThreadMemory(String threadId, {required bool enabled}) async {
     setState(() => _busy = true);
     try {
-      final off = await AppScope.read(context).client.setThreadMemory(threadId, enabled: enabled);
+      final state = AppScope.read(context);
+      final off = await state.client.setThreadMemory(threadId, enabled: enabled);
+      state.memoryOffChanged(off);
       if (!mounted) return;
       setState(() => _off = off);
       // 关掉时这个对话已提炼的内容被抹掉了，要重新取。

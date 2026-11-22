@@ -153,6 +153,7 @@ void installDefaults(FakeHost h) {
       'from_console': false,
     },
     'list_approvals': (_) => [approval('a1')],
+    'list_memory_off_threads': (_) => <Object>[],
     'list_tasks': (_) => <Object>[],
     'list_reports': (_) => <Object>[],
     'spend_today': (_) => {

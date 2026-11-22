@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ip_app/src/ui/admin/devices_page.dart';
 import 'package:ip_app/src/ui/admin/memory_page.dart';
 import 'package:ip_app/src/ui/admin/schedules_page.dart';
+import 'package:ip_app/src/ui/chat_page.dart';
 
 import 'fake_host.dart';
 import 'harness.dart';
@@ -336,5 +337,67 @@ void main() {
     expect(find.textContaining('这个岗位没开记忆'), findsOneWidget);
     expect(find.text('还没有内容'), findsNWidgets(2));
     await h.stop(tester);
+  });
+
+  testWidgets('对话页：管理设备能关掉、重新打开这个对话的记忆', (tester) async {
+    final h = adminHarness();
+    var off = <String>[];
+    h.host.handlers.addAll({
+      'list_memory_off_threads': (_) => off,
+      'set_thread_memory': (req) {
+        final id = req['thread_id'] as String;
+        off = req['enabled'] == true ? off.where((x) => x != id).toList() : [...off, id];
+        return off;
+      },
+    });
+    await h.savePaired();
+    await h.start(tester, size: const Size(1280, 800));
+    await tester.tap(find.text('对话'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('最近 CPI 怎么样'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('闲置后会被提炼进岗位记忆'), findsOneWidget);
+
+    // 关掉要先确认：已提炼的会被抹掉。
+    await tester.tap(find.widgetWithText(TextButton, '不让它进记忆'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('会被抹掉'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '不让它进记忆'));
+    await tester.pumpAndSettle();
+    final req = h.host.requests.lastWhere((r) => r['type'] == 'set_thread_memory');
+    expect((req['thread_id'], req['enabled']), ('t1', false));
+    expect(find.text('这个对话不进岗位记忆。'), findsOneWidget);
+
+    // 重新打开不用确认。
+    await tester.tap(find.text('重新打开'));
+    await tester.pumpAndSettle();
+    expect(h.host.requests.lastWhere((r) => r['type'] == 'set_thread_memory')['enabled'], true);
+    expect(find.textContaining('闲置后会被提炼进岗位记忆'), findsOneWidget);
+    await h.stop(tester);
+  });
+
+  testWidgets('对话页：日常设备只看到这个对话进不进记忆，没有开关；主机太旧时整行不显示', (tester) async {
+    final h = Harness();
+    h.host.handlers['list_memory_off_threads'] = (_) => ['t1'];
+    await h.savePaired();
+    await h.start(tester, size: const Size(1280, 800));
+    await tester.tap(find.text('对话'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('最近 CPI 怎么样'));
+    await tester.pumpAndSettle();
+    expect(find.text('这个对话不进岗位记忆。'), findsOneWidget);
+    expect(find.text('重新打开'), findsNothing);
+    await h.stop(tester);
+
+    final old = Harness();
+    old.host.handlers.remove('list_memory_off_threads');
+    await old.savePaired();
+    await old.start(tester, size: const Size(1280, 800));
+    await tester.tap(find.text('对话'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('最近 CPI 怎么样'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ThreadMemoryBar), findsNothing);
+    await old.stop(tester);
   });
 }
