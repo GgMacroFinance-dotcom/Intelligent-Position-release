@@ -44,7 +44,7 @@ endpoints:
     # cached_input 是命中提示前缀缓存的输入，cache_write 是写进缓存的输入（OpenAI 按输入价的 1.25 倍收），省略时都按 input 算。
     # 下面两行是 2026-11-14 从 OpenAI 的模型文档（developers.openai.com/api/docs/models/<模型>）核对的标准价，用之前请再核对；
     # 超过 27.2 万输入 token 的长请求 OpenAI 另按 2 倍输入价、1.5 倍输出价收，这里没算。
-    # 价格可以用 examples/ops-gateway/model_prices.py 从 OpenRouter 的模型目录读，运维岗位每天对一次。
+    # 价格可以用 examples/ops-gateway/model_prices.py 从 OpenRouter 的模型目录读，运维岗位每月 1 号校对一次。
     prices:
       gpt-6-astra: { input: 10, cached_input: 1, cache_write: 12.5, output: 50 }
       gpt-6-luna: { input: 0.10, cached_input: 0.01, cache_write: 0.125, output: 0.50 }
@@ -177,7 +177,14 @@ schedules:
     cron: "30 8 * * *"
     utc_offset: "+08:00"
     to: { role: ops-tester }
-    text: 按 AGENTS.md 的“上游新模型”一节跑 upstream_models.py。有新增的查官方价格，用 ask_human 请人确认上架。再跑 model_prices.py 对比 harness 的模型价格和 OpenRouter，有变化用 ask_human 请人确认后加 --write 写回。都没有变化就记一行。
+    text: 按 AGENTS.md 的“上游新模型”一节跑 upstream_models.py。有新增的查官方价格，用 ask_human 请人确认上架；没有变化就记一行。
+    enabled: false
+  - id: monthly-model-prices
+    description: 每月 1 号校对 harness 的模型价格
+    cron: "30 8 1 * *"
+    utc_offset: "+08:00"
+    to: { role: ops-tester }
+    text: 按 AGENTS.md 的“harness 的模型价格”一节跑 model_prices.py，和 OpenRouter 的模型目录对比。有变化用 ask_human 请人确认后加 --write 写回；没有变化就记一行。
     enabled: false
   - id: weekly-new-api-release
     description: 每周一检查 New API 有没有新发布

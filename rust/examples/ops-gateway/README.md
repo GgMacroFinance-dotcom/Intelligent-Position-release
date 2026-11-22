@@ -61,7 +61,7 @@ export UPSTREAM_KEY=...
 python3 upstream_models.py --base-url https://api.example.com --upstream-url http://127.0.0.1:<端口>/v1 \
   --upstream-key-env UPSTREAM_KEY --mapping mapping.json --ignore upstream-ignore.json --probe
 
-# harness 自己的模型价格（和上游新模型同一步）。OpenRouter 的目录是公开的，不用密钥
+# harness 自己的模型价格（每月 1 号）。OpenRouter 的目录是公开的，不用密钥
 python3 model_prices.py --config /path/to/ip.yaml --map prices-map.json        # 只对比
 python3 model_prices.py --config /path/to/ip.yaml --map prices-map.json --write # 人确认后写回，重启 harness 生效
 
@@ -78,7 +78,7 @@ python3 usage_report.py --sql-cmd "docker exec -i <postgres 容器> psql -X -q -
 
 ## 接到岗位上
 
-岗位走外部引擎 Codex（见 `ip.example.yaml` 的 `engines.ops-tester`），Codex 自带 shell，命令要联网（`network: true`）。工作目录里放 `AGENTS.md`（从 `AGENTS.example.md` 改）、`baseline.json` 和这几个脚本，Codex 每轮都会读 `AGENTS.md`。定时任务写在 `schedules` 里，见 `ip.example.yaml` 的 `daily-gateway-check`（每天巡检）、`daily-upstream-models`（上游新模型）、`weekly-new-api-release`（新版本）、`nightly-gateway-report`（每晚 23:00 日报），默认都关着。
+岗位走外部引擎 Codex（见 `ip.example.yaml` 的 `engines.ops-tester`），Codex 自带 shell，命令要联网（`network: true`）。工作目录里放 `AGENTS.md`（从 `AGENTS.example.md` 改）、`baseline.json` 和这几个脚本，Codex 每轮都会读 `AGENTS.md`。定时任务写在 `schedules` 里，见 `ip.example.yaml` 的五个：`daily-gateway-check`（每天巡检）、`daily-upstream-models`（上游新模型）、`monthly-model-prices`（每月 1 号校对模型价格）、`weekly-new-api-release`（新版本）、`nightly-gateway-report`（每晚 23:00 日报），默认都关着。
 
 这几种操作会改生产，手册要求先用 `ask_human` 说明影响、给出推荐选项，人选定后再做，做之前先备份：
 

@@ -72,7 +72,7 @@ python3 upstream_models.py --base-url <地址> --upstream-url <上游地址>/v1 
 - 试调不通的，或者人决定不上架的，加进 `upstream-ignore.json`，以后不再报。
 - 上游已经没有、我们还在卖的：马上报告，这是故障（用户会调不通）。
 
-### harness 自己的模型价格（同一步做）
+## harness 的模型价格（每月 1 号）
 
 harness 的岗位每日预算按 `ip.yaml` 里端点的 `prices` 算。价格从 OpenRouter 的公开模型目录读，不手填：
 
