@@ -10,6 +10,7 @@ repository.workspace = true
 ip-core.workspace = true
 tokio-postgres.workspace = true
 deadpool-postgres.workspace = true
+rusqlite = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -20,8 +21,12 @@ tracing.workspace = true
 [features]
 # 给其他 crate 的测试用：每个测试一个临时 schema（`testing` 模块）。
 testing = []
+# 从 SQLite 版的 ip.db 导入（`import` 模块，`ip store import-sqlite`）。只有 ip-cli 打开。
+import-sqlite = ["dep:rusqlite"]
 
 [dev-dependencies]
+rusqlite.workspace = true
+tempfile = "3"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]

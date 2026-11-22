@@ -9,6 +9,8 @@
 //! - **读**：连接池里的连接，预编译语句按连接缓存。
 //! - **只追加**：每次写入先记一条事件（`events` 表），再更新投影表（如 `messages`）。
 
+#[cfg(any(test, feature = "import-sqlite"))]
+mod import;
 mod schema;
 mod segment;
 #[cfg(any(test, feature = "testing"))]
@@ -23,6 +25,8 @@ use tokio::sync::oneshot;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::{NoTls, Row};
 
+#[cfg(any(test, feature = "import-sqlite"))]
+pub use import::ImportReport;
 pub use segment::{index_text, match_query, tokens};
 
 /// 全库搜索时参与相关度排序的最近命中条数。SQLite 时是 2000；PostgreSQL 的 `ts_rank`

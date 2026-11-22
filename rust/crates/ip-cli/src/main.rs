@@ -42,6 +42,9 @@ enum Command {
     /// 岗位的决策者笔记和记忆摘要：查看、写入、清空。服务在运行时也能用，下一轮对话生效。
     #[command(subcommand)]
     Context(ContextCommand),
+    /// 存储相关操作。
+    #[command(subcommand)]
+    Store(StoreCommand),
     /// 配对手机、电脑（backlog F-7）。改名和吊销在控制台“设备”页做。
     #[command(subcommand)]
     Device(DeviceCommand),
@@ -76,6 +79,20 @@ enum DeviceCommand {
         /// 控制台对外的地址，比如 https://ip.example.com。给了就在终端里画出二维码，手机扫码即可。
         #[arg(long)]
         url: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum StoreCommand {
+    /// 把 SQLite 版的 ip.db 导进配置里的 PostgreSQL（docs/ip/postgres-migration-plan.md 第 6 节）。
+    /// 目标 schema 里已经有数据时拒绝；全部在一个事务里，逐表核对行数，对不上就回滚。旧库只读，不改不删。
+    /// 导入时先停服务。
+    ImportSqlite {
+        #[arg(long)]
+        config: PathBuf,
+        /// 旧库文件；省略时用 <data_dir>/ip.db。
+        #[arg(long)]
+        from: Option<PathBuf>,
     },
 }
 
@@ -170,6 +187,10 @@ fn main() -> anyhow::Result<()> {
             .enable_all()
             .build()?
             .block_on(context(command)),
+        Command::Store(command) => tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(store(command)),
         Command::Device(command) => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?
@@ -228,6 +249,30 @@ async fn pull(config: PathBuf, only: Option<String>) -> anyhow::Result<()> {
     if failed > 0 {
         anyhow::bail!("{failed} 个序列拉取失败");
     }
+    Ok(())
+}
+
+/// `ip store import-sqlite`。
+async fn store(command: StoreCommand) -> anyhow::Result<()> {
+    let StoreCommand::ImportSqlite { config, from } = command;
+    let config = ip_server::Config::load(&config)?;
+    let from = from.unwrap_or_else(|| config.data_dir.join("ip.db"));
+    let db = config
+        .database
+        .resolve(&|var| std::env::var(var).ok())
+        .map_err(anyhow::Error::msg)?;
+    let report = ip_store::Store::import_sqlite(&db, &from).await?;
+    for (table, rows) in &report.tables {
+        match rows {
+            Some(n) => println!("{table}：{n} 行"),
+            None => println!("{table}：旧库里没有这张表，跳过"),
+        }
+    }
+    println!(
+        "已导入 schema {}。{} 没有改动，确认服务正常后再自己挪走或删掉。",
+        db.schema,
+        from.display()
+    );
     Ok(())
 }
 
