@@ -7,6 +7,7 @@
 另外顺带假扮两个外部服务，给 release_check.py 和 upstream_models.py 演练：
   /github/repos/<owner>/<repo>/releases   GitHub 的发布列表（--release 注入，最新的写在最后）
   /upstream/v1/models、/upstream/v1/chat/completions   上游（比如 OpenCodex）的模型目录和调用
+  /openrouter/api/v1/models   OpenRouter 的模型目录（含价格，美元 / token），给 model_prices.py 演练
 令牌固定是 sk-fake-probe（不是真密钥）。故障用 --fault 注入，可以写多次：
 
   version=<版本>        /api/status 报这个版本
@@ -19,6 +20,8 @@
   slow=<模型>:<秒>      调这个模型时先等这么多秒再正常回
   upstream_new=<模型>   上游目录里多出这个模型（模型名带 broken 的，调用回 404）
   upstream_gone=<模型>  上游目录里没有这个模型
+  or_price=<id>:<输入价>  OpenRouter 目录里这个模型的输入价改成这么多（美元 / 百万 token）
+  or_gone=<id>          OpenRouter 目录里没有这个模型
 
 --release <标签>[:pre] 往假 GitHub 的发布列表里加一个版本，可以写多次，按时间先后写。
 """
@@ -36,6 +39,13 @@ MODELS = {
     "model-a": {"quota_type": 0, "model_ratio": 1.25, "model_price": 0, "completion_ratio": 8, "owner_by": "fake"},
     "model-b": {"quota_type": 0, "model_ratio": 0.5, "model_price": 0, "completion_ratio": 4, "owner_by": "fake"},
     "image-1": {"quota_type": 1, "model_ratio": 0, "model_price": 0.04, "completion_ratio": 0, "owner_by": "fake"},
+}
+# 假 OpenRouter 目录：id → 价格（美元 / 百万 token）。和 fixtures/ip-prices.yaml 里写的一致。
+OPENROUTER = {
+    "vendor/model-a": {"prompt": 10, "completion": 50, "input_cache_read": 1, "input_cache_write": 12.5},
+    "vendor/model-b": {"prompt": 0.1, "completion": 0.5, "input_cache_read": 0.01},
+    "other/model-b": {"prompt": 9, "completion": 9},
+    "vendor/model-a:batch": {"prompt": 5, "completion": 25},
 }
 
 
@@ -88,6 +98,15 @@ class Handler(BaseHTTPRequestHandler):
                             "html_url": f"https://github.com/example/new-api/releases/tag/{tag}",
                             "body": f"{tag} 的更新说明：修复若干问题。"})
             return self.send(200, list(reversed(out)))
+        if self.path == "/openrouter/api/v1/models":
+            table = {k: dict(v) for k, v in OPENROUTER.items() if k not in self.faults.get("or_gone", [])}
+            for spec in self.faults.get("or_price", []):
+                mid, _, price = spec.partition(":")
+                if mid in table:
+                    table[mid]["prompt"] = float(price)
+            data = [{"id": k, "name": k, "pricing": {f: f"{v / 1e6:.12f}" for f, v in prices.items()}}
+                    for k, prices in table.items()]
+            return self.send(200, {"data": data})
         if self.path == "/upstream/v1/models":
             if self.headers.get("Authorization") != "Bearer " + UPSTREAM_TOKEN:
                 return self.send(401, {"error": {"message": "bad upstream key"}})

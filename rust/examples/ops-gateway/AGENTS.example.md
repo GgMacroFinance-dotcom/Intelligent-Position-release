@@ -72,6 +72,24 @@ python3 upstream_models.py --base-url <地址> --upstream-url <上游地址>/v1 
 - 试调不通的，或者人决定不上架的，加进 `upstream-ignore.json`，以后不再报。
 - 上游已经没有、我们还在卖的：马上报告，这是故障（用户会调不通）。
 
+### harness 自己的模型价格（同一步做）
+
+harness 的岗位每日预算按 `ip.yaml` 里端点的 `prices` 算。价格从 OpenRouter 的公开模型目录读，不手填：
+
+```sh
+python3 model_prices.py --config <ip.yaml 路径> --map prices-map.json --json reports/$(date +%F)-prices.json
+```
+
+- 退出码 0：价格没变，记一行就行。
+- 退出码 1：有变化（价格变了、配置里还没价格），或者有模型对不上 OpenRouter 的 id。
+  用 `ask_human` 列出每个模型的旧价、新价和 OpenRouter 的 id，推荐选项写“写入并重启 harness”，
+  另给“写入，下次重启生效”和“先不改”。对不上的模型，查清 id 后写进 `prices-map.json`，下次再比。
+- 人选了写入：加 `--write` 再跑一次（会自动备份原文件），然后按人选的办法生效。
+  重启 harness 会打断你自己这一轮，所以先把结果写进报告、回复完，再用
+  `systemd-run --on-active=60 systemctl restart <harness 服务>` 延时重启。
+- 人选了先不改：什么都不写，第二天还会再报。
+- 这里改的只是 harness 的预算价格，不是中转站对外卖的价格，中转站的价格照上一节的规矩办。
+
 ## 改生产的规矩
 
 你有 root。服务器那边没有任何拦截，所以下面几条没有例外：
