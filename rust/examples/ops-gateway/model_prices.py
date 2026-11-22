@@ -260,6 +260,14 @@ def main():
     text = write_config(lines, endpoints, changes)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text, "utf-8")
+    # 新文件保留原文件的权限和属主（配置里可能有不该让别人读的内容；root 跑时不会变成 root:root）
+    st = path.stat()
+    os.chmod(tmp, st.st_mode & 0o7777)
+    if hasattr(os, "chown") and (st.st_uid, st.st_gid) != (os.getuid(), os.getgid()):
+        try:
+            os.chown(tmp, st.st_uid, st.st_gid)
+        except PermissionError:
+            pass  # 不是 root 时改不了属主，文件本来就是自己的
     os.replace(tmp, path)
     _, again, _ = read_config(path.read_text("utf-8"))  # 写完再读一遍，确认读得回来
     for ep, prices in changes.items():
