@@ -78,6 +78,9 @@ class AppState extends ChangeNotifier {
   /// 有路由规则时，新对话默认自动分派。
   bool hasRules = false;
 
+  /// 关掉了记忆的对话（不进岗位记忆）；主机太旧没有这个请求时为空。
+  Set<String>? memoryOff;
+
   // ---------- 对话 ----------
 
   /// 打开着的对话；新对话还没发第一条时为空。
@@ -394,6 +397,12 @@ class AppState extends ChangeNotifier {
       reports = r[6] as List<ReportInfo>;
       spend = r[7] as SpendToday;
       try {
+        memoryOff = (await c.listMemoryOffThreads()).toSet();
+      } on RequestError {
+        // 主机太旧，没有对话记忆开关。
+        memoryOff = null;
+      }
+      try {
         notify = await c.getNotifySettings();
       } on RequestError {
         // 主机太旧，没有通知设置。
@@ -442,6 +451,17 @@ class AppState extends ChangeNotifier {
       agentForNew = agentId;
       _agentForNewChosen = true;
     }
+    notifyListeners();
+  }
+
+  /// 关掉或重新打开一个对话的记忆（要“管理”权限）。关掉时这个对话已提炼进岗位记忆的内容会被抹掉。
+  Future<void> setThreadMemory(String id, {required bool enabled}) async {
+    memoryOffChanged(await client.setThreadMemory(id, enabled: enabled));
+  }
+
+  /// 主机回了新的“关掉了记忆的对话”清单（对话页和记忆页共用）。
+  void memoryOffChanged(List<String> off) {
+    memoryOff = off.toSet();
     notifyListeners();
   }
 
