@@ -23,6 +23,7 @@ ts-rs.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+ip-store = { workspace = true, features = ["testing"] }
 tempfile = "3"
 
 [lints]

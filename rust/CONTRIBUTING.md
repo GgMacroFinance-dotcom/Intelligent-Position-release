@@ -28,6 +28,7 @@ CI 已恢复（2026-11-13）。改到 `rust/**` 或 `.github/workflows/rust.yml`
 
 ```sh
 cd rust
+export IP_TEST_DATABASE_URL=postgres://postgres:ip@127.0.0.1:5432/postgres   # 存储测试要一个 PostgreSQL，见 README“快速开始”
 cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 cargo test
@@ -44,7 +45,7 @@ cargo deny --locked --all-features check licenses
 ## 约定
 
 - **性能是功能的一部分。** 新增的热路径要在 `ip bench` 里有对应基准和目标值；PR 让某项基准变差时，在描述里写明原因。
-- **不阻塞异步运行时。** 数据库、搜索、图像处理放到专用线程；tokio 任务里不做同步 IO。
+- **不阻塞异步运行时。** 数据库走异步驱动（`tokio-postgres`）；搜索、图像处理这类 CPU 活放到专用线程；tokio 任务里不做同步 IO。
 - **数据只追加。** 不整文件重写状态；需要改动就追加事件或更新单行。
 - **`unsafe` 默认禁止。** 确实需要时，在该模块单独放开并写明理由，由两人共同审查。
 - **依赖和代码来源。** 只引入与 Apache-2.0 兼容的依赖（MIT、Apache-2.0、BSD 等）。允许的许可证清单在 `deny.toml`，由 CI 的 `licenses` 工作流检查；新依赖用了清单以外的许可证时，先确认它和 Apache-2.0 兼容，再加进清单，并在 PR 描述里写明。可以复用 openai/codex（Apache-2.0）的代码，复制时保留其版权声明并在文件头注明来源。nightly-lab 是非商用许可，只能参考设计，不得复制其代码。

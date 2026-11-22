@@ -47,7 +47,7 @@ flowchart TB
     tools["沙箱里的 shell 和文件工具<br/>bubblewrap，默认断网"]
     data["MCP 服务器和数据源<br/>Finance Macro Data API、CSV 目录"]
     codex["外部引擎 Codex<br/>经 /mcp 回调组织工具"]
-    store[("SQLite<br/>只追加的事件日志")]
+    store[("PostgreSQL<br/>只追加的事件日志")]
 
     entry --> router
     router -- "命中规则" --> exec

@@ -42,7 +42,8 @@
 ### 4.2 保持不变的
 
 - `Store` 的公开方法、`StoreError` 以外的类型都不变，调用方只改 `Store::open` 一处（改成接收数据库配置）。`StoreError::Sqlite` 换成 `StoreError::Db`。
-- 单一写入者：保留“一个写任务、同时到达的写合并成一个事务、每个请求一个保存点”的做法，用一条专用连接。这同时保证了 `events.seq` 按提交顺序递增，渠道游标的语义不变。代价是同一个库只能有一个 I.P. 进程在写，这和现在一样；启动时用 `pg_try_advisory_lock` 占住，第二个进程报错退出，不会悄悄乱序。
+- 单一写入者：保留“一个写任务、同时到达的写合并成一个事务、每个请求一个保存点”的做法，用一条专用连接。
+- 事件顺序：`ip context`、`ip device pair` 会在服务运行时另开进程写同一个库（SQLite 时就是这样），所以不能用“一个库只许一个进程”的锁。改为每个写事务开头取一把事务级 advisory lock（`pg_advisory_xact_lock`，提交时释放），所有写事件的事务排队提交，`events.seq` 按提交顺序递增，渠道游标的语义不变。seq 可能跳号（回滚的事务不收回序号），游标只要求递增，不受影响。
 
 ### 4.3 表结构对照
 
@@ -64,7 +65,14 @@
 - `messages` 加一列 `search tsvector`，写入时在 Rust 里算 `index_text(text)`，用 `to_tsvector('simple', $1)` 存；建 GIN 索引。
 - `match_query` 改为生成 `tsquery`：每个词内部的二字词用 `<->` 连成短语，词之间 `&`；单个汉字用前缀 `字:*`。这和现在 FTS5 的语义一一对应。
 - 排序：FTS5 的 bm25 换成 `ts_rank`，排序结果会有细微差别。继续只在最近 2000 条命中里排序。
-- 要重新量：`ip bench store` 的搜索 p95 目标仍是 10 ms。PostgreSQL 走本机套接字，每次查询多一次往返；GIN 上的短语查询要回表核对位置，常见词可能变慢。量出来超标再考虑把短语匹配改成只用 `&`（多搜到一点，精度略降）。
+- 实测（2026-11-22，`ip bench store`，PostgreSQL 16 和基准在同一台机器上）：照搬 SQLite 的写法 p95 是 41 ms。做了这几件以后 p95 7–8.4 ms、p50 3–3.6 ms，达到 10 ms 的目标：
+  - 先只搜最新的 1 万条消息，命中凑不够排序窗口再把范围放大四倍，直到覆盖全部历史。短语匹配要逐条读出命中消息的位置信息，常见词在 5 万条里命中 1 万条时光这一步就要十几毫秒。
+  - 排序窗口 `RANK_WINDOW` 从 2000 减到 1000：`ts_rank` 逐条解析位置信息，2000 条要 7 ms 左右。
+  - 连接设 `plan_cache_mode=force_custom_plan`：预编译语句执行几次后 PostgreSQL 改用通用计划，范围条件会选错索引。
+  - GIN 索引 `fastupdate = off`：开着时新写入先进待合并列表，刚写完一批消息时每次搜索都要线性扫它。代价是写入慢一些。
+  - 基准灌完数据后手动 `ANALYZE` 一次，量的是平稳状态（长期运行的库由 autovacuum 做）。
+- 写入吞吐从 SQLite 的约 1 万条/秒降到约 1,600 条/秒（每条消息几次网络往返）。员工的消息量远低于这个数，暂时不优化。
+- 岗位记忆搜索（`memory_search`）用 C 排序规则的 `lower()` 加 `strpos`，2000 份时 p95 约 6–7 ms（SQLite 时约 8 ms）。
 
 ### 4.5 迁移文件
 
@@ -78,6 +86,8 @@ database:
   schema: ip
   max_connections: 8
 ```
+
+第一版只支持不加密的连接（`NoTls`），够连同一台机器或同一个 compose 网络里的库；连 RDS、Supabase 这类要 TLS 的外部库，后面单独加（`tokio-postgres-rustls`）。
 
 连 Supabase 时用直连或 session 模式的连接池地址，不能用 transaction 模式（6543 端口），因为 `tokio-postgres` 用预编译语句。
 
@@ -123,13 +133,11 @@ mobius 上 I.P. 只跑运维员工小维，数据量小，停机几分钟可以�
 
 ## 8. 拆成几个 PR
 
-1. 本方案、backlog 加一条、`project-spec.md` 记下决定（只改文档）。
-2. `ip-store` 换成 PostgreSQL：迁移文件、写任务、读池、搜索；测试和 CI 加 PostgreSQL；`ip bench store` 重新量。`Store::open` 的调用方跟着改。删掉 `rusqlite`。
-3. 配置 `database`、docker-compose 和初始化脚本、README、部署文档。
-4. `ip store import-sqlite` 和导入测试。
+1. 本方案、backlog 加一条、`project-spec.md` 记下决定（只改文档，#55）。
+2. `ip-store` 换成 PostgreSQL，连同配置 `database`、docker-compose 和初始化脚本、CI 的 PostgreSQL、README 和部署文档。原计划把配置和部署单拆一个 PR，但不一起改的话 main 上用 Docker 部署会起不来，所以合在一起。删掉 `rusqlite`。
+3. `ip store import-sqlite` 和导入测试（`ip-cli` 里重新引入 `rusqlite`，只用来读旧库）。
+4. 连外部库的 TLS。
 5. mobius 上执行（不是 PR，单独确认）。
-
-2 和 3 可能要合在一起才能编译通过，到时候看。
 
 ## 9. 已定的（维护者 2026-11-22）
 

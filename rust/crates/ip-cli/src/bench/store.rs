@@ -80,11 +80,9 @@ pub fn run(check: bool) -> anyhow::Result<()> {
 }
 
 async fn measure() -> anyhow::Result<Report> {
-    let dir = std::env::temp_dir().join(format!("ip-bench-store-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join("store.db");
-    let store = Store::open(&path)?;
+    // 在 IP_TEST_DATABASE_URL 指向的库里建一个临时 schema，跑完删掉。
+    let db = ip_store::testing::TestDb::new();
+    let store = db.open().await;
 
     let started = Instant::now();
     let producers: Vec<_> = (0..PRODUCERS)
@@ -104,6 +102,8 @@ async fn measure() -> anyhow::Result<Report> {
         producer.await??;
     }
     let insert_ms = started.elapsed().as_secs_f64() * 1000.0;
+    // 长期运行的库由 autovacuum 更新统计信息；刚灌完 5 万条时手动做一次，量的是平稳状态。
+    store.analyze().await?;
 
     let mut samples = Vec::new();
     let mut slowest = (0.0, String::new());
@@ -129,13 +129,9 @@ async fn measure() -> anyhow::Result<Report> {
     let memory_search_samples = memory_searches(&store).await?;
     let context_samples = context_reads(&store).await?;
     let context_p95 = p95_of(&context_samples);
-    let db_bytes: u64 = std::fs::read_dir(&dir)?
-        .filter_map(|entry| entry.ok()?.metadata().ok())
-        .map(|meta| meta.len())
-        .sum();
+    let db_bytes = u64::try_from(store.size_bytes().await?).unwrap_or(0);
     let rss_mb = rss_mb_of(std::process::id());
     drop(store);
-    let _ = std::fs::remove_dir_all(&dir);
 
     Ok(Report {
         benchmark: "store",

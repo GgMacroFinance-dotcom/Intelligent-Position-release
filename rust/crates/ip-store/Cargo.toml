@@ -8,12 +8,18 @@ repository.workspace = true
 
 [dependencies]
 ip-core.workspace = true
-rusqlite.workspace = true
+tokio-postgres.workspace = true
+deadpool-postgres.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 ts-rs.workspace = true
 tokio.workspace = true
+tracing.workspace = true
+
+[features]
+# 给其他 crate 的测试用：每个测试一个临时 schema（`testing` 模块）。
+testing = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

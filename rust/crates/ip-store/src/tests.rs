@@ -2,13 +2,6 @@ use ip_core::{Author, Message, ThreadId};
 
 use super::*;
 
-fn temp_db(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("ip-store-test-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir.join("store.db")
-}
-
 fn text(thread: &str, at_ms: i64, body: &str) -> Message {
     let mut message = Message::text(ThreadId::from(thread), Author::human("张三"), body);
     message.at_ms = at_ms;
@@ -17,7 +10,7 @@ fn text(thread: &str, at_ms: i64, body: &str) -> Message {
 
 #[tokio::test]
 async fn finds_chinese_and_english_text() {
-    let store = Store::open(temp_db("search")).unwrap();
+    let store = crate::testing::store().await;
     store
         .append_message(text("t1", 1, "请帮我整理一下本周的销售报表"))
         .await
@@ -54,7 +47,7 @@ async fn finds_chinese_and_english_text() {
 
 #[tokio::test]
 async fn filters_by_thread() {
-    let store = Store::open(temp_db("thread-filter")).unwrap();
+    let store = crate::testing::store().await;
     store.append_message(text("a", 1, "合同草稿")).await.unwrap();
     store.append_message(text("b", 2, "合同终稿")).await.unwrap();
     let hits = store.search("合同", Some(&ThreadId::from("b")), 10).await.unwrap();
@@ -64,7 +57,7 @@ async fn filters_by_thread() {
 
 #[tokio::test]
 async fn duplicate_id_fails_alone() {
-    let store = Store::open(temp_db("duplicate")).unwrap();
+    let store = crate::testing::store().await;
     let first = text("t", 1, "第一条");
     let mut copy = text("t", 2, "复制");
     copy.id = first.id.clone();
@@ -80,12 +73,14 @@ async fn duplicate_id_fails_alone() {
     assert!(c.is_ok());
     let messages = store.thread_messages(&"t".into(), None, 10).await.unwrap();
     assert_eq!(messages.len(), 2);
-    assert_eq!(store.last_seq().await.unwrap(), 2, "失败的写入不应留下事件");
+    // PostgreSQL 的自增序号回滚后不收回，seq 可能跳号；要看的是事件条数。
+    let events = store.events_after(0, 100).await.unwrap();
+    assert_eq!(events.len(), 2, "失败的写入不应留下事件");
 }
 
 #[tokio::test]
 async fn concurrent_appends_are_batched_and_ordered() {
-    let store = Store::open(temp_db("concurrent")).unwrap();
+    let store = crate::testing::store().await;
     let tasks: Vec<_> = (0..1000)
         .map(|i| {
             let store = store.clone();
@@ -104,14 +99,14 @@ async fn concurrent_appends_are_batched_and_ordered() {
 
 #[tokio::test]
 async fn pages_a_thread_and_survives_reopen() {
-    let path = temp_db("reopen");
+    let db = crate::testing::TestDb::new();
     {
-        let store = Store::open(&path).unwrap();
+        let store = db.open().await;
         for i in 1..=5 {
             store.append_message(text("t", i, &format!("消息{i}"))).await.unwrap();
         }
     }
-    let store = Store::open(&path).unwrap();
+    let store = db.open().await;
     let latest = store.thread_messages(&"t".into(), None, 2).await.unwrap();
     assert_eq!(latest.iter().map(|m| m.at_ms).collect::<Vec<_>>(), [4, 5]);
     let earlier = store.thread_messages(&"t".into(), Some(4), 2).await.unwrap();
@@ -120,7 +115,7 @@ async fn pages_a_thread_and_survives_reopen() {
 
 #[tokio::test]
 async fn lists_recent_threads_with_preview() {
-    let store = Store::open(temp_db("threads")).unwrap();
+    let store = crate::testing::store().await;
     store.append_message(text("旧", 1, "第一条")).await.unwrap();
     let hello = text("新", 2, "你好");
     store.append_message(hello.clone()).await.unwrap();
@@ -160,7 +155,7 @@ fn task(id: &str, status: ip_core::TaskStatus, updated: i64) -> ip_core::Task {
 #[tokio::test]
 async fn tasks_upsert_and_filter() {
     use ip_core::TaskStatus::*;
-    let store = Store::open(temp_db("tasks")).unwrap();
+    let store = crate::testing::store().await;
     store.put_task(task("a", Open, 1)).await.unwrap();
     store.put_task(task("b", InProgress, 2)).await.unwrap();
     store.put_task(task("a", Done, 3)).await.unwrap();
@@ -176,7 +171,7 @@ async fn tasks_upsert_and_filter() {
 #[tokio::test]
 async fn approval_resolves_exactly_once() {
     use ip_core::{Approval, ApprovalOption, ApprovalState, ApprovalSubject};
-    let store = Store::open(temp_db("approvals")).unwrap();
+    let store = crate::testing::store().await;
     let card = Approval {
         id: "c1".into(),
         question: "这条消息交给谁？".into(),
@@ -229,9 +224,9 @@ async fn approval_resolves_exactly_once() {
 
 #[tokio::test]
 async fn settings_overwrite_and_survive_reopen() {
-    let path = temp_db("settings");
+    let db = crate::testing::TestDb::new();
     {
-        let store = Store::open(&path).unwrap();
+        let store = db.open().await;
         assert_eq!(store.setting("router.spec").await.unwrap(), None);
         store
             .put_setting("router.spec", serde_json::json!({"rules": []}))
@@ -242,7 +237,7 @@ async fn settings_overwrite_and_survive_reopen() {
             .await
             .unwrap();
     }
-    let store = Store::open(&path).unwrap();
+    let store = db.open().await;
     assert_eq!(
         store.setting("router.spec").await.unwrap(),
         Some(serde_json::json!({"rules": [1]}))
@@ -251,10 +246,10 @@ async fn settings_overwrite_and_survive_reopen() {
 
 #[tokio::test]
 async fn engine_sessions_upsert_without_events_and_survive_reopen() {
-    let path = temp_db("engine");
+    let db = crate::testing::TestDb::new();
     let (agent, thread) = (ip_core::AgentId::from("ops-1"), ThreadId::from("t1"));
     {
-        let store = Store::open(&path).unwrap();
+        let store = db.open().await;
         assert_eq!(store.engine_session(&agent, &thread).await.unwrap(), None);
         let before = store.last_seq().await.unwrap();
         let mut s = crate::EngineSession {
@@ -279,7 +274,7 @@ async fn engine_sessions_upsert_without_events_and_survive_reopen() {
         // 每轮都会更新，不写事件日志。
         assert_eq!(store.last_seq().await.unwrap(), before);
     }
-    let store = Store::open(&path).unwrap();
+    let store = db.open().await;
     let s = store.engine_session(&agent, &thread).await.unwrap().unwrap();
     assert_eq!(
         (s.session_id.as_str(), s.last_message.as_str(), s.updated_at_ms),
@@ -299,40 +294,42 @@ async fn engine_sessions_upsert_without_events_and_survive_reopen() {
 }
 
 #[tokio::test]
-async fn engine_sessions_from_an_older_database_gain_the_usage_columns() {
-    let path = temp_db("engine-old");
-    {
-        // 加累计用量之前的表结构，带一行旧会话。
-        let old = rusqlite::Connection::open(&path).unwrap();
-        old.execute_batch(
-            "CREATE TABLE engine_sessions (
-                 agent_id      TEXT NOT NULL,
-                 thread_id     TEXT NOT NULL,
-                 engine        TEXT NOT NULL,
-                 session_id    TEXT NOT NULL,
-                 last_message  TEXT NOT NULL,
-                 updated_at_ms INTEGER NOT NULL,
-                 PRIMARY KEY (agent_id, thread_id)
-             ) WITHOUT ROWID;
-             INSERT INTO engine_sessions VALUES ('ops-1', 't1', 'codex', 'sess-old', 'm9', 7);",
-        )
-        .unwrap();
-    }
-    // 打开两次：补列只做一次，第二次不报错。
-    drop(Store::open(&path).unwrap());
-    let store = Store::open(&path).unwrap();
-    let s = store
-        .engine_session(&"ops-1".into(), &"t1".into())
+async fn migrations_run_once_and_reopening_is_harmless() {
+    let db = crate::testing::TestDb::new();
+    // 两个连接同时打开：迁移在 advisory lock 下只跑一次，谁都不报错。
+    let (a, b) = tokio::join!(db.open(), db.open());
+    a.append_message(text("t1", 1, "第一次")).await.unwrap();
+    drop((a, b));
+    let store = db.open().await;
+    let client = store.reader().await.unwrap();
+    let versions: i64 = client
+        .query_one("SELECT COUNT(*) FROM schema_migrations", &[])
         .await
         .unwrap()
-        .unwrap();
-    assert_eq!((s.session_id.as_str(), s.last_message.as_str()), ("sess-old", "m9"));
-    assert_eq!(s.used, crate::SessionUsage::default());
+        .get(0);
+    assert_eq!(versions, 1);
+    assert_eq!(store.last_seq().await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn nul_characters_are_stored_as_replacement_characters() {
+    let store = crate::testing::store().await;
+    store.append_message(text("t1", 1, "工具输出\0二进制")).await.unwrap();
+    let messages = store.thread_messages(&"t1".into(), None, 10).await.unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(store.search("二进制", None, 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn rejects_bad_schema_names() {
+    let mut config = crate::DbConfig::new("postgres://localhost/ip");
+    config.schema = "ip; DROP TABLE x".into();
+    assert!(matches!(Store::connect(&config).await, Err(StoreError::Config(_))));
 }
 
 #[tokio::test]
 async fn channel_bindings_claim_once_and_fill_in_the_agent() {
-    let path = temp_db("bindings");
+    let db = crate::testing::TestDb::new();
     let b = crate::Binding {
         channel: "slack".into(),
         conversation: "T1/C1/1.0".into(),
@@ -342,7 +339,7 @@ async fn channel_bindings_claim_once_and_fill_in_the_agent() {
         created_at_ms: 1,
     };
     {
-        let store = Store::open(&path).unwrap();
+        let store = db.open().await;
         let before = store.last_seq().await.unwrap();
         assert_eq!(store.claim_binding(b.clone()).await.unwrap(), b);
         // 同一会话再来一次：返回已有的，不另开对话，不写事件。
@@ -377,7 +374,7 @@ async fn channel_bindings_claim_once_and_fill_in_the_agent() {
             None
         );
     }
-    let store = Store::open(&path).unwrap();
+    let store = db.open().await;
     let by_thread = store.binding_by_thread(&"t1".into()).await.unwrap().unwrap();
     assert_eq!(
         (by_thread.conversation.as_str(), by_thread.requester.as_str()),
@@ -391,8 +388,8 @@ async fn channel_bindings_claim_once_and_fill_in_the_agent() {
 #[tokio::test]
 async fn stashed_envelopes_survive_reopen_until_settled() {
     use crate::{Envelope, Settle};
-    let path = temp_db("channel-envelopes");
-    let store = Store::open(&path).unwrap();
+    let db = crate::testing::TestDb::new();
+    let store = db.open().await;
     assert!(store.stash_envelope("slack", "env-1", "{\"a\":1}").await.unwrap());
     assert!(store.stash_envelope("slack", "env-2", "{\"a\":2}").await.unwrap());
     assert!(store.stash_envelope("slack", "env-3", "{\"a\":3}").await.unwrap());
@@ -410,7 +407,7 @@ async fn stashed_envelopes_survive_reopen_until_settled() {
     drop(store);
 
     // 进程退出再打开：没处理完的还在，按收到的先后，带着失败次数。
-    let store = Store::open(&path).unwrap();
+    let store = db.open().await;
     let envelope = |id: &str, payload: &str, attempts| Envelope {
         id: id.into(),
         payload: payload.into(),
@@ -439,7 +436,7 @@ async fn stashed_envelopes_survive_reopen_until_settled() {
 
 #[tokio::test]
 async fn channel_inbox_deliveries_and_cursors() {
-    let store = Store::open(temp_db("channel-state")).unwrap();
+    let store = crate::testing::store().await;
     let before = store.last_seq().await.unwrap();
     assert!(store.remember_inbound("slack", "msg:C1:1.0").await.unwrap());
     assert!(!store.remember_inbound("slack", "msg:C1:1.0").await.unwrap());
@@ -478,8 +475,8 @@ async fn channel_inbox_deliveries_and_cursors() {
 async fn thread_memories_upsert_per_role_and_survive_reopen() {
     use crate::{MemoryStatus, ThreadMemory};
 
-    let path = temp_db("thread-memories");
-    let store = Store::open(&path).unwrap();
+    let db = crate::testing::TestDb::new();
+    let store = db.open().await;
     for (thread, at) in [("t-old", 100), ("t-mid", 200), ("t-new", 300)] {
         store.append_message(text(thread, at, "你好")).await.unwrap();
     }
@@ -532,7 +529,7 @@ async fn thread_memories_upsert_per_role_and_survive_reopen() {
     assert_eq!(store.last_seq().await.unwrap(), before);
     drop(store);
 
-    let store = Store::open(&path).unwrap();
+    let store = db.open().await;
     assert_eq!(
         store.thread_memory(&"macro".into(), &"t-old".into()).await.unwrap(),
         Some(updated.clone())
@@ -628,8 +625,8 @@ async fn thread_memories_upsert_per_role_and_survive_reopen() {
 
 #[tokio::test]
 async fn memory_notes_are_kept_per_role_until_applied() {
-    let path = temp_db("memory-notes");
-    let store = Store::open(&path).unwrap();
+    let db = crate::testing::TestDb::new();
+    let store = db.open().await;
     let (macro_role, ops): (ip_core::RoleId, ip_core::RoleId) = ("macro".into(), "ops".into());
     let a = store
         .add_memory_note(&macro_role, Some(&"t1".into()), "收益率写两位小数", 100)
@@ -649,7 +646,7 @@ async fn memory_notes_are_kept_per_role_until_applied() {
     store.apply_memory_notes(&macro_role, vec![a], 600).await.unwrap();
     drop(store);
 
-    let store = Store::open(&path).unwrap();
+    let store = db.open().await;
     let notes = store.memory_notes(&macro_role, 0, 10).await.unwrap();
     let seen: Vec<_> = notes.iter().map(|n| (n.id, n.text.as_str(), n.applied_ms)).collect();
     assert_eq!(seen, [(a, "收益率写两位小数", Some(500)), (b, "忘掉上周的口径", None)]);
@@ -672,7 +669,7 @@ async fn memory_notes_are_kept_per_role_until_applied() {
 async fn forgotten_thread_memories_keep_their_row_but_lose_their_content() {
     use crate::{MemoryStatus, ThreadMemory};
 
-    let store = Store::open(temp_db("forget-memories")).unwrap();
+    let store = crate::testing::store().await;
     let memory = |role: &str, thread: &str| ThreadMemory {
         role_id: role.into(),
         thread_id: thread.into(),

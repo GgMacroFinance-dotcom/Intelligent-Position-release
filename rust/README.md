@@ -7,6 +7,9 @@ AI 原生组织的运行底座：一个 Rust 进程跑在云 Linux 主机上，�
 
 ```sh
 cd rust
+# 存储用 PostgreSQL（14 以上，不用装扩展）。本机没有的话起一个只给本机用的：
+docker run -d --name ip-pg -e POSTGRES_PASSWORD=ip -p 127.0.0.1:5432:5432 postgres:17
+export IP_DATABASE_URL=postgres://postgres:ip@127.0.0.1:5432/postgres   # 第一次启动时自己建 schema ip 和表
 cp ip.example.yaml ip.yaml                         # 改岗位、员工、模型端点
 export OPENAI_API_KEY=...                          # 模型；密钥只放环境变量
 export WHICHAPI_API_KEY=...                        # 可选：FRED 数据经 WhichAPI 取，见 ../macro-mcp/README.md
@@ -17,6 +20,9 @@ curl http://127.0.0.1:7878/healthz
 浏览器打开 `http://127.0.0.1:7878/` 是 Web 控制台：和员工对话（流式回复、工具调用过程可展开）、搜索历史、查看岗位与员工、任务、审批、路由规则、岗位记忆。
 配置了访问令牌时，第一次用 `http://<主机>:7878/?token=<令牌>` 打开，令牌会记在浏览器里。
 控制台是不需要构建的原生 JS（`web/src`），编译进 `ip` 可执行文件；前端类型由 ts-rs 从 Rust 类型生成到 `web/src/types`，
+跑测试和 `ip bench store`、`ip bench agents` 也要一个 PostgreSQL：设 `IP_TEST_DATABASE_URL`（可以和上面是同一个库），
+每个测试在里面建一个临时 schema（`ip_test_<进程号>_…`），跑完删掉；没设时存储相关的测试直接失败，不会悄悄跳过。
+
 改了 Rust 里的接口类型后跑一次 `cargo test` 并提交生成的文件，CI 会检查两边一致并用 `tsc` 做类型检查。
 
 WebSocket 接口在 `/ws`。发一条消息：
@@ -63,8 +69,8 @@ cargo run --release -p ip-cli -- bench agents --check    # 500 个数字员工�
 | --- | --- | --- | --- |
 | 服务启动（中位） | 3.2–4.4 ms | 100 ms | 0.75–1.46 s |
 | 服务空闲内存 | 12.2–12.7 MB | 40 MB | 134–160 MB |
-| 5 万条消息搜索 p95 | 5.4 ms（p50 3.6 ms） | 10 ms | 113–136 ms，中文搜不到 |
-| 写入吞吐（64 路并发） | 约 1 万条/秒 | — | — |
+| 5 万条消息搜索 p95 | 7.0–8.4 ms（p50 3.1–3.6 ms）；PostgreSQL 16 在同一台机器上，2026-11-22。SQLite 时是 5.4 ms | 10 ms | 113–136 ms，中文搜不到 |
+| 写入吞吐（64 路并发） | 约 1,600 条/秒（PostgreSQL，同上）；SQLite 时约 1 万条/秒 | — | — |
 | 每个空闲数字员工的内存 | 4–12 KB | 64 KB | 每个 agent 一个 CLI 进程 |
 | 500 个员工同时工作，每轮额外耗时 p95 | 23–25 ms | 80 ms | — |
 
@@ -85,7 +91,7 @@ docker compose up -d --build
 | crate | 职责 | 阶段 |
 | --- | --- | --- |
 | `ip-core` | 领域模型：组织、岗位、数字员工、任务、消息、授权 | M0 |
-| `ip-store` | SQLite、只追加事件日志、专用写线程、中文全文搜索 | M0 |
+| `ip-store` | PostgreSQL（标准 PostgreSQL，不装扩展）、只追加事件日志、专用写任务、中文全文搜索 | M0 |
 | `ip-runtime` | 数字员工循环（M0）；上下文压缩、定时任务（M1）；决策者笔记、岗位记忆（提炼、合并、查记忆、更正） | M0 |
 | `ip-models` | 云端模型与可配置推理端点（本地 / 外接 GPU） | M0 |
 | `ip-tools` | shell、文件工具（含 `edit_file`）与 bubblewrap 沙箱 | M0 |
@@ -105,7 +111,7 @@ docker compose up -d --build
 
 - [x] 仓库与 CI：workspace、12 个 crate 骨架、GitHub Actions、基准框架、许可与贡献指南（#3）
 - [x] `ip-core`：组织、岗位、数字员工、对话、消息；岗位用 YAML 定义（#4）
-- [x] `ip-store`：建表、事件日志、批量写、中文搜索、`ip bench store`（#4）
+- [x] `ip-store`：建表、事件日志、批量写、中文搜索、`ip bench store`（#4）。2026-11-22 从 SQLite 换成 PostgreSQL（backlog D-6），旧库导入命令还没做
 - [x] `ip-models`：OpenAI 兼容端点（DeepSeek、vLLM、SGLang、llama.cpp 通用）、流式输出、工具调用、限流和重试、测试用脚本模型（#5）；调用方丢掉流（排队、重试退避、等响应头、读正文时都算）或收到协议结束事件时立即断开连接、交还并发名额（#68，用假 HTTP 服务测）
 - [x] 模型调用故障处理（E-11）：每次尝试等待响应头默认最多 30 秒，正常流式生成不受该时限限制。错误正文限时、限量读取；Chat Completions 意外断流报错，结束后的数据忽略。用假 HTTP 服务和流解析测试覆盖。
 - [x] `ip-tools`：shell 和文件工具；shell 跑在 bubblewrap 沙箱里（只读系统目录、断网、清空环境变量），超时整组终止，输出限长；文件工具从工作目录的文件描述符出发打开（Linux 用 `openat2(RESOLVE_BENEATH)`，其他系统逐级 `O_NOFOLLOW`），检查和打开是同一步，不怕检查后路径被换成指向外部的符号链接（#66，本机测试含并发换目录的压力测试）
