@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  锁屏推送（F-21，m2-spec D-35）。aps-environment：开发版签名是 development，打 App Store、TestFlight 包时
+  Xcode 按发布用的描述文件换成 production。keychain-access-groups：第一个是 App 自己的分组，
+  不指定分组存的东西（主机的设备令牌，flutter_secure_storage）照旧只有 App 读得到；第二个是和通知扩展共用的，
+  只放锁屏推送的密钥（Shared/PushKeychain.swift）。改 Bundle ID 时两个文件和 PushKeychain.groupSuffix 一起改。
+-->
+<dict>
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+		<string>$(AppIdentifierPrefix)dev.intelligentposition.ipApp.push</string>
+	</array>
+</dict>
+</plist>

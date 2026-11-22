@@ -16,10 +16,10 @@ intelligent-position 的 App，一份 Dart 代码出 Android、iOS、macOS、Win
 - **系统通知**（F-16）：App 不在前台（手机切到别的 App、桌面窗口没有焦点）时，主机发来的通知弹成系统通知，同一件事的新通知替换旧的，在别处处理过了就撤掉；点通知去那个对话，没有对话的去待办。通知哪些事、带不带预览、静音、按岗位关，在“我”页改，存在主机上（和控制台“设备与通知”页是同一份设置）。连上主机后才向系统要通知权限。手机锁屏、App 被系统关掉以后要靠下面的锁屏推送。
 - **桌面托盘**（F-17，macOS、Windows、Linux）：关窗口只是藏到托盘，连接不断，照样弹通知；从托盘菜单“退出”才真的退出。托盘提示“N 件待办”，macOS、Linux 图标旁边再显示数字。托盘菜单里勾“开机启动”：Linux、Windows 开机后只在托盘里，不弹窗口；macOS 要 13 以上，在“系统设置 > 通用 > 登录项”里也能关。点托盘图标、点通知、再打开一次 App 都把开着的那个窗口叫出来，不另起一个。Linux 的托盘要桌面支持 AppIndicator（GNOME 要装 AppIndicator 扩展）。
 - **扫码配对**（F-19，Android、iOS、macOS）：“连接主机”页点“扫配对二维码”，扫控制台或 App“设备”页上的码，扫到后和手填一样先确认主机再配对。相机画面在本机解码（纯 Dart 的 zxing2），不用谷歌的 ML Kit。第一次扫时系统会要相机权限。
-- **锁屏推送**（F-21，先做了 Android）：App 被系统关掉、手机锁屏以后也能收到通知。连上主机、有了通知权限后，App 向推送中转（`rust/crates/ip-relay`）登记 FCM 令牌和这台手机自己的 Web Push 公钥，再把中转给的地址告诉主机；主机照旧发加密的 Web Push，中转原样转给 FCM，手机上的原生代码（`android/app/src/main/kotlin/…/IpPush.kt`）用自己的私钥解开后弹通知，中转看不到内容。“已在别处处理”直接撤掉原来那条。“我”页“这台设备的通知”里有“锁屏推送”开关，关掉会删掉主机上的订阅和手机上的密钥。要谷歌 Play 服务；构建时没给推送参数（见下）就没有这个功能。iPhone 还没做。
+- **锁屏推送**（F-21，Android 和 iPhone）：App 被系统关掉、手机锁屏以后也能收到通知。连上主机、有了通知权限后，App 向推送中转（`rust/crates/ip-relay`）登记系统的推送令牌（Android 是 FCM，iPhone 是 APNs）和这台手机自己的 Web Push 公钥，再把中转给的地址告诉主机；主机照旧发加密的 Web Push，中转原样转给 FCM 或 APNs，手机用自己的私钥解开，中转看不到内容。Android 由原生代码（`android/app/src/main/kotlin/…/IpPush.kt`）解密、弹通知，“已在别处处理”直接撤掉原来那条。iPhone 由通知扩展（`ios/NotificationService/`）解密、改写苹果送来的通知，解不开时显示“有一条新通知”；App 在后台还连着时自己弹过的同一件事，推送到了只替换、不再响铃；“已在别处处理”撤掉原来那条，换成一条不响铃、不亮屏的（iOS 不让通知扩展什么都不显示）。“我”页“这台设备的通知”里有“锁屏推送”开关，关掉会删掉主机上的订阅和手机上的密钥。Android 要谷歌 Play 服务；构建时没给推送参数、iPhone 版没用开发者账号签名（见下）就没有这个功能。
 - 断线自动重连（500 毫秒起翻倍，最多 8 秒），带上次的事件序号让主机补发断开期间的事件；补不上就整个重新拉。App 从后台回到前台时马上重连。主机吊销了这台设备（401）时不再重连，提示重新配对。
 
-还没有的（按顺序做，见 backlog）：iPhone 的锁屏推送（F-21 之五）；锁屏推送还没用真的 Firebase、推送中转在真手机上收过。
+还没有的（按顺序做，见 backlog）：锁屏推送还没用真的 Firebase、APNs、推送中转在真手机上收过（F-21 之六）。
 
 ## 锁屏推送的构建参数（F-21）
 
@@ -34,7 +34,21 @@ flutter build apk --release \
 
 `-P` 的四项也可以用同名的环境变量给，值在 Firebase 控制台“项目设置”里这个 Android 应用下面（包名 `dev.intelligent_position.ip_app`）。都没给时 App 照常能用，只是“锁屏推送”开关是灰的。主机的 `ip.yaml` 要把中转的域名写进 `push.hosts`（m2-spec D-35）。
 
-解密的单元测试（RFC 8291 的例子、和 Dart 那边同样的通知 id）在 JVM 上跑，要 Android SDK：
+iPhone 版的中转地址同样用 `--dart-define=IP_PUSH_RELAY=…` 给，推送要用维护者的苹果开发者账号签名：在 Xcode 里给 `Runner` 和 `NotificationService` 两个 target 选团队，自动签名按 `ios/Runner/Runner.entitlements`、`ios/NotificationService/NotificationService.entitlements` 开推送和钥匙串共享（私钥放在 App 和通知扩展共用的钥匙串分组里）。Bundle ID 是 `dev.intelligentposition.ipApp`，中转的 `IP_RELAY_APNS_TOPIC` 填它。开发版签名（`aps-environment` 是 `development`）只收苹果测试环境的推送，要连 `IP_RELAY_APNS_SANDBOX=1` 的中转；打 App Store、TestFlight 包时 Xcode 按发布用的描述文件换成 `production`，连不带这一项的中转。没签名的构建（`--no-codesign`、模拟器上不选团队）“锁屏推送”开关是灰的。改 Bundle ID 时两个 `.entitlements` 和 `ios/Shared/PushKeychain.swift` 的 `groupSuffix` 一起改。
+
+```sh
+flutter build ios --release --dart-define=IP_PUSH_RELAY=https://push.example.com
+```
+
+解密的单元测试（RFC 8291 的例子、和 Dart 那边同样的通知 id）。iPhone 版的在模拟器上跑，要 Xcode（CI 的 `flutter-ios` 工作流在改到 `ios/` 时跑）：
+
+```sh
+flutter build ios --simulator --debug
+xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -only-testing:RunnerTests/WebPushCryptoTests -only-testing:RunnerTests/PushNoticeTests
+```
+
+Android 版的在 JVM 上跑，要 Android SDK：
 
 ```sh
 cd android && ./gradlew :app:testDebugUnitTest
@@ -78,7 +92,7 @@ cd ../apps/flutter && dart run tool/gen_protocol.dart
 | `lib/src/storage.dart` | 主机列表和令牌放安全存储 |
 | `lib/src/qr/` | 扫二维码（F-19）：`decode.dart` 把相机画面转成灰度图再用 zxing2 解，`scanner.dart` 是各平台的相机 |
 | `lib/src/notifications.dart` | 系统通知：弹、按标签撤、点开回调（F-16） |
-| `lib/src/push/lock_push.dart` | 锁屏推送（F-21）：向推送中转登记、`subscribe_push`、令牌变了换地址、开关；原生那一半在 `android/app/src/main/kotlin/dev/intelligent_position/ip_app/`（`IpPush.kt` 收 FCM、存密钥、弹通知，`WebPushCrypto.kt` 解密） |
+| `lib/src/push/lock_push.dart` | 锁屏推送（F-21）：向推送中转登记、`subscribe_push`、令牌变了换地址、开关；原生那一半：Android 在 `android/app/src/main/kotlin/dev/intelligent_position/ip_app/`（`IpPush.kt` 收 FCM、存密钥、弹通知，`WebPushCrypto.kt` 解密）；iPhone 在 `ios/`（`Runner/IpPush.swift` 要 APNs 令牌、方法通道、点通知，`Shared/` 是 App 和通知扩展共用的解密、钥匙串、通知改写，`NotificationService/` 是通知扩展） |
 | `lib/src/desktop/` | 桌面的托盘和窗口（`shell.dart`）、开机启动（`autostart.dart`）（F-17）；只开一个、`--hidden` 在 `linux/runner/`、`windows/runner/` 里，macOS 的开机启动在 `macos/Runner/MainFlutterWindow.swift` |
 | `lib/src/app_state.dart` | App 的状态：连接、员工、对话、审批、任务、哪些员工正在处理或上一轮失败 |
 | `lib/src/star_map.dart` | 星图的数据：谁坐太阳、每位员工的紧急度、重要度、理由和天体 |
@@ -141,10 +155,11 @@ flutter test integration_test -d <设备> \
 
 2026-11-21：
 
-- `flutter test`：118 个测试，假主机。
+- `flutter test`：119 个测试，假主机。
 - 真的 Linux 版 App（Xvfb 虚拟屏幕、GNOME 钥匙串）连本机真的 `ip serve`，**模型是假的**（一个本机的假 OpenAI 流式接口，回固定文字）：端到端测试在宽屏（1280 像素）和手机宽度（390 像素）各跑通一次；另外用 `xdotool` 在发布版里用真键盘配对、连发两条消息、Shift+Enter 换行。
 - 星图：同一台假模型的主机上配了一位协调员和十位员工，用脚本造了员工提问、协调员派活、任务过期、受阻、快到期、一轮失败、慢回复几种情况，在真的 Linux 版里看了位置、大小、理由和气泡，宽屏和手机宽度都点过。Impeller 的 GL 后端在这台机器的 Mesa 软件渲染上画 1 像素的圆描边会出方块、在透明度图层里画背景模糊会整块丢掉，已经绕开（轨道画成折线，气泡不做淡入动画）；真显卡上没试过。
 - 待办和看报告（F-14）：同一台主机上把手写的报告放进员工工作目录，在真的 Linux 版（手机宽度）里从完成的任务结果打开报告、在报告里打开上一份、把受阻的任务改成已取消，主机上核对过状态。
 - 任务页和岗位页（F-15）：真的 Linux 版（手机宽度）里用真键盘新建了任务（选负责人、选截止日期），主机上署了设备名、另开了执行对话；岗位页显示了主机算的当天费用和缓存命中，从岗位页点开和员工的新对话。
 - 锁屏推送（F-21 之四）：`flutter test` 里 7 个测试用假的推送通道和假中转走登记、换令牌、开关、点通知；Kotlin 的解密用 RFC 8291 附录 A 的例子在 JVM 上核对过（`./gradlew :app:testDebugUnitTest`，4 个）。没用真的 Firebase 项目、没在真手机上收过推送。
-- Android：2026-11-21 在容器里装了 Android SDK，`flutter build apk --debug` 编过（改锁屏推送之前和之后各一次），没在模拟器或真手机上跑过。iOS、macOS、Windows 没编过也没跑过（容器里没有 Xcode）；CI 的安装包任务没触发过。真手机、真主机上的 HTTPS、Tailscale 都没试过。
+- 锁屏推送（F-21 之五，iPhone）：2026-11-22，Swift 的解密测试（RFC 8291 附录 A 的例子，6 个）在 Linux 容器里用 Swift 6.0.3 和接口相同的 swift-crypto 跑过；`flutter test` 里用模拟的原生端测过方法通道 `ip/push` 的约定。CI 的 `flutter-ios` 工作流（macOS、Flutter 3.47.9）第一次跑（#50）：`flutter build ios --debug --no-codesign` 和 `--simulator` 都编过（App 带着通知扩展），8 个 Swift 测试（解密 6 个、通知改写 2 个）在 iPhone 模拟器上全过。没签名，没在真 iPhone、真 APNs 上收过推送；真机上怎么验在 `docs/ip/f21-iphone-handoff.md`。
+- Android：2026-11-21 在容器里装了 Android SDK，`flutter build apk --debug` 编过（改锁屏推送之前和之后各一次），没在模拟器或真手机上跑过。iOS 只在 CI 上编过、在模拟器上跑过 Swift 单元测试，App 没在模拟器或真机上打开过；macOS、Windows 没编过也没跑过（容器里没有 Xcode）；CI 的安装包任务没触发过。真手机、真主机上的 HTTPS、Tailscale 都没试过。

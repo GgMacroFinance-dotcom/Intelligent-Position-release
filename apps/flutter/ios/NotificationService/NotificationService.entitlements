@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- 只读锁屏推送的密钥：和 Runner.entitlements 的第二个分组一样（Shared/PushKeychain.swift）。 -->
+<dict>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)dev.intelligentposition.ipApp.push</string>
+	</array>
+</dict>
+</plist>

@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.22（2026-11-21）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.23（2026-11-22）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -950,6 +950,7 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
   - 推送令牌、中转地址变了就重新登记、重新 `subscribe_push`（同一台设备同一个地址替换）。在“我”页关掉锁屏推送、断开主机时 `unsubscribe_push`；设备被吊销时主机已经会删它的订阅（D-33）。
 - **不重复打扰**：App 已经按 D-33 报 `presence`（F-16），在前台时主机不推。App 在后台但连接还在时，`alert` 和推送都会到：两边用同一个通知 id（标签的 FNV-1a，和 F-16 一样），后到的只替换、不再响铃（Android 的 `setOnlyAlertOnce`）。
 - **Android 的实现**（F-21 之四）：收 FCM、解密、弹通知都在原生代码里（`IpPush.kt`、`WebPushCrypto.kt`），App 被杀掉后 FCM 叫起服务就能弹，不用启动 Flutter。中转在 FCM 的数据消息里另带 `urgency`（`high` 或 `normal`），App 按它选“要我处理的”或“员工回复和任务完成”通知渠道。私钥用 Android Keystore 里的一把 AES 密钥包起来，存在应用私有的 SharedPreferences。Firebase 的配置不进仓库（没有 `google-services.json`），构建时用 `-PIP_FCM_*` 给；中转地址用 `--dart-define=IP_PUSH_RELAY` 给。
+- **iPhone 的实现**（F-21 之五）：中转发 `mutable-content` 的通知，标题“intelligent-position”、正文“有一条新通知”是解不开时的兜底，密文放在 `userInfo["ip"]`。通知扩展（`apps/flutter/ios/NotificationService/`）用钥匙串里 App 和扩展共用分组中的私钥解开，改写标题、正文，`threadIdentifier` 用 `thread_id`；解不开时照兜底显示。iOS 不让通知扩展什么都不显示，所以 `silent` 的“已在别处处理”是撤掉同一件事的旧通知（App 自己弹的按 FNV-1a 的 id，之前的推送按记下的标签），再显示一条不响铃、不亮屏（`passive`）的；同一件事已经显示过的（App 在后台还连着时按 F-16 弹过），新到的推送撤掉那条、自己只替换不响铃。私钥和 `auth` 的钥匙串属性是“首次解锁后、只在这台设备”：手机重启后还没解锁过时收到的解不开，显示兜底；不进备份。App 里（`ios/Runner/IpPush.swift`）向 APNs 要设备令牌（小写十六进制交给中转），每次启动重新要一次，变了告诉 Flutter 那边重新登记；点通知按 `userInfo` 里记的对话去那个对话或“待办”，不是锁屏推送的通知交给 flutter_local_notifications。方法通道 `ip/push` 和 Android 是同一套。APNs 的通知里没有 `urgency`，iPhone 不分两种通知。
 - **要维护者准备的**：苹果开发者账号（APNs 密钥，并用它给 iOS App 签名，Q-12）；一个 Firebase 项目（FCM 服务账号，Android App 的 `google-services.json`）；跑中转的主机和域名。没有这些之前，中转和 App 只用假的 APNs、FCM 测。
 - **Android 的依赖**：收 FCM 要谷歌 Play 服务（闭源）。官方 App 接受这一点；以后可以加 UnifiedPush 给没有 Play 服务的手机，主机这边不用再改。
 - 测试：主机加白名单的单元测试（`push.hosts` 里的认、相近的写法不认）和配置检查；`/ws` 集成测试用假中转走一遍 App 式的订阅。中转用假的 APNs、FCM 测登记、封条解不开、转发的字段、令牌失效回 410、限流。App 用假的推送通道测登记、换令牌、关掉、收到后解密弹通知和撤销。没有在真的 APNs、FCM 和真手机上跑过之前，不写“可用”。
@@ -982,3 +983,4 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 | 2026-11-21 | v0.20 | 修 Codex 续接会话时用量重复记账（backlog E-10，提议，等工程师审查）：D-23 的引擎会话表加四列累计用量，D-20 的 `TurnContext` 加 `session_usage`、`TurnReport` 加 `session_usage`；每轮只记和上一轮累计值的差。只用假 codex 测过，累计值的数字取自 2026-11-14 真实 Codex 的核对 |
 | 2026-11-21 | v0.21 | 新增 D-36（已实现，backlog E-6）：Claude Code 引擎（`kind: claude_code`），和 Codex 共用进程管理；第 6 节改名为“外部引擎” |
 | 2026-11-21 | v0.22 | 新增 D-37（提议，backlog E-12）：Socket Mode 的 WebSocket 按 `HTTPS_PROXY`/`NO_PROXY` 等环境变量经 HTTP 代理的 CONNECT 隧道连接，规则和 Web API 一致；支持代理 Basic 认证；D-11 加一句指向 D-37。只用本地假代理和假 Slack 测过 |
+| 2026-11-22 | v0.23 | D-35 加 iPhone 的实现（F-21 之五，提议，等工程师审查）：通知扩展解密、改写 APNs 送来的通知，“已在别处处理”撤掉旧的、换成不响铃不亮屏的；私钥放 App 和扩展共用的钥匙串分组。`/ws` 协议和中转都不变。没在真 iPhone、真 APNs 上收过 |
