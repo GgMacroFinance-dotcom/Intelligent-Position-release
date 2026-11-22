@@ -196,6 +196,7 @@ class _ThreadViewState extends State<ThreadView> {
     ];
     return Column(
       children: [
+        if (id != null && state.memoryOff != null) ThreadMemoryBar(threadId: id, off: state.memoryOff!.contains(id)),
         Expanded(
           child: items.isEmpty
               ? EmptyHint(id == null ? (state.agents.isEmpty ? '主机上没有数字员工。' : '选一位员工，或者交给自动分派，开始新对话。') : '')
@@ -210,6 +211,74 @@ class _ThreadViewState extends State<ThreadView> {
         ),
         const Composer(),
       ],
+    );
+  }
+}
+
+/// 对话顶上的一行：这个对话进不进岗位记忆；“管理”权限的设备能关掉、重新打开（和控制台一样）。
+class ThreadMemoryBar extends StatefulWidget {
+  const ThreadMemoryBar({super.key, required this.threadId, required this.off});
+
+  final String threadId;
+  final bool off;
+
+  @override
+  State<ThreadMemoryBar> createState() => _ThreadMemoryBarState();
+}
+
+class _ThreadMemoryBarState extends State<ThreadMemoryBar> {
+  bool _busy = false;
+
+  Future<void> _toggle() async {
+    final state = AppScope.read(context);
+    if (!widget.off) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('不让这个对话进记忆？'),
+          content: const Text('这个对话已经提炼进岗位记忆的内容会被抹掉，以后也不再提炼。随时可以重新打开。'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('不让它进记忆')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    setState(() => _busy = true);
+    try {
+      await state.setThreadMemory(widget.threadId, enabled: widget.off);
+    } on RequestError catch (e) {
+      if (mounted) showError(context, '操作失败：$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 8, 0),
+      child: Row(
+        children: [
+          Icon(widget.off ? Icons.memory_outlined : Icons.memory, size: 16, color: theme.hintColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              widget.off ? '这个对话不进岗位记忆。' : '岗位开了记忆时，这个对话闲置后会被提炼进岗位记忆。',
+              style: TextStyle(color: theme.hintColor, fontSize: 13),
+            ),
+          ),
+          // 开关记忆要“管理”权限。
+          if (state.isAdmin)
+            TextButton(
+              onPressed: _busy || !state.connected ? null : _toggle,
+              child: Text(widget.off ? '重新打开' : '不让它进记忆'),
+            ),
+        ],
+      ),
     );
   }
 }

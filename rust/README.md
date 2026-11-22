@@ -139,7 +139,7 @@ docker compose up -d --build
 - [x] App 里“管理”权限的页（backlog F-18）：设备、定时任务、记忆、路由规则四页，从“我”页进去，日常权限看不到。只在假主机上测过
 - [x] App 扫码配对（backlog F-19）：Android、iOS、macOS 用摄像头扫配对二维码，扫到后照常先确认主机再配对；本机解码，不用谷歌 ML Kit。只在假相机上测，真相机没扫过
 - [x] App 的协议类型从 Rust 生成（backlog F-20）：`apps/flutter/tool/gen_protocol.dart` 从 `web/src/types/*.ts` 生成 `wire.dart`，flutter CI 检查生成结果已提交；App 解析回复、事件和发请求都经过生成的类型，Rust 改了协议字段 Dart 就编不过
-- [ ] 手机锁屏推送（backlog F-21，`docs/ip/m2-spec.md` D-35）：主机放行 `push.hosts` 里的推送服务，负载上限 2800 字节；推送中转 `ip-relay`（`POST /register` 换订阅地址，`POST /w/<封条>` 转给 APNs 或 FCM，令牌失效回 410，限流，`ip bench relay` 接入 CI）。Android App 经 FCM 收推送、原生代码解密弹通知（`apps/flutter`，解密对过 RFC 8291 的例子）。只用假的 APNs、FCM 和假的推送通道测过；中转还没部署，iPhone 还没接
+- [ ] 手机锁屏推送（backlog F-21，`docs/ip/m2-spec.md` D-35）：主机放行 `push.hosts` 里的推送服务，负载上限 2800 字节；推送中转 `ip-relay`（`POST /register` 换订阅地址，`POST /w/<封条>` 转给 APNs 或 FCM，令牌失效回 410，限流，`ip bench relay` 接入 CI）。Android App 经 FCM 收推送、原生代码解密弹通知；iPhone App 经 APNs 收推送、通知扩展解密改写通知（`apps/flutter`，两边的解密都对过 RFC 8291 的例子）。只用假的 APNs、FCM 和假的推送通道测过；中转还没部署，没在真手机上收过
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片
 - [x] 路由 v2（二）：语义匹配（可选）：规则都没命中时请模型按岗位职责判断，把握够就分派，不够时把判断作为审批卡片的推荐项
@@ -156,7 +156,7 @@ docker compose up -d --build
 - [x] 费用补全：语义分派调用模型的费用单列记账（不占岗位预算）；岗位页显示各岗位今日已用 / 上限；执行员工这一轮失败（费用用满、模型出错、步数超限）时，派给它的任务标为受阻并写回派活的对话，不自动叫回协调员重派，避免一圈圈重试花钱
 - [x] 提示词缓存命中率能量出来（backlog D-2 的第一步）：账本按岗位累计当天的 token 用量（输入、其中命中前缀缓存的、输出），每轮结束时记一次，成功和失败的轮次都记，没登记价格的模型也记，语义分派单列，重启不清零；`spend_today` 返回 `tokens` 和 `routing_tokens`，控制台岗位页显示各岗位今日缓存命中率，`ip eval` 每题和合计都打印。命中率 = 命中缓存的输入 token / 全部输入 token。2026-11-14 用真实模型量过（[实测记录](../docs/ip/prompt-cache-2026-11-14.md)）：研究员 84%–97%，协调员 34%（请求短，钱主要花在输出上）
 - [x] 运维测试岗位流程骨架：岗位说明写明复现 → 定位 → 最小修改 → 复跑验证 → 报告（`reports/<日期>-<主题>.md`）→ 交回，动线上先 `ask_human`；员工可用 `workspace` 指定工作目录（指向要维护的项目）；`examples/ops-demo` 是故意留了 bug 的小项目，用假模型跑通了跑测试失败 → 修复 → 复跑通过 → 写报告
-- [x] 运维测试岗位维护模型中转站的工具（backlog D-4 ①）：`examples/ops-gateway` 里的巡检（状态、版本、鉴权、计价漂移、模型探测、TLS、容器、服务、磁盘、备份）、New API 新版本检查、上游新模型检查、每晚用量和报错日报，岗位手册模板，`ip.example.yaml` 加了四个定时任务（默认关）。`drill.sh` 用假中转站和假主机命令跑 31 个场景，CI 跑；日报的 SQL 在 PostgreSQL 16 上核对过。没在真中转站上跑过
+- [x] 运维测试岗位维护模型中转站的工具（backlog D-4 ①）：`examples/ops-gateway` 里的巡检（状态、版本、鉴权、计价漂移、模型探测、TLS、容器、服务、磁盘、备份）、New API 新版本检查、上游新模型检查、每晚用量和报错日报，岗位手册模板，`ip.example.yaml` 加了五个定时任务（默认关）。harness 自己的模型价格每月 1 号从 OpenRouter 的模型目录读，人确认后写回 `ip.yaml`（`model_prices.py`）。`drill.sh` 用假中转站、假 OpenRouter 和假主机命令跑 40 个场景，CI 跑；日报的 SQL 在 PostgreSQL 16 上核对过。没在真中转站上跑过
 - [x] 定时任务：`ip.yaml` 的 `schedules`（五段 cron + `utc_offset` 时区），到点给岗位或员工发一条消息、开一段新对话，不写 `to` 时按路由规则分派；停机期间错过的不补跑；上次运行结果存数据库；控制台任务页显示下次运行时间，可立即运行
 - [x] MCP 远程接入和 Finance Macro Data API：`mcp_servers` 可以写 `url` 连远程服务器（Streamable HTTP，令牌用 `bearer_token_env`；必须是 https，只有本机地址可以用 http）。宏观研报岗位的美国和全球数据改为直接调 Finance Macro Data API（which-api 仓库的 `packages/macro-mcp`，12 个工具），中国数据仍用 `ip data pull` 拉的国家统计局序列。用本机启动的同一版服务（0.2.0）联调过：握手、列工具、取 FRED 实时数据都通。2026-11-11 的真实验收里，真实模型经 Render 上的测试部署取到了数（见下面宏观研报岗位的真实验收一条）
 - [x] Finance Macro Data API 开源（backlog C-2）：9 个美国宏观数据工具放进仓库根目录的 `macro-mcp/`（MIT，Node.js 18.17 以上，零依赖），示例配置改成本机 stdio 启动。和 WhichAPI 托管版的差别：不带 API 目录工具；FRED 不直连，经 WhichAPI 托管服务取，要 `WHICHAPI_API_KEY`；快照不带 ICE BofA 的三个面板（2026-11-16 起这些序列可以用 `get_fred_series` 取，只用模拟的回复测过）。包自己的测试进 CI（`macro-mcp` 工作流）；经 WhichAPI 取 FRED 这条路包自己的测试用的是模拟；2026-11-14 的评测里配真实模型真实跑过（[记录](../docs/ip/evals/2026-11-14-e8/README.md)）

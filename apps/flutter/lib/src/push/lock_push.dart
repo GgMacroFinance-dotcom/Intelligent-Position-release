@@ -1,9 +1,9 @@
 // 锁屏推送（backlog F-21，m2-spec D-35）：App 被系统杀掉、手机锁屏以后也能收到主机的通知。
 //
 // 主机照旧发 Web Push（D-33），收件的“推送服务”是项目运营的推送中转（rust/crates/ip-relay）。这里做登记：
-// 向系统要推送令牌（Android 是 FCM），连同这台手机自己的 Web Push 公钥交给中转换一个订阅地址，
-// 再用 `subscribe_push` 告诉主机。收推送、解密、弹通知在原生代码里做（Android：IpPush.kt），
-// 不用启动 Flutter。私钥只在手机上。
+// 向系统要推送令牌（Android 是 FCM，iPhone 是 APNs），连同这台手机自己的 Web Push 公钥交给中转换一个订阅地址，
+// 再用 `subscribe_push` 告诉主机。收推送、解密、弹通知在原生代码里做（Android：IpPush.kt；
+// iPhone：通知扩展 ios/NotificationService），不用启动 Flutter。私钥只在手机上。
 
 import 'dart:async';
 import 'dart:convert';
@@ -35,7 +35,7 @@ abstract interface class PushChannel {
   /// 交给中转的平台名：`fcm` 或 `apns`。
   String get platform;
 
-  /// 这个构建配了系统推送没有（Android 要在构建时给 Firebase 的配置）。
+  /// 这个构建配了系统推送没有（Android 要在构建时给 Firebase 的配置，iPhone 要带推送权利签名）。
   Future<bool> available();
 
   /// 拿推送令牌和这台手机的 Web Push 公钥；没有密钥时原生那边生成一套。
@@ -54,9 +54,10 @@ abstract interface class PushChannel {
   Stream<void> get tokenChanges;
 }
 
-/// Android：原生代码在 android/app/src/main/kotlin/…/IpPush.kt、MainActivity.kt。
-class AndroidPushChannel implements PushChannel {
-  AndroidPushChannel() {
+/// 原生那一半，经方法通道 `ip/push`，两个平台的约定一样。Android 在 android/app/src/main/kotlin/…/IpPush.kt、
+/// MainActivity.kt；iPhone 在 ios/Runner/IpPush.swift、AppDelegate.swift。
+class NativePushChannel implements PushChannel {
+  NativePushChannel(this.platform) {
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'tapped':
@@ -72,7 +73,7 @@ class AndroidPushChannel implements PushChannel {
   final _tokens = StreamController<void>.broadcast();
 
   @override
-  String get platform => 'fcm';
+  final String platform;
 
   @override
   Future<bool> available() async => await _channel.invokeMethod<bool>('available') ?? false;
@@ -97,10 +98,11 @@ class AndroidPushChannel implements PushChannel {
   Stream<void> get tokenChanges => _tokens.stream;
 }
 
-/// 这个平台、这个构建能用的推送通道；不能用时为 null。iPhone 以后接（F-21 之五）。
+/// 这个平台、这个构建能用的推送通道；不能用时为 null。
 PushChannel? platformPushChannel() {
   if (kIsWeb || pushRelay.isEmpty) return null;
-  if (Platform.isAndroid) return AndroidPushChannel();
+  if (Platform.isAndroid) return NativePushChannel('fcm');
+  if (Platform.isIOS) return NativePushChannel('apns');
   return null;
 }
 

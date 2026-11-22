@@ -1,9 +1,10 @@
 // 锁屏推送（F-21）：连上主机后向中转登记、告诉主机订阅地址，令牌变了换新地址，开关，点通知。
-// 原生那一半（FCM、解密、弹通知）和推送中转都换成假的。
+// 原生那一半（FCM、APNs、解密、弹通知）和推送中转都换成假的。
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ip_app/src/push/lock_push.dart';
 import 'package:ip_app/src/storage.dart';
@@ -84,6 +85,52 @@ void main() {
     expect(sameRelay(relay, 'https://evil.example.com/w/abc'), isFalse);
     expect(sameRelay(relay, 'http://push.example.com/w/abc'), isFalse);
     expect(sameRelay(relay, 'https://push.example.com:8443/w/abc'), isFalse);
+  });
+
+  test('原生通道 ip/push：Android、iPhone 同一套方法名和参数', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const ch = MethodChannel('ip/push');
+    final calls = <String>[];
+    Object? registration = {'token': '0a1b', 'p256dh': 'BPUB', 'auth': 'AUTH'};
+    messenger.setMockMethodCallHandler(ch, (call) async {
+      calls.add(call.method);
+      return switch (call.method) {
+        'available' => true,
+        'registration' => registration,
+        'takeTapped' => 't9',
+        _ => null,
+      };
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(ch, null));
+
+    final native = NativePushChannel('apns');
+    expect(native.platform, 'apns');
+    expect(await native.available(), isTrue);
+    final reg = await native.registration();
+    expect((reg.token, reg.p256dh, reg.auth), ('0a1b', 'BPUB', 'AUTH'));
+    expect(await native.takeTapped(), 't9');
+    await native.reset();
+    expect(calls, ['available', 'registration', 'takeTapped', 'reset']);
+    registration = null;
+    await expectLater(native.registration(), throwsA(isA<PushError>()));
+
+    // 原生那边调过来的：点了通知（空串是去“待办”）、令牌变了。
+    final taps = <String>[];
+    var changed = 0;
+    native.taps.listen(taps.add);
+    native.tokenChanges.listen((_) => changed++);
+    Future<void> fromNative(String method, [Object? arg]) => messenger.handlePlatformMessage(
+      'ip/push',
+      const StandardMethodCodec().encodeMethodCall(MethodCall(method, arg)),
+      (_) {},
+    );
+    await fromNative('tapped', 't1');
+    await fromNative('tapped', '');
+    await fromNative('tokenChanged');
+    await pumpEventQueue();
+    expect(taps, ['t1', '']);
+    expect(changed, 1);
   });
 
   testWidgets('连上后登记，告诉主机订阅地址；重连时同一个地址再告诉一次，不重新登记', (tester) async {

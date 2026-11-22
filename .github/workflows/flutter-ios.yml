@@ -1,0 +1,81 @@
+name: flutter-ios
+
+# iPhone 的原生代码（apps/flutter/ios：锁屏推送的通知扩展、解密、APNs 登记，backlog F-21 之五）。
+# 只在改到它、锁屏推送的 Dart 代码或依赖时跑，用 macOS：编过 iOS（真机版不签名、模拟器版各一次），
+# 在模拟器上跑 RunnerTests（RFC 8291 的解密例子、通知怎么改写）。没有签名证书，收不到真的 APNs 推送。
+on:
+  pull_request:
+    paths:
+      - "apps/flutter/ios/**"
+      - "apps/flutter/lib/src/push/**"
+      - "apps/flutter/pubspec.yaml"
+      - "apps/flutter/pubspec.lock"
+      - ".github/workflows/flutter-ios.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/flutter/ios/**"
+      - "apps/flutter/lib/src/push/**"
+      - "apps/flutter/pubspec.yaml"
+      - "apps/flutter/pubspec.lock"
+      - ".github/workflows/flutter-ios.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: flutter-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 和 flutter.yml 的 FLUTTER_VERSION 一起改。
+  FLUTTER_VERSION: 3.47.9
+
+defaults:
+  run:
+    working-directory: apps/flutter
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Build for device (no codesign)
+        run: flutter build ios --debug --no-codesign --no-pub
+      - name: Build for simulator
+        run: flutter build ios --debug --simulator --no-pub
+      - name: RunnerTests on a simulator
+        run: |
+          udid="$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          runtimes = sorted((k for k in devices if ".iOS-" in k), key=lambda k: [int(x) for x in k.rsplit(".iOS-", 1)[1].split("-")], reverse=True)
+          print(next(d["udid"] for k in runtimes for d in devices[k] if d["name"].startswith("iPhone")))
+          ')"
+          echo "simulator: $udid"
+          xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
+            -destination "id=$udid" -resultBundlePath "$RUNNER_TEMP/ios.xcresult" \
+            -only-testing:RunnerTests/WebPushCryptoTests -only-testing:RunnerTests/PushNoticeTests \
+            CODE_SIGNING_ALLOWED=NO
+          xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/ios.xcresult" > "$RUNNER_TEMP/ios-tests.json"
+          python3 - "$RUNNER_TEMP/ios-tests.json" <<'PY'
+          import json, sys
+          def cases(nodes):
+              for node in nodes:
+                  if node.get("nodeType") == "Test Case":
+                      yield node["name"].removesuffix("()"), node["result"]
+                  yield from cases(node.get("children", []))
+          with open(sys.argv[1]) as report:
+              results = dict(cases(json.load(report)["testNodes"]))
+          print(results)
+          # 6 个解密和编码的、2 个通知改写的，一个都不能少。
+          if len(results) != 8 or set(results.values()) != {"Passed"}:
+              sys.exit("Expected all 8 push tests to pass")
+          PY
