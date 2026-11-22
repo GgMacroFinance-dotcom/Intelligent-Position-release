@@ -243,6 +243,17 @@ I.P. 启动时自己建表、跑迁移。改用自己已有的 PostgreSQL（RDS�
 把 `IP_DATABASE_URL` 换成那个库的连接串，去掉 compose 里的 `postgres` 服务。现在只支持不加密的连接，
 连外部库要 TLS 的情况还没做（backlog D-6）。Supabase 用直连地址或 session 模式的连接池地址，不能用 transaction 模式（6543 端口）。
 
+**从 SQLite 版升级**：以前的数据在 `ip-data` 卷的 `ip.db` 里。先停服务、备份 `ip-data` 卷（见下面），拉新代码后
+`docker compose up -d postgres`，再导入，成功后启动：
+
+```bash
+docker compose stop ip
+docker compose run --rm ip store import-sqlite --config /srv/ip/ip.yaml
+docker compose up -d --build
+```
+
+目标 schema 里已经有数据时导入会拒绝；行数对不上整个回滚。`ip.db` 不会被改动，确认没问题后自己删。
+
 **备份**：数据库每天用 `pg_dump` 导一份，按 schema 分开（团队上下文系统的用 `-n tcms`）。不用停服务。
 
 ```bash

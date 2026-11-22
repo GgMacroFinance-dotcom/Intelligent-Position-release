@@ -465,12 +465,16 @@ pub(crate) fn clean_text(text: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// 序列化成 JSON 文本，准备存进 `jsonb`。`jsonb` 不收 `\u0000`，换成 `�`；
+/// 序列化成 JSON 文本，准备存进 `jsonb`。`jsonb` 不收 `\u0000`，换成 `\ufffd`；
 /// 只换真正的转义（前面的反斜杠是偶数个），字符串里字面的 `\\u0000` 不动。
 pub(crate) fn to_jsonb<T: serde::Serialize + ?Sized>(value: &T) -> Result<String> {
-    let json = serde_json::to_string(value)?;
+    Ok(jsonb_safe(serde_json::to_string(value)?))
+}
+
+/// 把 JSON 文本里的 `\u0000` 换成 `\ufffd`，见 [`to_jsonb`]。
+pub(crate) fn jsonb_safe(json: String) -> String {
     if !json.contains("\\u0000") {
-        return Ok(json);
+        return json;
     }
     let bytes = json.as_bytes();
     let mut out = String::with_capacity(json.len());
@@ -492,7 +496,7 @@ pub(crate) fn to_jsonb<T: serde::Serialize + ?Sized>(value: &T) -> Result<String
         }
     }
     out.push_str(&json[last..]);
-    Ok(out)
+    out
 }
 
 fn is_unique_violation(error: &tokio_postgres::Error) -> bool {

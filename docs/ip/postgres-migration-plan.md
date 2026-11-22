@@ -110,13 +110,14 @@ harness 自身的内存目标（40 MB）不变，PostgreSQL 是另一个进程�
 
 ## 6. 数据迁移
 
-新增一次性命令 `ip store import-sqlite --from <data_dir>/ip.db`：
+一次性命令 `ip store import-sqlite --config ip.yaml [--from <旧库>]`（省略 `--from` 时读 `<data_dir>/ip.db`，2026-11-22 已做）：
 
 1. 目标 schema 必须是空的（只跑过建表迁移），否则拒绝，避免重复导入。
 2. 一个事务里按依赖顺序拷：`events`（保留原 `seq`）→ 各投影表 → 渠道表 → `engine_sessions` → 记忆表。`messages.search` 由导入时重新计算，不拷 FTS5 的索引。
 3. 把 `events`、`memory_notes` 的自增起点调到最大值之后。
-4. 校验：每张表行数、`last_seq`、抽几条搜索在两边结果一致，有一项不对就回滚。
-5. 原 `ip.db` 不删，改名留作备份。
+4. 校验：提交前逐表核对行数，有一张对不上就整个回滚。（原计划还要抽查搜索结果两边一致；排序从 bm25 换成了 `ts_rank`，结果顺序本来就会不同，改成在测试里查导入后能搜到。）
+5. 旧库只读打开，不改不删、不改名；确认服务正常后由人自己挪走。
+6. 旧库没有的表跳过；早期 `engine_sessions` 没有的用量列按 0。NUL 字符换成替换字符。导入完 `ANALYZE` 一次。
 
 ## 7. mobius 怎么迁
 
@@ -125,7 +126,7 @@ mobius 上 I.P. 只跑运维员工小维，数据量小，停机几分钟可以�
 1. 在 mobius 上单独起一个 `postgres:17` 容器给 I.P. 和 TCMS 用，**不和 Ai4sci 中转站的 PostgreSQL 共用**：那是另一个产品，有自己的升级、回滚演练和备份，混在一起出事会互相拖累。
 2. 停 `ip-harness`，备份 `data/ip.db`。
 3. 换新版二进制，`ip.yaml` 加 `database`，环境变量文件里放连接串。
-4. 跑 `ip store import-sqlite`，看校验结果。
+4. 跑 `ip store import-sqlite --config ip.yaml`，看每张表的行数。
 5. 启动服务，在控制台搜一条历史消息、看一眼待办和审批。
 6. 回滚：换回旧二进制和旧 `ip.yaml`，`ip.db` 还在。
 
@@ -135,7 +136,7 @@ mobius 上 I.P. 只跑运维员工小维，数据量小，停机几分钟可以�
 
 1. 本方案、backlog 加一条、`project-spec.md` 记下决定（只改文档，#55）。
 2. `ip-store` 换成 PostgreSQL，连同配置 `database`、docker-compose 和初始化脚本、CI 的 PostgreSQL、README 和部署文档。原计划把配置和部署单拆一个 PR，但不一起改的话 main 上用 Docker 部署会起不来，所以合在一起。删掉 `rusqlite`。
-3. `ip store import-sqlite` 和导入测试（`ip-cli` 里重新引入 `rusqlite`，只用来读旧库）。
+3. `ip store import-sqlite` 和导入测试（`ip-store` 的 `import-sqlite` 功能，只有 `ip-cli` 打开，`rusqlite` 只用来读旧库）。
 4. 连外部库的 TLS。
 5. mobius 上执行（不是 PR，单独确认）。
 

@@ -40,6 +40,8 @@ ts-rs = { version = "12", features = ["serde-json-impl"] }
 # PostgreSQL（D-6，docs/ip/postgres-migration-plan.md）。不开 TLS 以外的可选功能。
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
 deadpool-postgres = { version = "0.14", default-features = false, features = ["rt_tokio_1"] }
+# 只用来读旧的 SQLite 库，导入 PostgreSQL（`ip store import-sqlite`）。
+rusqlite = { version = "0.41", features = ["bundled"] }
 serde-saphyr = "2"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
