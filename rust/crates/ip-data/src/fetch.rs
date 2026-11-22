@@ -13,9 +13,8 @@
 //! - `fred`：美联储圣路易斯分行 FRED 的公开 CSV 下载，不需要 API key。按目录里的频率请求，
 //!   原始数据更密时（比如日度利率放进月度序列）由 FRED 按 `aggregate`（avg / sum / eop，默认 avg）汇总。
 //!
-//! 国家统计局的数据不在这里拉：2026-11-15 起岗位直接用 `macro-mcp` 的统计局工具（`search_china_indicators`、
-//! `browse_china_catalog`、`get_china_indicator`、`get_china_series`），同一份数据只留一个来源。
-//! 旧的 `fetch: { nbs: ... }` 写法会报“unknown variant”。
+//! 岗位通过 `macro-mcp` 的统计局工具取数。旧 CSV 目录中的全国月度 CPI 也支持直接拉取：
+//! `fetch: { nbs: { code: A01010101, offset: -100, last: 3 } }`。
 //!
 //! 拉到的数据和已有 CSV 合并（同一日期以新数据为准），写临时文件再改名，读的一方不会读到半个文件。
 
@@ -27,11 +26,30 @@ use serde::Deserialize;
 use crate::csv_dir::{CsvDir, SeriesInfo};
 use crate::series::{Frequency, Series, fmt_value};
 
+mod cpi;
+
 /// 序列的数据从哪里来。
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum Fetch {
     Fred(FredSpec),
+    Nbs(NbsSpec),
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(tag = "code", deny_unknown_fields)]
+pub enum NbsSpec {
+    #[serde(rename = "A01010101")]
+    NationalCpi {
+        #[serde(default)]
+        offset: f64,
+        #[serde(default = "default_cpi_count")]
+        last: u32,
+    },
+}
+
+fn default_cpi_count() -> u32 {
+    120
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -85,6 +103,13 @@ impl Fetcher {
 
     pub async fn pull(&self, fetch: &Fetch, freq: Frequency) -> Result<Pulled, String> {
         match fetch {
+            Fetch::Nbs(NbsSpec::NationalCpi { offset, last }) => {
+                if freq != Frequency::Monthly {
+                    return Err("全国 CPI 只支持月度频率".into());
+                }
+                let now = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now()).date_naive();
+                self.pull_national_cpi(*offset, *last, cpi::URL, now).await
+            }
             Fetch::Fred(spec) => {
                 let mut url = format!("{}/graph/fredgraph.csv?id={}", self.fred_base, encode(&spec.id));
                 let fq = match freq {
@@ -109,12 +134,11 @@ impl Fetcher {
     }
 
     async fn get(&self, url: &str) -> Result<String, String> {
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| format!("请求失败：{}", chain(&e)))?;
+        self.send(self.http.get(url)).await
+    }
+
+    async fn send(&self, request: reqwest::RequestBuilder) -> Result<String, String> {
+        let resp = request.send().await.map_err(|e| format!("请求失败：{}", chain(&e)))?;
         let status = resp.status();
         let text = resp.text().await.map_err(|e| format!("读取响应失败：{e}"))?;
         if !status.is_success() {

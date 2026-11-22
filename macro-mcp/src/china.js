@@ -106,7 +106,7 @@ async function readParts(parts, freq, observations, o) {
     cached &&= hit;
     if (!Array.isArray(data)) throw new SourceError('mapping_failed', 'Unexpected data.stats.gov.cn response.');
     for (const period of data) {
-      const cell = (period?.values || []).find((v) => v?._id === id);
+      const cell = (period?.values || []).find((v) => v?._id === id && v.da === NATIONAL.value);
       if (!cell) continue;
       ({ name, unit } = nameAndUnit(cell));
       const raw = String(cell.value ?? '').trim();
