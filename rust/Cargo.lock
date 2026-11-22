@@ -1061,6 +1061,7 @@ dependencies = [
 name = "ip-data"
 version = "0.8.0"
 dependencies = [
+ "chrono",
  "ip-core",
  "ip-models",
  "ip-tools",

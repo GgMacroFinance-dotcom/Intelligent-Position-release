@@ -186,8 +186,7 @@ mod fetching {
         assert!(parse_fred("h\n2024/01/01,1\n", Frequency::Monthly).is_err());
         let spec: Fetch = serde_saphyr::from_str("{ fred: { id: DGS10, aggregate: eop } }").unwrap();
         assert!(matches!(spec, Fetch::Fred(ref f) if f.id == "DGS10"));
-        // 国家统计局改由 macro-mcp 的工具直接取，旧写法要报错，不能悄悄不拉。
-        assert!(serde_saphyr::from_str::<Fetch>("{ nbs: { code: A01010101 } }").is_err());
+        assert!(serde_saphyr::from_str::<Fetch>("{ nbs: { code: A01080101 } }").is_err());
     }
 
     /// 本地假服务：按路径前缀返回固定内容，记录请求行。
@@ -219,6 +218,57 @@ mod fetching {
             }
         });
         (base, seen)
+    }
+
+    #[tokio::test]
+    async fn legacy_cpi_keeps_latest_three_published_national_months() {
+        let spec: Fetch = serde_saphyr::from_str("{ nbs: { code: A01010101, offset: -100, last: 3 } }").unwrap();
+        let Fetch::Nbs(crate::fetch::NbsSpec::NationalCpi { offset, last }) = spec else {
+            panic!("expected CPI")
+        };
+        let id = "53180dfb9c14411ba4b762307c85920c";
+        let periods: Vec<_> = [
+            ("202607MM", "100.5"),
+            ("202610MM", "100.7"),
+            ("202611MM", ""),
+            ("202608MM", "100.8"),
+            ("202609MM", "100.9"),
+        ]
+        .into_iter()
+        .map(|(code, value)| {
+            serde_json::json!({"code": code, "values": [
+                {"_id": id, "da": "110000000000", "value": "140"},
+                {"_id": id, "da": "000000000000", "i_showname": "居民消费价格指数(上年同月=100)", "value": value}
+            ]})
+        })
+        .collect();
+        let (base, seen) = fake_server(vec![(
+            "/stream/esData",
+            serde_json::json!({"success":true,"data":periods}).to_string(),
+        )])
+        .await;
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 21).unwrap();
+        let pulled = Fetcher::new()
+            .unwrap()
+            .pull_national_cpi(offset, last, &format!("{base}/stream/esData"), day)
+            .await
+            .unwrap();
+        let rows: Vec<_> = pulled
+            .series
+            .points
+            .iter()
+            .map(|(m, v)| (m.as_str(), crate::series::fmt_value(*v)))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("2026-08", "0.8".into()),
+                ("2026-09", "0.9".into()),
+                ("2026-10", "0.7".into())
+            ]
+        );
+        assert_eq!(pulled.upstream_name.as_deref(), Some("居民消费价格指数(上年同月=100)"));
+        assert_eq!(seen.lock().unwrap().as_slice(), ["POST /stream/esData HTTP/1.1"]);
     }
 
     #[tokio::test]

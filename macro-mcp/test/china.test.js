@@ -116,6 +116,29 @@ test('shortcut merges base-period catalogs, newer catalog wins, offset applied, 
   } finally { m.restore(); }
 });
 
+test('national CPI returns the latest three published months when regional cells precede the national total', async () => {
+  const [cid, id] = CPI.at(-1);
+  const rows = periods(id, '居民消费价格指数 (上年同月=100)', [
+    ['202611', ''], ['202610', '100.7'], ['202609', '100.9'], ['202608', '100.8'], ['202607', '100.5'],
+  ]);
+  for (const period of rows) period.values.unshift({ ...period.values[0], da: '110000000000', value: '140' });
+  const mock = mockFetch((url, init) => {
+    assert.equal(url, BASE + '/stream/esData');
+    assert.equal(init.method, 'POST');
+    const query = JSON.parse(init.body);
+    if (query.cid !== cid) return ok([]);
+    assert.deepEqual(query.indicatorIds, [id]);
+    assert.equal(query.das[0].value, '000000000000');
+    return ok(rows);
+  });
+  try {
+    const result = await china.chinaSeries({ indicator: 'cpi_yoy', observations: 3 }, nov15);
+    assert.deepEqual(result.records, [
+      { month: '2026-10', value: 0.7 }, { month: '2026-09', value: 0.9 }, { month: '2026-08', value: 0.8 },
+    ]);
+  } finally { mock.restore(); }
+});
+
 test('shortcut finds its ids again by catalog and indicator names when the stored ones return nothing', async () => {
   const m = mockFetch(site({ storedIdsGone: true }));
   try {
