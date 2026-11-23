@@ -71,8 +71,12 @@ pub struct ServerConfig {
     pub env_from: BTreeMap<String, String>,
     pub cwd: Option<PathBuf>,
     /// 远程：服务器地址（Streamable HTTP），如 `https://example.com/mcp`。
-    /// 必须是 https；只有本机地址（localhost、127.0.0.1、[::1]）可以用 http。
+    /// 必须是 https；只有本机地址（localhost、127.0.0.1、[::1]）可以用 http，除非写了 `allow_http`。
     pub url: Option<String>,
+    /// 远程：允许用 http 连不是本机的地址。只给同一台主机上的私有网络用，比如 docker compose 里
+    /// 用服务名连另一个容器（`http://tcms:7341/mcp`）。令牌和数据不加密，出主机的地址不要用。默认 false。
+    #[serde(default)]
+    pub allow_http: bool,
     /// 远程：访问令牌所在的环境变量名，以 `Authorization: Bearer <令牌>` 发送。
     pub bearer_token_env: Option<String>,
     /// 只给这些岗位用；空表示所有岗位。
@@ -92,6 +96,9 @@ impl ServerConfig {
                 if self.bearer_token_env.is_some() {
                     return Err("bearer_token_env 只用于 url；stdio 服务器的密钥用 env_from".into());
                 }
+                if self.allow_http {
+                    return Err("allow_http 只用于 url".into());
+                }
                 Ok(())
             }
             (Some(url), true) => {
@@ -106,7 +113,7 @@ impl ServerConfig {
                             .into(),
                     );
                 }
-                check_url(url)
+                check_url(url, self.allow_http)
             }
         }
     }
@@ -149,13 +156,17 @@ fn stdio_command(
 }
 
 /// 远程地址必须是 https；http 只允许本机，免得令牌和数据明文出网。
-fn check_url(url: &str) -> Result<(), String> {
+/// `allow_http` 是配置里明写的例外（同一台主机上的私有网络），这时 http 也要有主机名。
+fn check_url(url: &str, allow_http: bool) -> Result<(), String> {
     let uri: http::Uri = url.parse().map_err(|_| format!("url {url:?} 不是合法地址"))?;
     let host = uri.host().unwrap_or_default();
     match uri.scheme_str() {
         Some("https") if !host.is_empty() => Ok(()),
         Some("http") if matches!(host, "localhost" | "127.0.0.1" | "[::1]") => Ok(()),
-        Some("http") => Err(format!("url {url:?} 要用 https；http 只能连本机地址")),
+        Some("http") if allow_http && !host.is_empty() => Ok(()),
+        Some("http") => Err(format!(
+            "url {url:?} 要用 https；http 只能连本机地址（同一台主机上的私有网络，比如 docker compose 的服务名，可以写 allow_http: true）"
+        )),
         _ => Err(format!("url {url:?} 要以 https:// 开头")),
     }
 }

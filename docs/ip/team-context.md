@@ -1,7 +1,7 @@
 # 接团队上下文系统（TCMS）
 
 > 2026-11-23 写。对应 [`backlog.md`](backlog.md) 的 D-5，也是团队上下文系统（Team Context Management System，简称 TCMS，仓库 `Team-context-management-system`）分步实现的第 6 步。
-> 状态：I.P. 这一侧的代码已合并（release PR #58）。2026-11-23 用真实模型（`gpt-6-luna`、`gpt-6-astra`）和本机起的真实 `tcms serve` 做过一次评测，见第 7 节。没在 Docker 部署里和 TCMS 一起跑过。
+> 状态：I.P. 这一侧的代码已合并（release PR #58）。2026-11-23 用真实模型（`gpt-6-luna`、`gpt-6-astra`）和本机起的真实 `tcms serve` 做过一次评测，见第 7 节。2026-11-23 起 Docker 部署可以带上 TCMS（compose 里的 `tcms` 服务，见 [`deploy-docker.md`](deploy-docker.md)“团队上下文”），只用回声假模型在本机 Docker 里跑通过。
 
 ## 1. 是什么
 
@@ -19,6 +19,7 @@ TCMS 是一个独立的 MCP 服务，放团队共享的上下文：规则、事�
 mcp_servers:
   tcms-macro:
     url: http://127.0.0.1:7341/mcp           # tcms serve 的默认地址；不是本机地址时必须是 https
+    # allow_http: true                       # 用 docker compose 的服务名连（http://tcms:7341/mcp）时要写，见 deploy-docker.md
     bearer_token_env: TCMS_TOKEN_MACRO       # tcms token add --role macro 发的令牌
     roles: [macro-researcher]                # 必须只写这一个岗位
     timeout_secs: 30
@@ -85,4 +86,4 @@ TCMS 连不上、超时（10 秒）或返回错误时，记一条警告日志，
 没测：
 
 - 真实模型用 `context_propose` 提修改。它要人批准，不适合放进自动评测；上面第二条里是假模型提的。
-- Docker 部署里和 TCMS 一起跑。`docker-compose.yml` 里还没有 TCMS 的服务。
+- 真实模型在 Docker 部署里和 TCMS 一起跑。compose 里的 `tcms` 服务 2026-11-23 在本机 Docker 里只用回声假模型跑通过：`ip check` 取到包，团队上下文评测 9/10（和不用 Docker 时一样），提议在审核页批准后写进卷里的上下文仓库（[`deploy-docker.md`](deploy-docker.md) 的实测结果）。

@@ -5,8 +5,10 @@
 #   cp deploy/env.example .env        # 填密钥
 #   docker compose run --rm ip check --config /srv/ip/ip.yaml
 #   docker compose up -d --build
+#
+# 团队上下文系统（tcms 服务）是可选的：在 .env 里写 COMPOSE_PROFILES=tcms 才起，步骤见 docs/ip/deploy-docker.md“团队上下文”。
 services:
-  # 存储用的 PostgreSQL（docs/ip/postgres-migration-plan.md）。团队上下文系统以后也连这一个，用自己的 schema。
+  # 存储用的 PostgreSQL（docs/ip/postgres-migration-plan.md）。团队上下文系统（tcms 服务）也连这一个，用自己的 schema。
   # 不映射到主机端口，只有同一个 compose 网络里的容器连得到。
   postgres:
     image: postgres:17
@@ -44,6 +46,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # 起了 tcms 时等它好了再起，启动时就能连上它的 MCP；没起时（没开 tcms 这个 profile）不管。
+      tcms:
+        condition: service_healthy
+        required: false
     ports:
       # 只给本机。要从别处访问控制台，放在 HTTPS 反向代理后面，或者用 ssh -L 转发。
       - "127.0.0.1:7878:7878"
@@ -71,7 +77,35 @@ services:
     # 收到停止信号后，等正在进行的一轮做完再退出。
     stop_grace_period: 60s
 
+  # 团队上下文系统（TCMS，docs/ip/team-context.md）。可选：.env 里写 COMPOSE_PROFILES=tcms 才起。
+  # 镜像直接从 TCMS 的公开仓库构建（TCMS_REF 选分支或标签）；TCMS_BUILD_CONTEXT 可以换成本机的一份源码。
+  # ip 服务在 compose 网络里用 http://tcms:7341/mcp 连它，每个岗位一个令牌（docker compose run --rm tcms token add ...）。
+  tcms:
+    profiles: [tcms]
+    build:
+      context: ${TCMS_BUILD_CONTEXT:-https://github.com/GgMacroFinance-dotcom/Team-context-management-system.git#${TCMS_REF:-main}}
+    image: tcms:latest
+    restart: unless-stopped
+    environment:
+      # 用 01-roles.sh 建的 tcms_app 角色（只能动 tcms schema），密码就是 .env 里的 TCMS_DB_PASSWORD。
+      TCMS_DATABASE_URL: postgres://tcms_app:${TCMS_DB_PASSWORD:-}@postgres:5432/ip
+      # 默认只接受 Host 是本机的请求（防 DNS 重绑定）；ip 服务连它时 Host 是 tcms，要写上。
+      TCMS_ALLOWED_HOSTS: tcms
+      # 审核页批准提议时，提交者的邮箱（名字是登录的人）。
+      TCMS_GIT_EMAIL: ${TCMS_GIT_EMAIL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # 审核页 http://127.0.0.1:7341/review，只给本机；远程主机上用 ssh -L 7341:127.0.0.1:7341 转发。
+      - "127.0.0.1:7341:7341"
+    volumes:
+      # 上下文仓库（git 里的 Markdown，是真相）。第一次启动时是空的，入口脚本 git init 一个。
+      - tcms-context:/var/lib/tcms/context
+    stop_grace_period: 30s
+
 volumes:
   ip-data:
   public-data:
   pg-data:
+  tcms-context:

@@ -432,6 +432,32 @@ fn remote_url_must_be_https_unless_local() {
     }
 }
 
+/// docker compose 里用服务名连另一个容器（tcms 服务）时，要在配置里明写 allow_http 才收 http。
+#[test]
+fn allow_http_is_an_explicit_opt_in_for_private_network_hosts() {
+    let compose = "http://tcms:7341/mcp";
+    assert!(remote(compose).validate().is_err(), "没写 allow_http 时照旧拒绝");
+    let allowed = ServerConfig {
+        allow_http: true,
+        ..remote(compose)
+    };
+    assert!(allowed.validate().is_ok());
+    // allow_http 不放宽别的：照样要有主机名，照样只认 http 和 https。
+    for bad in ["http:///mcp", "ws://tcms:7341/mcp", "tcms:7341/mcp"] {
+        let config = ServerConfig {
+            allow_http: true,
+            ..remote(bad)
+        };
+        assert!(config.validate().is_err(), "{bad}");
+    }
+    let on_stdio = ServerConfig {
+        command: "node".into(),
+        allow_http: true,
+        ..ServerConfig::default()
+    };
+    assert!(on_stdio.validate().is_err(), "allow_http 只用于 url");
+}
+
 #[tokio::test]
 async fn remote_config_errors_are_reported_before_connecting() {
     let mut configs = BTreeMap::new();
