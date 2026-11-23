@@ -2,10 +2,11 @@
 
 > 一台 Linux 云主机上，用 `docker compose` 起 harness。镜像里带工具沙箱 bubblewrap，可选带 Codex。
 > 相关文件都在 `rust/` 下：`Dockerfile`、`docker-compose.yml`、`deploy/env.example`。
+> 团队上下文系统（TCMS）是可选的第三个服务，见“团队上下文”一节。
 
 ## 要求
 
-- Linux 主机，Docker Engine 24 以上，带 Compose v2.17 以上（`docker compose` 命令；`additional_contexts` 要 2.17）。
+- Linux 主机，Docker Engine 24 以上，带 Compose v2.20 以上（`docker compose` 命令；`additional_contexts` 要 2.17，`depends_on` 里的 `required: false` 要 2.20）。
 - 主机内核允许普通用户建用户命名空间，工具沙箱靠它隔离。Ubuntu 24.04 起默认不允许，要放开：
 
   ```bash
@@ -71,6 +72,76 @@
    ```bash
    ssh -L 7878:127.0.0.1:7878 <主机>
    ```
+
+## 团队上下文（可选）
+
+团队上下文系统（TCMS，[`team-context.md`](team-context.md)）作为 compose 里的 `tcms` 服务起，和 I.P. 共用 `postgres`，用自己的角色 `tcms_app` 和 schema `tcms`。
+镜像直接从 TCMS 的公开仓库构建；不开它时 compose 和以前一样，只有 `postgres` 和 `ip`。
+
+1. **开启**：在 `.env` 里写 `COMPOSE_PROFILES=tcms`，并用 `openssl rand -hex 24` 生成 `TCMS_DB_PASSWORD`。
+
+   `TCMS_DB_PASSWORD` 只在 `pg-data` 卷第一次建出来时生效。已经起过、当时没填的，进库里补建角色和 schema：
+
+   ```bash
+   docker compose exec -T postgres psql -U postgres -d ip -v pw="<TCMS_DB_PASSWORD>" <<'SQL'
+   CREATE ROLE tcms_app LOGIN PASSWORD :'pw';
+   GRANT CONNECT ON DATABASE ip TO tcms_app;
+   CREATE SCHEMA tcms AUTHORIZATION tcms_app;
+   ALTER ROLE tcms_app SET search_path = tcms;
+   SQL
+   ```
+
+2. **构建、起 tcms**：
+
+   ```bash
+   docker compose build tcms
+   docker compose up -d tcms
+   ```
+
+   上下文仓库在 `tcms-context` 卷里，第一次启动时是空的，会自动 `git init`。
+
+3. **放内容**：把一个 Markdown 目录（比如 Notion、AFFiNE 导出的）导进某个范围，再同步一次索引。范围是 `org`、`team-<团队>`、`role-<岗位>`、`project-<项目>`：
+
+   ```bash
+   docker compose run --rm -v "$PWD/资料:/import:ro" tcms import /import --into team-research
+   docker compose run --rm tcms reindex
+   ```
+
+   以后员工用 `context_propose` 提修改，人在审核页批准。换成自己的 git 仓库等其他办法见 TCMS 仓库的 `docs/deploy-docker.md`。
+
+4. **发令牌**：每个岗位一个，明文只打印这一次，填进 `.env` 的 `TCMS_TOKEN_MACRO`。上下文仓库里还没有 `teams.yaml` 时，用 `--team` 写明岗位属于哪个团队：
+
+   ```bash
+   docker compose run --rm tcms token add --name "I.P. 宏观研报" --role macro --team research
+   ```
+
+   审核的人用另一种令牌：
+
+   ```bash
+   docker compose run --rm tcms token add --reviewer --name "王审核"
+   ```
+
+5. **配 `ip.yaml`**：取消 `mcp_servers.tcms-macro` 和 `team_context` 两段的注释，地址改成 compose 里的服务名，并加上 `allow_http: true`。两个容器在同一台主机的 compose 网络里，走 http，不出这台主机：
+
+   ```yaml
+   mcp_servers:
+     tcms-macro:
+       url: http://tcms:7341/mcp
+       allow_http: true
+       bearer_token_env: TCMS_TOKEN_MACRO
+       roles: [macro-researcher]
+   ```
+
+6. **检查、启动**：`ip check` 里“团队上下文 macro-researcher”一项是 ✓，就说明取到包了。`ip` 会等 `tcms` 变成 `healthy` 再起。
+
+   ```bash
+   docker compose run --rm ip check --config /srv/ip/ip.yaml
+   docker compose up -d
+   ```
+
+7. **审核页**：`http://127.0.0.1:7341/review`，用审核令牌登录。端口只开放给本机，远程主机上用 `ssh -L 7341:127.0.0.1:7341 <主机>`。
+
+TCMS 的镜像默认从 `main` 构建。`.env` 里的 `TCMS_REF` 可以换成分支或标签；`TCMS_BUILD_CONTEXT` 可以指向本机的一份源码。
 
 ## 容器里的路径
 
@@ -255,6 +326,8 @@ docker compose up -d --build
 目标 schema 里已经有数据时导入会拒绝；行数对不上整个回滚。`ip.db` 不会被改动，确认没问题后自己删。
 
 **备份**：数据库每天用 `pg_dump` 导一份，按 schema 分开（团队上下文系统的用 `-n tcms`）。不用停服务。
+开了团队上下文时，上下文仓库（`tcms-context` 卷，是真相）另外打一个 git bundle：
+`docker compose exec -T tcms git -C /var/lib/tcms/context bundle create - --all > context-$(date +%F).bundle`。
 
 ```bash
 docker compose exec -T postgres pg_dump -U postgres -d ip -n ip -Fc > ip-$(date +%F).dump
@@ -300,5 +373,19 @@ docker compose start ip
 | `ip bench startup --check`（在容器里） | 通过，启动中位数 3.9 ms，内存 16 MB |
 | 带 Codex 的镜像 | `codex --version` 是 `codex-cli 0.167.1`；`ip check` 里“岗位 ops-tester 的 Codex 引擎” ✓；Codex 自带的 bubblewrap 三项都放开时能用，缺 `systempaths=unconfined` 时报同样的错 |
 | 不带 Codex 的镜像配了 Codex 引擎 | `ip check` 里这一项 ✗：找不到 codex |
+
+2026-11-23 加团队上下文时，在 Docker 29.10.0、Compose v5.7.1 上又试了一遍。这台机器只能经 HTTPS 代理出网，构建时临时多加了几行，让 cargo 和 apt 信任代理的证书、apt 走 https；仓库里的 `Dockerfile` 没有这几行。模型用的是不花钱的回声假模型（`evals/team-context/echo_model.py`），放在另一个容器里。
+
+| 测了什么 | 结果 |
+| --- | --- |
+| 不开 `tcms` | `docker compose config --services` 只有 `postgres`、`ip`，`ip` 的 `depends_on` 里的 `tcms` 不起作用 |
+| 开了 `tcms`，空卷第一次启动 | `pg-data` 新建时建了 `tcms_app` 和 `tcms`。旧版 TCMS 在这里起不来（`tcms_app` 没有在库里建 schema 的权限），TCMS 改成先查再建以后几秒 `healthy` |
+| 导入、发令牌 | 造的上下文仓库（`evals/team-context/context/`）按三个范围导入，15 条；发了岗位令牌和审核令牌 |
+| `ip check` | “团队上下文 macro-researcher：经 tcms-macro 取到了包：固定前缀约 366 token，按任务挑的约 280 token”。没写 `allow_http` 时，第一项“配置文件”就报错：http 只能连本机地址 |
+| 团队上下文评测，回声假模型 | 在 `ip` 容器里跑 `ip eval --set evals/team-context.yaml`：9/10，和不用 Docker 时一样（没过的那题是规则原文“不写 DXY”被原样回了出来） |
+| `docker compose up -d` | `ip` 等 `tcms` 变成 `healthy` 才起，日志里 `tcms-macro` 连上了 5 个工具 |
+| 提议和批准 | 用岗位令牌调 `context_propose`，审核页接口批准后，`tcms-context` 卷里多了一个提交，提交者是审核的人；索引更新到 16 条，`context_search` 搜得到 |
+| 审核页 | 本机 `http://127.0.0.1:7341/review` 是 200，别的 `Host` 是 403 |
+| `docker compose stop tcms` | 退出码 0 |
 
 还没测的：真的用 Codex 改代码（要 `CODEX_API_KEY`），以及 Slack 和真实模型。这些在[验收手册](m2-acceptance.md)第 4、5 节里，用 Docker 起服务也照那里的步骤做。
