@@ -1,7 +1,7 @@
 # 接团队上下文系统（TCMS）
 
 > 2026-11-23 写。对应 [`backlog.md`](backlog.md) 的 D-5，也是团队上下文系统（Team Context Management System，简称 TCMS，仓库 `Team-context-management-system`）分步实现的第 6 步。
-> 状态：I.P. 这一侧的代码已写，**只用假模型测过**。TCMS 用的是测试里的假服务和本机起的真实 `tcms serve`。没用真实模型跑过，没在 Docker 部署里和 TCMS 一起跑过。
+> 状态：I.P. 这一侧的代码已合并（release PR #58）。2026-11-23 用真实模型（`gpt-6-luna`、`gpt-6-astra`）和本机起的真实 `tcms serve` 做过一次评测，见第 7 节。没在 Docker 部署里和 TCMS 一起跑过。
 
 ## 1. 是什么
 
@@ -80,8 +80,9 @@ TCMS 连不上、超时（10 秒）或返回错误时，记一条警告日志，
 - 单元测试，TCMS 是测试里的假服务。测了前缀进系统提示词、对话开头那部分在同一个对话里不变、隐藏的工具不交给模型、员工能用 `context_search`、TCMS 出错时这一轮照常进行、外部引擎第一轮拿到两部分，还有配置检查的几种错误写法。模型是假的。
 - 本机起真实的 `tcms serve`（PostgreSQL 16，造的小上下文仓库），I.P. 用假模型对话：前缀进了系统提示词，对话开头是相关条目和目录，工具列表里没有 `context_get`，`context_search` 搜到了条目，`context_propose` 提的修改在 `tcms proposals` 里看得到。`ip check` 报对了正确的令牌，也报出了岗位名对不上。
 - 设了 `IP_TEST_TCMS_URL` 和 `IP_TEST_TCMS_TOKEN` 时，`ip-runtime` 的测试会连真实的 TCMS，搜一次、提一条修改。CI 里不设，跳过。
+- 真实模型评测（TCMS 第 7 步，2026-11-23）：10 道必须用到团队上下文才能答对的题，比较不接、接上（预算 4000 token）、小预算（只列标题，员工要自己查）三种配置。`gpt-6-luna` 每种 3 遍，不接 0/30，接上 30/30，小预算 30/30；`gpt-6-astra` 每种 1 遍，不接 1/10（判分误判），接上 10/10，小预算 10/10。两个模型都照前缀里的规则写了声明、写了“广义美元指数”；小预算时问按任务挑的条目的题都自己调了 `context_search`，有时再 `context_read`。合计约 0.48 美元。题目是专门造的，只说明链路通了，不说明真实工作里帮了多少。记录在 [`evals/2026-11-23-team-context/`](evals/2026-11-23-team-context/README.md)，跑法 `rust/evals/team-context/run.sh`。
 
 没测：
 
-- 真实模型会不会照前缀里的规则做事，会不会用 `context_read`、`context_propose`。这是 TCMS 的第 7 步（评测），要花费用，开工前问维护者。
+- 真实模型用 `context_propose` 提修改。它要人批准，不适合放进自动评测；上面第二条里是假模型提的。
 - Docker 部署里和 TCMS 一起跑。`docker-compose.yml` 里还没有 TCMS 的服务。

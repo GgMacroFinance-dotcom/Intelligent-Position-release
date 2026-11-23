@@ -1,0 +1,380 @@
+{
+  "cases": [
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：利率、资金面、下周日历",
+          "name": "回复里有要求的内容",
+          "pass": false
+        }
+      ],
+      "cost_usd": 0.0001302,
+      "elapsed_ms": 3459,
+      "error": null,
+      "id": "weekly-sections",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "我不知道鹰眼周报固定有哪些章节；当前对话没有提供相关模板或口径，我不想猜。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 121,
+        "prompt_tokens": 697
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：林雯、2026-12-12 / 12 月 12 日 / 12月12日",
+          "name": "回复里有要求的内容",
+          "pass": false
+        }
+      ],
+      "cost_usd": 0.00014790000000000002,
+      "elapsed_ms": 2767,
+      "error": null,
+      "id": "polaris-owner",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "我目前不知道“北极星”项目由谁负责、什么时候交付；当前对话里没有这两项信息。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 156,
+        "prompt_tokens": 699
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：周岚、周三、17:00 / 17：00 / 17 点 / 17点 / 下午 5 点 / 下午5点 / 下午五点",
+          "name": "回复里有要求的内容",
+          "pass": false
+        }
+      ],
+      "cost_usd": 0.0001354,
+      "elapsed_ms": 2141,
+      "error": null,
+      "id": "cpi-review",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "我不知道。当前对话没有提供 CPI 点评的审稿人或最晚发布时间，不能替你猜；请以组内排期或最新流程为准。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 130,
+        "prompt_tokens": 704
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：基准、偏鹰、偏鸽、60、25、15",
+          "name": "回复里有要求的内容",
+          "pass": false
+        }
+      ],
+      "cost_usd": 0.0001564,
+      "elapsed_ms": 3103,
+      "error": null,
+      "id": "three-scenarios",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "我不知道我们组“三档情景”的具体名称和默认概率；当前对话里没有这项口径，我不想凭经验编一个。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 171,
+        "prompt_tokens": 709
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：EFFR / 联邦基金有效利率",
+          "name": "回复里有要求的内容",
+          "pass": false
+        }
+      ],
+      "cost_usd": 0.0002475,
+      "elapsed_ms": 6126,
+      "error": null,
+      "id": "sofr-spread",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "我不知道本组“SOFR 利差”的内部口径；仅凭这个词无法确定它是相对哪一个利率算的。\n\n一般写法是 **SOFR − 对照利率**，若利率以百分比表示，差值乘以 100 换算为基点（bp）。但也可能指贷款定价中的 **SOFR + 加点**。需要结合本组具体图表或指标名称，才能确认公式、期限和取值日期。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 355,
+        "prompt_tokens": 700
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：2 年 / 2年 / 两年、10 年 / 10年 / 十年、赵牧",
+          "name": "回复里有要求的内容",
+          "pass": false
+        }
+      ],
+      "cost_usd": 0.0002565,
+      "elapsed_ms": 4093,
+      "error": null,
+      "id": "client-tenors",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "我目前不知道北岸资管这份简报要求看哪些期限，也没有对接人的信息；现有对话和任务记录里没有相关安排。不能凭空确定。",
+      "report_path": null,
+      "steps": 2,
+      "tools_used": [
+        "list_tasks"
+      ],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 223,
+        "prompt_tokens": 1450
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：林雯、何川",
+          "name": "回复里有要求的内容",
+          "pass": false
+        }
+      ],
+      "cost_usd": 0.000153,
+      "elapsed_ms": 2527,
+      "error": null,
+      "id": "data-purchase",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "我不知道 8000 元数据采购对应的审批人，不能替你猜。请查采购制度，或向直属负责人、采购/财务确认。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 166,
+        "prompt_tokens": 700
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：林雯、6 人 / 6人 / 六人 / 6 名 / 6名 / 六名 / 6 位 / 6位 / 六位",
+          "name": "回复里有要求的内容",
+          "pass": false
+        }
+      ],
+      "cost_usd": 0.0001035,
+      "elapsed_ms": 1531,
+      "error": null,
+      "id": "team-lead",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "我不知道目前研究组组长是谁，也不知道组里一共几个人；这段对话里没有提供这些信息。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 67,
+        "prompt_tokens": 700
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：本材料仅供内部讨论，不构成投资建议",
+          "name": "回复里有要求的内容",
+          "pass": false
+        }
+      ],
+      "cost_usd": 0.0001672,
+      "elapsed_ms": 3034,
+      "error": null,
+      "id": "disclaimer-rule",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "北岸资管您好！本周的利率点评将于明天（11月24日）发出。感谢关注。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 191,
+        "prompt_tokens": 717
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "没出现：广义美元指数",
+          "name": "回复里有要求的内容",
+          "pass": false
+        },
+        {
+          "detail": "",
+          "name": "没有不该用的写法",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.00023040000000000002,
+      "elapsed_ms": 4564,
+      "error": null,
+      "id": "dollar-index-rule",
+      "model": "openai/gpt-6-luna",
+      "pass": false,
+      "reply": "近期美元指数在 X 附近波动，较前期整体呈现 X 走势，反映市场对美国利率路径与经济前景的定价仍在调整。展望后市，美元方向仍取决于美国经济数据、主要央行政策分化及风险偏好的变化，短期波动或延续。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 319,
+        "prompt_tokens": 709
+      }
+    }
+  ],
+  "cost_usd": 0.001728,
+  "passed": 0,
+  "total": 10,
+  "usage": {
+    "cache_write_tokens": 0,
+    "cached_tokens": 0,
+    "completion_tokens": 1899,
+    "prompt_tokens": 7785
+  }
+}

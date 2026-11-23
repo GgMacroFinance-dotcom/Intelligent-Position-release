@@ -1,0 +1,378 @@
+{
+  "cases": [
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.000329925,
+      "elapsed_ms": 2149,
+      "error": null,
+      "id": "weekly-sections",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "鹰眼周报固定三节，顺序是：利率、资金面、下周日历。[ctx_01JDX4M6Q8TC00000000000011 r1]",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 2453,
+        "cached_tokens": 0,
+        "completion_tokens": 46,
+        "prompt_tokens": 2456
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.00003972,
+      "elapsed_ms": 1079,
+      "error": null,
+      "id": "polaris-owner",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "“北极星”项目由林雯负责，交付日是 2026 年 12 月 12 日。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 2392,
+        "completion_tokens": 31,
+        "prompt_tokens": 2395
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.00015695,
+      "elapsed_ms": 1340,
+      "error": null,
+      "id": "cpi-review",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "先发给合规的周岚审核；审核通过后，最晚须在 CPI 公布当周的周三 17:00（北京时间）前发出。[ctx_01JDX4M6Q8TC00000000000012 r1]",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 722,
+        "cached_tokens": 1790,
+        "completion_tokens": 97,
+        "prompt_tokens": 2515
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.000053450000000000005,
+      "elapsed_ms": 1007,
+      "error": null,
+      "id": "three-scenarios",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "“三档情景”是基准、偏鹰、偏鸽；没有特别说明时，概率分别按 60%、25%、15% 写。[ctx_01JDX4M6Q8TC00000000000013 r1]",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 2515,
+        "completion_tokens": 56,
+        "prompt_tokens": 2518
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.000056760000000000005,
+      "elapsed_ms": 1055,
+      "error": null,
+      "id": "sofr-spread",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "本组的“SOFR 利差”按 **SOFR 减联邦基金有效利率（EFFR）**计算，单位是 bp；两个利率必须取同一天的数据。[ctx_01JDX4M6Q8TC00000000000020 r1]",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 2446,
+        "completion_tokens": 64,
+        "prompt_tokens": 2449
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.00015907499999999998,
+      "elapsed_ms": 1592,
+      "error": null,
+      "id": "client-tenors",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "看 **2 年期和 10 年期美债**；不看 5 年期或 30 年期。对接人是 **赵牧**。[ctx_01JDX4M6Q8TC00000000000021 r1]",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 675,
+        "cached_tokens": 1790,
+        "completion_tokens": 113,
+        "prompt_tokens": 2468
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0001557,
+      "elapsed_ms": 1438,
+      "error": null,
+      "id": "data-purchase",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "8000 元超过 5000 元，需要研究组长林雯和财务何川两人都批准后才能下单。[ctx_01JDX4M6Q8TC00000000000015 r1]",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 724,
+        "cached_tokens": 1790,
+        "completion_tokens": 94,
+        "prompt_tokens": 2517
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0001412,
+      "elapsed_ms": 805,
+      "error": null,
+      "id": "team-lead",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "研究组组长是林雯，组里共 6 人。[ctx_01JDX4M6Q8TC00000000000010 r1]",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 828,
+        "cached_tokens": 1790,
+        "completion_tokens": 39,
+        "prompt_tokens": 2621
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0002897,
+      "elapsed_ms": 3579,
+      "error": null,
+      "id": "disclaimer-rule",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "赵牧您好，向您同步：本周利率点评将于明天（11月24日）发出。  \n如有需要补充的关注点，欢迎告知。  \n本材料仅供内部讨论，不构成投资建议。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 864,
+        "cached_tokens": 1790,
+        "completion_tokens": 327,
+        "prompt_tokens": 2657
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复里有要求的内容",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "没有不该用的写法",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.000328075,
+      "elapsed_ms": 4761,
+      "error": null,
+      "id": "dollar-index-rule",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "近期，广义美元指数在 X 附近波动，整体呈现 X 走势，反映市场对美国利率路径及风险情绪的持续调整。展望后市，美国经济数据和货币政策预期仍是影响美元表现的关键变量，走势存在不确定性。",
+      "report_path": null,
+      "steps": 1,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 727,
+        "cached_tokens": 1790,
+        "completion_tokens": 438,
+        "prompt_tokens": 2520
+      }
+    }
+  ],
+  "cost_usd": 0.0017105549999999997,
+  "passed": 10,
+  "total": 10,
+  "usage": {
+    "cache_write_tokens": 6993,
+    "cached_tokens": 18093,
+    "completion_tokens": 1305,
+    "prompt_tokens": 25116
+  }
+}

@@ -1,0 +1,68 @@
+# 团队上下文评测（团队上下文系统 TCMS 的第 7 步，docs/ip/team-context.md）：10 道必须用到团队上下文才能答对的题，
+# 比较接上团队上下文前后。题目里的人名、客户、规矩都是 evals/team-context/context/ 里造的，模型不可能事先知道。
+# 运行：evals/team-context/run.sh（起一个本机的 tcms serve，接上、不接、小预算三种各跑一遍）。
+# 都看员工在对话里的最后一条回复（reply: true），不看报告文件；检查规则见 crates/ip-cli/src/eval/mod.rs。
+# must_contain 的一项写成列表时，出现其中一种说法就算。数字和带冒号的时间要加引号，不然会被读成数。
+cases:
+  # 按任务挑的条目（放在对话开头）。
+  - id: weekly-sections
+    agent: macro-1
+    reply: true
+    question: 鹰眼周报固定有哪几节？直接在对话里回答，不用取数，也不用写报告文件。
+    must_contain: [利率, 资金面, 下周日历]
+
+  - id: polaris-owner
+    agent: macro-1
+    reply: true
+    question: “北极星”项目谁负责？什么时候交付？直接在对话里回答，不用取数，也不用写报告文件。
+    must_contain: [林雯, ["2026-12-12", 12 月 12 日, 12月12日]]
+
+  - id: cpi-review
+    agent: macro-1
+    reply: true
+    question: CPI 点评写完以后要先给谁审？最晚什么时候发出？直接在对话里回答，不用取数，也不用写报告文件。
+    must_contain: [周岚, 周三, ["17:00", "17：00", 17 点, 17点, 下午 5 点, 下午5点, 下午五点]]
+
+  - id: three-scenarios
+    agent: macro-1
+    reply: true
+    question: 我们说的“三档情景”是哪三档？没有特别说明时概率各按多少写？直接在对话里回答，不用取数，也不用写报告文件。
+    must_contain: [基准, 偏鹰, 偏鸽, "60", "25", "15"]
+
+  - id: sofr-spread
+    agent: macro-1
+    reply: true
+    question: 本组说的“SOFR 利差”是怎么算的？直接在对话里回答，不用取数，也不用写报告文件。
+    must_contain: [[EFFR, 联邦基金有效利率]]
+
+  - id: client-tenors
+    agent: macro-1
+    reply: true
+    question: 给北岸资管写美债简报，要看哪几个期限？对接人是谁？直接在对话里回答，不用取数，也不用写报告文件。
+    must_contain: [["2 年", 2年, 两年], ["10 年", 10年, 十年], 赵牧]
+
+  - id: data-purchase
+    agent: macro-1
+    reply: true
+    question: 我想买一份 8000 元的数据，要谁批？直接在对话里回答，不用取数，也不用写报告文件。
+    must_contain: [林雯, 何川]
+
+  # 固定前缀里的条目（放在系统提示词里）：常驻的事实和规则。
+  - id: team-lead
+    agent: macro-1
+    reply: true
+    question: 研究组组长是谁？组里一共几个人？直接在对话里回答，不用取数，也不用写报告文件。
+    must_contain: [林雯, ["6 人", 6人, 六人, "6 名", 6名, 六名, "6 位", 6位, 六位]]
+
+  - id: disclaimer-rule
+    agent: macro-1
+    reply: true
+    question: 帮我起草一封发给北岸资管的三句话邮件，说本周的利率点评明天发出。直接在对话里写出邮件，不用取数，也不用写报告文件。
+    must_contain: [本材料仅供内部讨论，不构成投资建议]
+
+  - id: dollar-index-rule
+    agent: macro-1
+    reply: true
+    question: 用两句话写一段美元最近走势点评的开头，具体数字用 X 代替。直接在对话里写出来，不用取数，也不用写报告文件。
+    must_contain: [广义美元指数]
+    must_not_contain: [DXY]
