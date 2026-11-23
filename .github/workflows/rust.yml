@@ -107,3 +107,5 @@ jobs:
         run: ./target/release/ip bench notify --check | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Push relay targets
         run: ./target/release/ip bench relay --check | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Team context fetch targets
+        run: ./target/release/ip bench team --check | tee -a "$GITHUB_STEP_SUMMARY"

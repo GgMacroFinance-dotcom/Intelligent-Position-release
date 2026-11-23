@@ -237,6 +237,7 @@ impl App {
         let mut rc = RuntimeConfig {
             org_prompt: config.org_prompt.clone(),
             memory: config.memory.clone(),
+            team_context: config.team_context.clone(),
             utc_offset_minutes: config.utc_offset_minutes()?,
             ..RuntimeConfig::default()
         };

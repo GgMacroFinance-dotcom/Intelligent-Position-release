@@ -494,6 +494,45 @@ impl McpHub {
         Some(out)
     }
 
+    /// 由 harness 自己调某个服务器上的一个工具（不经过模型），返回结构化结果。
+    ///
+    /// 和 [`call`](Self::call) 不同：按服务器名找，不看岗位（调用方自己保证这个服务器是给谁用的）；
+    /// 结果不截断，优先取 `structuredContent`，没有时把文字内容当 JSON 解析。
+    /// 用于团队上下文：每轮开头取上下文包（`docs/ip/team-context.md`）。
+    pub async fn call_json(
+        &self,
+        server: &str,
+        tool: &str,
+        arguments: serde_json::Map<String, serde_json::Value>,
+        timeout: Duration,
+    ) -> Result<serde_json::Value, String> {
+        let found = {
+            let state = self.read();
+            match state.servers.iter().find(|s| s.name == server) {
+                Some(s) => Ok(s.clone()),
+                None => Err(match state.unavailable.iter().find(|u| u.name == server) {
+                    Some(u) => format!("MCP 服务器 {server} 没连上：{}", u.error),
+                    None => format!("没有 MCP 服务器 {server}"),
+                }),
+            }
+        };
+        let server = found?;
+        let params = CallToolRequestParams::new(tool.to_string()).with_arguments(arguments);
+        let wait = timeout.min(server.timeout);
+        let result = tokio::time::timeout(wait, server.peer.call_tool(params))
+            .await
+            .map_err(|_| format!("{} 的 {tool} 超过 {} 毫秒没有返回", server.name, wait.as_millis()))?
+            .map_err(|e| format!("MCP 服务器 {} 出错：{e}", server.name))?;
+        if result.is_error.unwrap_or(false) {
+            return Err(render(&result.content, None));
+        }
+        if let Some(v) = result.structured_content {
+            return Ok(v);
+        }
+        let text = render(&result.content, None);
+        serde_json::from_str(&text).map_err(|_| format!("{} 的 {tool} 返回的不是 JSON", server.name))
+    }
+
     /// 停掉后台重连，关闭所有连接；stdio 服务器的子进程随之退出。远程服务器只是断开。
     pub async fn shutdown(&self) {
         let servers = {

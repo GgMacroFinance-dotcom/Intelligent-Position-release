@@ -302,3 +302,19 @@ mcp_servers:
   #   env_from: { GITHUB_PERSONAL_ACCESS_TOKEN: GITHUB_TOKEN }
   #   roles: [ops-tester]
   #   timeout_secs: 60
+  # 团队上下文系统（TCMS，见下面的 team_context）：每个岗位用自己的令牌（tcms token add --role macro）配一项，只给这一个岗位用。
+  # tcms-macro:
+  #   url: http://127.0.0.1:7341/mcp
+  #   bearer_token_env: TCMS_TOKEN_MACRO
+  #   roles: [macro-researcher]
+  #   timeout_secs: 30
+
+# 团队上下文（docs/ip/team-context.md）：岗位每轮开头从 TCMS 取一个上下文包，固定前缀放进系统提示词（组织规则之后），
+# 按任务挑的部分放在对话开头；员工多了 context_search、context_read、context_propose 三个工具，提的修改人批准以后才生效。
+# TCMS 连不上时这一轮不带，照常进行。只用假模型测过。
+# team_context:
+#   budget_tokens: 4000            # 整个包的 token 预算，100 到 200000
+#   roles:
+#     macro-researcher:
+#       server: tcms-macro         # 上面 mcp_servers 里那一项
+#       role: macro                # TCMS 里的岗位名，要和令牌一致；省略时用 I.P. 的岗位 id

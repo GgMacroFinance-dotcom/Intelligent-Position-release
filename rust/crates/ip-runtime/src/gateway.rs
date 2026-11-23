@@ -25,9 +25,31 @@ pub(crate) struct OrgTools {
     pub mcp: Option<Arc<ip_mcp::McpHub>>,
     /// 这个岗位开了记忆：多三个记忆工具（查、读、记更正）。
     pub memory: bool,
+    /// 不给员工的 MCP 工具（完整的 `mcp__<服务器>__<工具>` 名）：团队上下文的 `context_get` 等由 harness 调。
+    pub hidden: Vec<String>,
 }
 
 impl OrgTools {
+    pub fn new(config: &crate::RuntimeConfig, setup: &crate::AgentSetup) -> Self {
+        let hidden = config
+            .team_context
+            .roles
+            .get(&setup.role.id)
+            .map(|t| {
+                crate::team::HIDDEN_TOOLS
+                    .iter()
+                    .map(|tool| crate::team::tool_name(&t.server, tool))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            data: setup.data.clone(),
+            mcp: setup.mcp.clone(),
+            memory: config.memory.enabled_for(&setup.role.id),
+            hidden,
+        }
+    }
+
     /// 某个岗位能用的工具定义。顺序固定，利于前缀缓存。
     pub fn specs(&self, role: &RoleId) -> Vec<ToolSpec> {
         let mut tools = work_tools::specs();
@@ -38,7 +60,11 @@ impl OrgTools {
             tools.extend(hub.specs_for(role));
         }
         if let Some(hub) = &self.mcp {
-            tools.extend(hub.specs_for(role));
+            tools.extend(
+                hub.specs_for(role)
+                    .into_iter()
+                    .filter(|t| !self.hidden.contains(&t.name)),
+            );
         }
         tools
     }
@@ -64,6 +90,11 @@ impl OrgTools {
             && let Some(out) = hub.call(&me.role, name, arguments).await
         {
             return Some(out);
+        }
+        if self.hidden.iter().any(|h| h == name) {
+            return Some(ToolOutput::err(format!(
+                "{name} 由系统在每轮开头调用，结果已经在提示词里；要找条目用 context_search"
+            )));
         }
         if let Some(hub) = &self.mcp
             && let Some(out) = hub.call(&me.role, name, arguments).await

@@ -160,6 +160,7 @@ pub async fn check(config: &Config, env: &(dyn Fn(&str) -> Option<String> + Sync
                     };
                     r.push(Status::Ok, "MCP 服务器", detail);
                 }
+                check_team_context(config, &hub, &mut r).await;
                 hub.shutdown().await;
             }
             Err(e) => r.push(Status::Fail, "MCP 服务器", e.to_string()),
@@ -191,6 +192,44 @@ pub async fn check(config: &Config, env: &(dyn Fn(&str) -> Option<String> + Sync
         }
     }
     r
+}
+
+/// 接了团队上下文的岗位：用这个岗位的令牌取一次包，看令牌和岗位名对不对得上。
+async fn check_team_context(config: &Config, hub: &ip_mcp::McpHub, r: &mut Report) {
+    for (role, team) in &config.team_context.roles {
+        let item = format!("团队上下文 {role}");
+        // 服务器没连上的，上面已经报过了。
+        if hub.unavailable().iter().any(|u| u.name == team.server) {
+            continue;
+        }
+        let mut args = serde_json::Map::new();
+        args.insert(
+            "role".into(),
+            team.role.clone().unwrap_or_else(|| role.to_string()).into(),
+        );
+        if let Some(t) = &team.team {
+            args.insert("team".into(), t.clone().into());
+        }
+        args.insert("task".into(), "ip check：试取一次上下文包".into());
+        args.insert("budget_tokens".into(), config.team_context.budget_tokens.into());
+        let wait = std::time::Duration::from_secs(10);
+        match hub.call_json(&team.server, "context_get", args, wait).await {
+            Ok(pack) => {
+                let tokens = |k: &str| pack.get(k).and_then(|v| v.as_u64()).unwrap_or_default();
+                r.push(
+                    Status::Ok,
+                    item,
+                    format!(
+                        "经 {} 取到了包：固定前缀约 {} token，按任务挑的约 {} token",
+                        team.server,
+                        tokens("prefix_tokens"),
+                        tokens("task_tokens")
+                    ),
+                );
+            }
+            Err(e) => r.push(Status::Fail, item, format!("经 {} 取包失败：{e}", team.server)),
+        }
+    }
 }
 
 fn check_data_dir(config: &Config, r: &mut Report) {

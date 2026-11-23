@@ -46,7 +46,7 @@ WebSocket 接口在 `/ws`。发一条消息：
 `/mcp` 是给 Codex 这类外部引擎用的 MCP 服务端（Streamable HTTP），开放的是组织工具、本岗位的数据工具和外部 MCP 工具，不含 shell 和文件工具。
 它只认运行时为每一轮签发的令牌（`Runtime::grant_turn`），不认上面的访问令牌，并且只接受本机地址的请求。详见[《M2 规格》](../docs/ip/m2-spec.md) D-17 到 D-19。
 
-启动前可以先检查配置：`ip check --config ip.yaml` 逐项检查模型端点的 key、工具沙箱、数据源、MCP 服务器、外部引擎（Codex、Claude Code）和 Slack 令牌能不能用，有失败时退出码为 1。它不发消息、不调模型。用真实账号验收的步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)。
+启动前可以先检查配置：`ip check --config ip.yaml` 逐项检查模型端点的 key、工具沙箱、数据源、MCP 服务器、外部引擎（Codex、Claude Code）、Slack 令牌和团队上下文能不能用，有失败时退出码为 1。它不发消息、不调模型。用真实账号验收的步骤见[《M2 真实验收手册》](../docs/ip/m2-acceptance.md)。
 
 质量评测：`ip eval --config ip.yaml --set evals/macro-smoke.yaml` 用真实模型跑评测集里的固定问题，每次用一个新的临时数据目录。
 检查项都用程序判定：本轮正常结束、调了取数工具、写了报告、报告里的数字能在工具结果里找到（允许四舍五入、单位换算和两数之差）、
@@ -59,9 +59,10 @@ WebSocket 接口在 `/ws`。发一条消息：
 cargo run --release -p ip-cli -- bench startup --check   # 启动时间、空闲内存
 cargo run --release -p ip-cli -- bench store --check     # 5 万条消息写入与搜索，每轮读岗位上下文，找待提炼的对话
 cargo run --release -p ip-cli -- bench agents --check    # 500 个数字员工常驻与并发
+cargo run --release -p ip-cli -- bench team --check      # 每轮开头取团队上下文包的开销
 ```
 
-`--check` 时未达标即失败，CI 每个 PR 都跑这三项。
+`--check` 时未达标即失败。CI 每个 PR 都跑这几项，还有下面各条里提到的 `events`、`notify`、`relay`。
 
 4 核云主机上的实测：
 
@@ -92,7 +93,7 @@ docker compose up -d --build
 | --- | --- | --- |
 | `ip-core` | 领域模型：组织、岗位、数字员工、任务、消息、授权 | M0 |
 | `ip-store` | PostgreSQL（标准 PostgreSQL，不装扩展）、只追加事件日志、专用写任务、中文全文搜索 | M0 |
-| `ip-runtime` | 数字员工循环（M0）；上下文压缩、定时任务（M1）；决策者笔记、岗位记忆（提炼、合并、查记忆、更正） | M0 |
+| `ip-runtime` | 数字员工循环（M0）；上下文压缩、定时任务（M1）；决策者笔记、岗位记忆（提炼、合并、查记忆、更正）；接团队上下文系统 | M0 |
 | `ip-models` | 云端模型与可配置推理端点（本地 / 外接 GPU） | M0 |
 | `ip-tools` | shell、文件工具（含 `edit_file`）与 bubblewrap 沙箱 | M0 |
 | `ip-server` | `/healthz`、`/ws` 接口，`ip.yaml` 配置 | M0 |
@@ -203,6 +204,7 @@ docker compose up -d --build
 - [x] 第 5 步：人在对话里说“记住……”“以后别……”“忘掉……”时，员工用 `memory_note` 记一条更正，下次合并时生效，保留期内每次合并都带上，忘掉的内容不会被带回来。程序只允许人的消息引起的一轮里记，外部渠道的对话和从它派出去的执行对话不能记。只用假模型测过
 - [x] 第 6 步：控制台“记忆”页。按岗位看决策者笔记、岗位记忆摘要、各对话的记忆和被读过的次数、人要求的更正；笔记和摘要可以直接改，对话记忆可以抹掉，更正可以删，整个岗位可以清空（决策者笔记不动）。对话页顶部可以按对话关掉记忆，关掉的对话不提炼、也不能记更正。只用假模型测过，页面在本机浏览器里点过
 - [x] 第 7 步：用真实模型跑一遍（2026-11-15，gpt-6-luna，合并另用 gpt-6-astra 对比）。提炼、合并、`memory_search` / `memory_read`、`memory_note`、抹掉、按对话关记忆、清空都按设计工作；合并提示词有两处会被抄进摘要，已改并重跑确认；员工是否照摘要做还没验证。见 [`docs/ip/memory-2026-11-15-real-run.md`](../docs/ip/memory-2026-11-15-real-run.md)
+- [x] 团队上下文（backlog D-5，团队上下文系统 TCMS 的第 6 步，见 [`docs/ip/team-context.md`](../docs/ip/team-context.md)）：`team_context` 给岗位指定一项带这个岗位 TCMS 令牌的 `mcp_servers`（启动时检查它只给这一个岗位用）。每轮开头调一次 `context_get`，固定前缀放进系统提示词、紧跟组织规则，按任务挑的部分放在对话开头，同一个对话不换，提示词缓存能命中；外部引擎在开新会话时拿到这两部分。员工用 `context_search`、`context_read`、`context_propose`，`context_get`、`context_changes` 不给模型。TCMS 出错时这一轮不带、照常进行。`ip check` 用每个岗位的令牌试取一次包；`ip bench team` 量每轮取包的开销（p95 约 0.2 毫秒，目标 5 毫秒），接入 CI。只用假模型测过，TCMS 用的是测试里的假服务和本机起的真实 `tcms serve`；真实模型评测还没做
 
 ## 许可
 

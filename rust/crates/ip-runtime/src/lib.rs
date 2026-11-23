@@ -13,6 +13,9 @@ mod gateway;
 pub mod memory;
 mod memory_tools;
 mod prompt;
+pub mod team;
+#[cfg(test)]
+mod team_tests;
 #[cfg(test)]
 mod tests;
 mod work;
@@ -46,6 +49,8 @@ pub struct RuntimeConfig {
     pub context_budget_chars: usize,
     /// 岗位记忆：开关和各层的大小上限。
     pub memory: memory::MemoryConfig,
+    /// 接团队上下文系统的岗位（`docs/ip/team-context.md`）。
+    pub team_context: team::TeamContextConfig,
     /// 任务最多能委派几层（员工在执行对话里继续往下派活时加一层）。
     pub max_delegation_depth: u32,
     /// 每个员工收件箱的容量；满了以后 `send` 会等待。
@@ -64,6 +69,7 @@ impl Default for RuntimeConfig {
             history_limit: 200,
             context_budget_chars: 60_000,
             memory: memory::MemoryConfig::default(),
+            team_context: team::TeamContextConfig::default(),
             max_delegation_depth: 3,
             inbox_capacity: 64,
             event_capacity: 4096,
@@ -165,6 +171,8 @@ pub(crate) struct Shared {
     pub memory_seen: std::sync::Mutex<HashMap<ThreadId, i64>>,
     /// 外部引擎的本轮令牌。
     pub grants: gateway::Grants,
+    /// 各对话开头的团队上下文（按任务挑的部分），取到一次就不再换。
+    pub team_openings: team::OpeningCache,
     /// `/mcp` 的地址；服务开始监听后才有。
     pub mcp_url: RwLock<Option<String>>,
     agents: Weak<AgentTable>,
@@ -270,6 +278,7 @@ impl Runtime {
                 memory_pass: tokio::sync::Mutex::new(()),
                 memory_seen: std::sync::Mutex::default(),
                 grants: gateway::Grants::default(),
+                team_openings: team::OpeningCache::default(),
                 mcp_url: RwLock::default(),
                 agents: Arc::downgrade(&agents),
             }),
@@ -380,11 +389,7 @@ impl Runtime {
             dir.agents.insert(agent.id.clone(), agent.clone());
         }
         let pending = Arc::new(AtomicUsize::new(0));
-        let tools = gateway::OrgTools {
-            data: setup.data.clone(),
-            mcp: setup.mcp.clone(),
-            memory: self.shared.config.memory.enabled_for(&setup.role.id),
-        };
+        let tools = gateway::OrgTools::new(&self.shared.config, &setup);
         let worker = agent::Worker::new(self.shared.clone(), setup, pending.clone());
         let task = tokio::spawn(worker.run(rx));
         agents.insert(
