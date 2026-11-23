@@ -141,6 +141,26 @@
 
 7. **审核页**：`http://127.0.0.1:7341/review`，用审核令牌登录。端口只开放给本机，远程主机上用 `ssh -L 7341:127.0.0.1:7341 <主机>`。
 
+8. **推到自己的 git 远端（可选）**：上下文仓库默认只在 `tcms-context` 卷里。配了远端以后，批准、改单条、导入之前先从远端拉，提交以后推上去；tcms 每 60 秒再同步一次，人在自己的克隆里改了推到远端，就这样进来、进索引。在 GitHub、Gitea 上建一个仓库（空的或者已经放了上下文都行），发一个只对这个仓库有读写权限的令牌（GitHub 用 fine-grained token，Contents 读写），在 `.env` 里写：
+
+   ```bash
+   TCMS_REMOTE=https://github.com/<组织>/<仓库>.git
+   TCMS_GIT_TOKEN=<令牌>
+   # Gitea、GitLab 还要写用户名：
+   # TCMS_GIT_USERNAME=<用户名>
+   ```
+
+   令牌不要写进地址。`.env` 里的变量 `ip` 容器也读得到，和数据库密码一样；员工的 shell 命令在沙箱里，读不到服务进程的环境变量。
+
+   重新起：`docker compose up -d tcms`。手动同步一次、看结果：
+
+   ```bash
+   docker compose exec tcms tcms sync
+   docker compose logs tcms | grep 远端
+   ```
+
+   卷里有内容、远端是空的时推上去；卷是空的、远端有内容时拉下来；两边都有内容、又不是从同一个仓库来的时，git 不合并，日志里一直报错，先定以哪边为准。两边同时改了同一处、合并不了时，服务器这边的提交推到远端的旁支 `tcms/main-unmerged`，在自己的克隆里合并它、推回 `main`；合并好之前，审核页上的批准会停下来，提议还是待审核。ssh 远端、分支、同步间隔（`TCMS_REMOTE_BRANCH`、`TCMS_SYNC_SECS`）和别的情况见 TCMS 仓库 `docs/deploy-docker.md` 的“推到自己的 git 远端”。
+
 TCMS 的镜像默认从 `main` 构建。`.env` 里的 `TCMS_REF` 可以换成分支或标签；`TCMS_BUILD_CONTEXT` 可以指向本机的一份源码。
 
 ## 容器里的路径
@@ -326,7 +346,7 @@ docker compose up -d --build
 目标 schema 里已经有数据时导入会拒绝；行数对不上整个回滚。`ip.db` 不会被改动，确认没问题后自己删。
 
 **备份**：数据库每天用 `pg_dump` 导一份，按 schema 分开（团队上下文系统的用 `-n tcms`）。不用停服务。
-开了团队上下文时，上下文仓库（`tcms-context` 卷，是真相）另外打一个 git bundle：
+开了团队上下文时，上下文仓库（`tcms-context` 卷，是真相）另外打一个 git bundle（配了 git 远端时，远端就是一份异地备份）：
 `docker compose exec -T tcms git -C /var/lib/tcms/context bundle create - --all > context-$(date +%F).bundle`。
 
 ```bash
@@ -387,5 +407,17 @@ docker compose start ip
 | 提议和批准 | 用岗位令牌调 `context_propose`，审核页接口批准后，`tcms-context` 卷里多了一个提交，提交者是审核的人；索引更新到 16 条，`context_search` 搜得到 |
 | 审核页 | 本机 `http://127.0.0.1:7341/review` 是 200，别的 `Host` 是 403 |
 | `docker compose stop tcms` | 退出码 0 |
+
+同一天加了推到 git 远端（第 8 步），又试了一遍。TCMS 镜像在本机构建，代码和 TCMS 仓库合并推送以后的 `main` 一样。远端是主机上起的带 Basic 认证的假 git 服务（`git http-backend` 外面包一层），**不是真的 GitHub、Gitea**；模型还是回声假模型。
+
+| 测了什么 | 结果 |
+| --- | --- |
+| 不填 `TCMS_REMOTE` | 和以前一样：日志里没有远端那一行，导入、`ip check` 照常 |
+| 已经有内容的卷，再填上 `TCMS_REMOTE`、`TCMS_GIT_TOKEN`，`docker compose up -d tcms` | 日志“远端 …：每 3 秒同步一次”（试的时候把 `TCMS_SYNC_SECS` 设成了 3），马上推上去：“拉：远端还没有这个分支；推：推到了 b2d89d8eed6a”。远端多了导入那次的提交 |
+| 人在自己的克隆里改一条、推到 `main` | 几秒内服务快进过去，索引更新，`tcms search` 搜到人改的内容 |
+| 用岗位令牌调 `context_propose`，审核页接口批准 | 回答里 `remote.pushed_new` 是真，“推到了 4247cf350d26”；远端 `main` 依次是导入、人改、批准三个提交，批准那次的提交者是审核的人 |
+| `docker compose exec tcms tcms sync` | “拉：和远端一样；推：远端已经是最新的”，退出码 0 |
+| `ip check` | 照常取到包，按任务挑的部分从约 76 token 变成约 95 token |
+| 新建的 `ip` 容器 | 读得到 `TCMS_GIT_TOKEN`（`env_file: .env`），和数据库密码一样 |
 
 还没测的：真的用 Codex 改代码（要 `CODEX_API_KEY`），以及 Slack 和真实模型。这些在[验收手册](m2-acceptance.md)第 4、5 节里，用 Docker 起服务也照那里的步骤做。

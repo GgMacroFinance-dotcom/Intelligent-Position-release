@@ -93,6 +93,13 @@ services:
       TCMS_ALLOWED_HOSTS: tcms
       # 审核页批准提议时，提交者的邮箱（名字是登录的人）。
       TCMS_GIT_EMAIL: ${TCMS_GIT_EMAIL:-}
+      # 可选：上下文仓库推到自己的 git 远端，人也能在自己的克隆里改。不填 TCMS_REMOTE 时只在卷里提交。
+      # 说明在 .env 的示例（deploy/env.example）和 docs/ip/deploy-docker.md“团队上下文”第 8 步。
+      TCMS_REMOTE: ${TCMS_REMOTE:-}
+      TCMS_REMOTE_BRANCH: ${TCMS_REMOTE_BRANCH:-}
+      TCMS_GIT_TOKEN: ${TCMS_GIT_TOKEN:-}
+      TCMS_GIT_USERNAME: ${TCMS_GIT_USERNAME:-}
+      TCMS_SYNC_SECS: ${TCMS_SYNC_SECS:-60}
     depends_on:
       postgres:
         condition: service_healthy
