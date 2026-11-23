@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 
 use crate::engine::{BoxFuture, Engine, McpGrant, TurnContext, TurnSink};
 use crate::gateway::{OrgTools, TURN_TOKEN_GRACE};
-use crate::{AgentSetup, RuntimeEvent, Shared, Work, memory, prompt};
+use crate::{AgentSetup, RuntimeEvent, Shared, Work, memory, prompt, team};
 
 pub(crate) struct Worker {
     shared: Arc<Shared>,
@@ -47,11 +47,7 @@ enum TurnError {
 
 impl Worker {
     pub fn new(shared: Arc<Shared>, setup: AgentSetup, pending: Arc<AtomicUsize>) -> Self {
-        let org = OrgTools {
-            data: setup.data,
-            mcp: setup.mcp,
-            memory: shared.config.memory.enabled_for(&setup.role.id),
-        };
+        let org = OrgTools::new(&shared.config, &setup);
         let version = mcp_version(&org);
         let tools = all_specs(setup.toolbox.as_ref(), &org, &setup.role);
         Self {
@@ -191,18 +187,28 @@ impl Worker {
             .map_err(|e| TurnError::Model(e.to_string()))?;
         let roster = self.shared.roster(&self.agent.id);
         let extras = self.extras().await;
-        let system = prompt::system_prompt(
-            &self.shared.config.org_prompt,
-            &self.role,
-            &self.agent,
-            &roster,
-            &extras,
-        );
         let max_steps = self.shared.config.max_steps.max(1);
+        // 团队上下文要看对话里的任务描述，第一步读出历史以后再拼系统提示词；一轮之内不变。
+        let mut prompt_parts: Option<(String, Option<String>)> = None;
 
         for step in 1..=max_steps {
             let mut history = self.load(thread).await?;
-            let mut messages = self.build(&system, &history);
+            if prompt_parts.is_none() {
+                let team = self.team_context(thread, team::task_text(&self.agent, &history)).await;
+                let system = prompt::system_prompt(
+                    &self.shared.config.org_prompt,
+                    team.system.as_deref(),
+                    &self.role,
+                    &self.agent,
+                    &roster,
+                    &extras,
+                );
+                prompt_parts = Some((system, team.opening));
+            }
+            let Some((system, opening)) = &prompt_parts else {
+                unreachable!("上面刚拼好")
+            };
+            let mut messages = self.build(system, opening.as_deref(), &history);
             self.check_budget().await?;
             let budget = self.shared.config.context_budget_chars;
             if budget > 0 && prompt::size_chars(&messages) > budget {
@@ -212,7 +218,7 @@ impl Worker {
                 match compacted {
                     Ok(true) => {
                         history = self.load(thread).await?;
-                        messages = self.build(&system, &history);
+                        messages = self.build(system, opening.as_deref(), &history);
                     }
                     Ok(false) => {}
                     // 压缩失败不影响这一轮，照原样发；端点若拒绝过长的请求，会作为模型错误报出来。
@@ -274,17 +280,37 @@ impl Worker {
             .await?)
     }
 
-    fn build(&self, system: &str, history: &[Message]) -> Vec<ChatMessage> {
-        let mut messages = Vec::with_capacity(history.len() + 1);
+    /// 系统提示词、对话开头的团队上下文（有的话），然后是历史。
+    fn build(&self, system: &str, opening: Option<&str>, history: &[Message]) -> Vec<ChatMessage> {
+        let mut messages = Vec::with_capacity(history.len() + 2);
         messages.push(ChatMessage::System {
             content: system.to_string(),
         });
+        if let Some(opening) = opening {
+            messages.push(ChatMessage::User {
+                content: opening.to_string(),
+            });
+        }
         messages.extend(prompt::history(
             &self.agent,
             history,
             self.shared.config.utc_offset_minutes,
         ));
         messages
+    }
+
+    /// 这一轮的团队上下文；岗位没接时是空的。
+    async fn team_context(&self, thread: &ThreadId, task: Option<String>) -> team::TeamContext {
+        team::fetch(
+            self.org.mcp.as_deref(),
+            &self.shared.config.team_context,
+            &self.shared.team_openings,
+            &self.agent,
+            thread,
+            task,
+            &self.role.description,
+        )
+        .await
     }
 
     /// 这个岗位的决策者笔记和岗位记忆摘要。读不出来时不带，这一轮照常进行。
@@ -469,11 +495,19 @@ impl Worker {
         if fresh.is_empty() {
             return Ok(0);
         }
-        let input = prompt::transcript(None, &fresh, self.shared.config.utc_offset_minutes);
+        let mut input = prompt::transcript(None, &fresh, self.shared.config.utc_offset_minutes);
         let roster = self.shared.roster(&self.agent.id);
         let extras = self.extras().await;
+        let team = self.team_context(thread, team::task_text(&self.agent, &history)).await;
+        // 引擎靠自己的会话记住之前的内容：团队上下文的开头只在第一轮交给它，放在新消息前面。
+        if session.is_none()
+            && let Some(opening) = &team.opening
+        {
+            input = format!("{opening}\n\n{input}");
+        }
         let system = prompt::system_prompt(
             &self.shared.config.org_prompt,
+            team.system.as_deref(),
             &self.role,
             &self.agent,
             &roster,

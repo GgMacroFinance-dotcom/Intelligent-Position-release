@@ -15,6 +15,7 @@ anyhow.workspace = true
 clap.workspace = true
 ip-core.workspace = true
 ip-data.workspace = true
+ip-mcp.workspace = true
 ip-models.workspace = true
 ip-relay.workspace = true
 ip-runtime.workspace = true
@@ -22,6 +23,8 @@ ip-server.workspace = true
 ip-store = { workspace = true, features = ["testing", "import-sqlite"] }
 mimalloc.workspace = true
 regex.workspace = true
+# ip bench team 里起一个假的团队上下文服务。
+rmcp.workspace = true
 serde.workspace = true
 serde-saphyr.workspace = true
 serde_json.workspace = true

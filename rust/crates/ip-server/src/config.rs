@@ -66,6 +66,9 @@ pub struct Config {
     /// 外部 MCP 服务器：`command`（stdio 子进程，不在沙箱里）或 `url`（远程，Streamable HTTP）。
     #[serde(default)]
     pub mcp_servers: BTreeMap<String, ip_mcp::ServerConfig>,
+    /// 团队上下文：哪些岗位接团队上下文系统，各用 `mcp_servers` 里的哪一项（`docs/ip/team-context.md`）。
+    #[serde(default)]
+    pub team_context: ip_runtime::team::TeamContextConfig,
     /// 数据源：员工用 `data_catalog`、`data_series` 查数据。
     #[serde(default)]
     pub data_sources: BTreeMap<String, ip_data::SourceConfig>,
@@ -355,6 +358,17 @@ pub enum ConfigError {
     UnknownSemanticEndpoint(String),
     #[error("数据源 `{0}` 限定的岗位 `{1}` 不存在")]
     DataRole(String, String),
+    #[error("team_context.roles 里的岗位 `{0}` 不存在")]
+    TeamContextRole(String),
+    #[error("岗位 `{0}` 的团队上下文用的 MCP 服务器 `{1}` 不在 mcp_servers 里")]
+    TeamContextServer(String, String),
+    #[error(
+        "MCP 服务器 `{0}` 带着岗位 `{1}` 的团队上下文令牌，要写 roles: [{1}]，只给这一个岗位用；\
+         别的岗位用自己的令牌另配一项"
+    )]
+    TeamContextShared(String, String),
+    #[error("team_context.budget_tokens 要在 100 到 200000 之间，现在是 {0}")]
+    TeamContextBudget(u32),
     #[error("模型 `{0}` 的价格无效（要是非负数）")]
     BadPrice(String),
     #[error("岗位 `{0}` 设了 budget_per_day_usd，但模型 `{1}` 没有在端点的 prices 里配置价格")]
@@ -563,7 +577,29 @@ impl Config {
                 return Err(ConfigError::DataRole(name.clone(), r.to_string()));
             }
         }
+        self.validate_team_context()?;
         self.router()?;
+        Ok(())
+    }
+
+    /// 团队上下文的令牌决定能看哪些范围，所以带着某个岗位令牌的 MCP 服务器只能给这个岗位用。
+    fn validate_team_context(&self) -> Result<(), ConfigError> {
+        let team = &self.team_context;
+        if !ip_runtime::team::BUDGET_RANGE.contains(&team.budget_tokens) {
+            return Err(ConfigError::TeamContextBudget(team.budget_tokens));
+        }
+        let org = self.org();
+        for (role, t) in &team.roles {
+            if org.role(role).is_none() {
+                return Err(ConfigError::TeamContextRole(role.to_string()));
+            }
+            let Some(server) = self.mcp_servers.get(&t.server) else {
+                return Err(ConfigError::TeamContextServer(role.to_string(), t.server.clone()));
+            };
+            if server.roles.as_slice() != std::slice::from_ref(role) {
+                return Err(ConfigError::TeamContextShared(t.server.clone(), role.to_string()));
+            }
+        }
         Ok(())
     }
 }

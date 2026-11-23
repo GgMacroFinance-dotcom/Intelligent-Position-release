@@ -24,6 +24,8 @@ uuid.workspace = true
 
 [dev-dependencies]
 ip-store = { workspace = true, features = ["testing"] }
+# 测试里起一个假的团队上下文服务（MCP 服务器）。
+rmcp.workspace = true
 tempfile = "3"
 
 [lints]

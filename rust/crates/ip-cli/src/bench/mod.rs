@@ -14,6 +14,7 @@ mod events;
 mod notify;
 mod relay;
 mod store;
+mod team;
 use serde::Serialize;
 
 /// 服务从启动到健康检查返回 200 的目标上限。
@@ -51,6 +52,8 @@ enum Which {
     Notify,
     /// 推送中转打开封条、拼好转给 APNs 的请求体的耗时。
     Relay,
+    /// 每轮开头经 MCP 取一次团队上下文包，I.P. 这一侧的耗时。
+    Team,
 }
 
 #[derive(Serialize)]
@@ -74,6 +77,7 @@ pub fn run(args: BenchArgs) -> anyhow::Result<()> {
         Which::Events => events::run(args.check),
         Which::Notify => notify::run(args.check),
         Which::Relay => relay::run(args.check),
+        Which::Team => team::run(args.check),
     }
 }
 

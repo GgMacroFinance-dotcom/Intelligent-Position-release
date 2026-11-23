@@ -459,3 +459,32 @@ async fn remote_config_errors_are_reported_before_connecting() {
     let err = McpHub::connect(&configs).await.unwrap_err();
     assert!(matches!(err, McpError::BadConfig { .. }), "{err}");
 }
+
+#[tokio::test]
+async fn harness_calls_tools_by_server_and_gets_json() {
+    let hub = hub(vec![RoleId::from("macro")]).await;
+    let args = |text: &str| {
+        let mut m = serde_json::Map::new();
+        m.insert("text".into(), text.into());
+        m
+    };
+    let wait = Duration::from_secs(5);
+    // 文字内容是 JSON 时解析出来；不看岗位（服务器只给 macro 用，harness 照样能调）。
+    let v = hub
+        .call_json("fake", "echo", args(r#"{"prefix":"规则"}"#), wait)
+        .await
+        .unwrap();
+    assert_eq!(v["prefix"], "规则");
+    // 不是 JSON、工具报错、没有这个服务器、超时：都是 Err，说清楚原因。
+    let e = hub.call_json("fake", "echo", args("纯文字"), wait).await.unwrap_err();
+    assert!(e.contains("不是 JSON"), "{e}");
+    let e = hub.call_json("fake", "fail", args(""), wait).await.unwrap_err();
+    assert_eq!(e, "坏了");
+    let e = hub.call_json("nope", "echo", args(""), wait).await.unwrap_err();
+    assert!(e.contains("没有 MCP 服务器 nope"), "{e}");
+    let e = hub
+        .call_json("fake", "slow", args(""), Duration::from_millis(50))
+        .await
+        .unwrap_err();
+    assert!(e.contains("没有返回"), "{e}");
+}

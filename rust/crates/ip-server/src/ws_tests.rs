@@ -939,6 +939,86 @@ fn rejects_inconsistent_config() {
     }
 }
 
+#[test]
+fn team_context_servers_carry_one_roles_token() {
+    let with = |team: &str, server_roles: &str| {
+        EXAMPLE.replacen(
+            "org_prompt:",
+            &format!(
+                "mcp_servers:\n  tcms-macro: {{ url: \"http://127.0.0.1:7341/mcp\", bearer_token_env: TCMS_TOKEN_MACRO{server_roles} }}\n\
+                 team_context:\n{team}\norg_prompt:"
+            ),
+            1,
+        )
+    };
+    let ok = with(
+        "  roles:\n    macro: { server: tcms-macro, role: macro }",
+        ", roles: [macro]",
+    );
+    let c = Config::from_yaml(&ok).unwrap();
+    assert_eq!(c.team_context.budget_tokens, 4000, "预算默认 4000");
+    assert_eq!(c.team_context.roles[&"macro".into()].server, "tcms-macro");
+    // 没写 team_context 时谁都不接。
+    assert!(Config::from_yaml(EXAMPLE).unwrap().team_context.roles.is_empty());
+    for (text, why) in [
+        (
+            with("  roles:\n    macro: { server: tcms-macro }", ""),
+            "带岗位令牌的服务器没限定岗位，别的岗位也能用",
+        ),
+        (
+            with("  roles:\n    macro: { server: tcms-ops }", ", roles: [macro]"),
+            "服务器不在 mcp_servers 里",
+        ),
+        (
+            with("  roles:\n    nobody: { server: tcms-macro }", ", roles: [macro]"),
+            "不存在的岗位",
+        ),
+        (
+            with(
+                "  budget_tokens: 50\n  roles:\n    macro: { server: tcms-macro }",
+                ", roles: [macro]",
+            ),
+            "预算太小",
+        ),
+        (
+            with("  roles:\n    macro: { sever: tcms-macro }", ", roles: [macro]"),
+            "拼错的字段",
+        ),
+    ] {
+        assert!(Config::from_yaml(&text).is_err(), "{why} 应被拒绝");
+    }
+}
+
+/// 示例配置里注释掉的团队上下文写法，去掉注释以后也要能通过检查。
+#[test]
+fn shipped_team_context_example_is_valid() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ip.example.yaml");
+    let shipped = std::fs::read_to_string(path).unwrap();
+    let mut block = false;
+    let text: String = shipped
+        .lines()
+        .map(|line| {
+            let t = line.trim_start();
+            let indent = &line[..line.len() - t.len()];
+            if t.starts_with("# tcms-macro:") || t == "# team_context:" {
+                block = true;
+            } else if !t.starts_with("#   ") {
+                block = false;
+            }
+            if block {
+                format!("{indent}{}\n", &t[2..])
+            } else {
+                format!("{line}\n")
+            }
+        })
+        .collect();
+    let c = Config::from_yaml(&text).unwrap();
+    let team = &c.team_context.roles[&"macro-researcher".into()];
+    assert_eq!(team.server, "tcms-macro");
+    assert_eq!(team.role.as_deref(), Some("macro"));
+    assert!(c.mcp_servers.contains_key("tcms-macro"));
+}
+
 #[tokio::test]
 async fn builds_app_from_config_without_secrets_leaking_into_yaml() {
     let dir = tempfile::tempdir().unwrap();

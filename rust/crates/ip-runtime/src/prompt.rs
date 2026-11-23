@@ -5,12 +5,24 @@ use ip_models::{ChatMessage, ToolCall};
 
 use crate::memory::Extras;
 
-/// 系统提示词：组织规则 → 岗位说明 → 员工身份 → 同事名单 → 决策者笔记 → 岗位记忆摘要。
+/// 系统提示词：组织规则 → 团队上下文的固定前缀 → 岗位说明 → 员工身份 → 同事名单 → 决策者笔记 → 岗位记忆摘要。
 /// 越靠前越稳定，前缀缓存命中越多（`docs/ip/context-memory-design.md` 5.1）。
-pub fn system_prompt(org_prompt: &str, role: &Role, agent: &Agent, roster: &str, extras: &Extras) -> String {
+/// 团队上下文（`docs/ip/team-context.md`）在组织规则之后：同一岗位每次一样，条目改了才变。
+pub fn system_prompt(
+    org_prompt: &str,
+    team: Option<&str>,
+    role: &Role,
+    agent: &Agent,
+    roster: &str,
+    extras: &Extras,
+) -> String {
     let mut s = String::new();
     if !org_prompt.trim().is_empty() {
         s.push_str(org_prompt.trim());
+        s.push_str("\n\n");
+    }
+    if let Some(team) = team {
+        s.push_str(team.trim());
         s.push_str("\n\n");
     }
     s.push_str(&format!(
