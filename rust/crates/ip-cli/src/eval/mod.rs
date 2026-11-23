@@ -1,7 +1,7 @@
 //! `ip eval`：用真实模型跑固定的评测问题，按程序判定的检查项打分，输出通过率和花费。
 //!
 //! 每次运行用一个新的临时数据目录，员工的工作目录是空的，不受之前的对话和报告影响。
-//! 评测集的格式见 `evals/macro-smoke.yaml`。
+//! 评测集的格式见 `evals/macro-smoke.yaml`（看报告）和 `evals/team-context.yaml`（看回复）。
 
 pub mod checks;
 
@@ -57,9 +57,15 @@ struct Case {
     /// 报告标题里必须出现的小节名。
     #[serde(default)]
     sections: Vec<String>,
-    /// 报告里必须出现的文字，比如取不到的数据要写“未取得”。
+    /// 报告（或回复）里必须出现的文字，比如取不到的数据要写“未取得”。一项可以写成几种说法的列表，出现其一就算。
     #[serde(default)]
-    must_contain: Vec<String>,
+    must_contain: Vec<Needle>,
+    /// 报告（或回复）里不能出现的文字，比如团队规定不用的叫法。
+    #[serde(default)]
+    must_not_contain: Vec<String>,
+    /// 看员工在对话里的最后一条回复，不看报告文件：不查报告、数字追溯和观测日期，只查上面两项。
+    #[serde(default)]
+    reply: bool,
     /// 能追溯到工具结果的数字占比下限，默认 1（全部）。
     #[serde(default = "one")]
     min_traceable: f64,
@@ -67,6 +73,44 @@ struct Case {
 
 fn one() -> f64 {
     1.0
+}
+
+/// `must_contain` 的一项：一种说法，或几种说法里出现其一。
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Needle {
+    One(String),
+    Any(Vec<String>),
+}
+
+impl Needle {
+    fn found_in(&self, text: &str) -> bool {
+        match self {
+            Needle::One(s) => text.contains(s.as_str()),
+            Needle::Any(list) => list.iter().any(|s| text.contains(s.as_str())),
+        }
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Needle::One(s) => s.clone(),
+            Needle::Any(list) => list.join(" / "),
+        }
+    }
+}
+
+/// 没出现的必含项。
+fn missing_needles<'a>(needles: &'a [Needle], text: &str) -> Vec<&'a Needle> {
+    needles.iter().filter(|n| !n.found_in(text)).collect()
+}
+
+/// 出现了的禁用写法。
+fn forbidden_found<'a>(words: &'a [String], text: &str) -> Vec<&'a str> {
+    words
+        .iter()
+        .filter(|w| text.contains(w.as_str()))
+        .map(String::as_str)
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -88,6 +132,10 @@ struct CaseResult {
     elapsed_ms: u64,
     error: Option<String>,
     report_path: Option<String>,
+    /// `reply` 题：员工最后一条回复的全文。
+    reply: Option<String>,
+    /// 成功调用过的工具（去重），看员工有没有用 `context_search`、`context_read` 这些。
+    tools_used: Vec<String>,
     checks: Vec<Check>,
     untraceable: Vec<String>,
 }
@@ -235,8 +283,13 @@ async fn run_case(
     let mut calls = std::collections::HashMap::new();
     let mut ok_tools = Vec::new();
     let mut report_rel = None;
+    let mut reply = None;
+    let me = Author::Agent {
+        agent_id: agent.clone(),
+    };
     for message in &messages {
         match &message.body {
+            Body::Text { text } if message.author == me => reply = Some(text.clone()),
             Body::ToolCall { call_id, name, input } => {
                 calls.insert(call_id.clone(), name.clone());
                 if name == "write_file"
@@ -293,13 +346,44 @@ async fn run_case(
             ),
         });
     }
-    checks.push(Check {
-        name: "写了报告",
-        pass: report.is_some(),
-        detail: report_rel.clone().unwrap_or_else(|| "没有写 reports/*.md".into()),
-    });
     let mut untraceable = Vec::new();
-    if let Some(report) = &report {
+    if case.reply {
+        let text = reply.clone().unwrap_or_default();
+        checks.push(Check {
+            name: "回复了",
+            pass: !text.trim().is_empty(),
+            detail: String::new(),
+        });
+        if !case.must_contain.is_empty() {
+            let missing = missing_needles(&case.must_contain, &text);
+            checks.push(Check {
+                name: "回复里有要求的内容",
+                pass: missing.is_empty(),
+                detail: labels("没出现", &missing),
+            });
+        }
+        if !case.must_not_contain.is_empty() {
+            let found = forbidden_found(&case.must_not_contain, &text);
+            checks.push(Check {
+                name: "没有不该用的写法",
+                pass: found.is_empty(),
+                detail: if found.is_empty() {
+                    String::new()
+                } else {
+                    format!("出现了：{}", found.join("、"))
+                },
+            });
+        }
+    } else {
+        checks.push(Check {
+            name: "写了报告",
+            pass: report.is_some(),
+            detail: report_rel.clone().unwrap_or_else(|| "没有写 reports/*.md".into()),
+        });
+    }
+    if !case.reply
+        && let Some(report) = &report
+    {
         let numbers = checks::numbers(report);
         let tools = checks::ToolNumbers::new(data_outputs.iter().copied());
         untraceable = numbers
@@ -334,21 +418,22 @@ async fn run_case(
             },
         });
         if !case.must_contain.is_empty() {
-            let missing: Vec<&String> = case
-                .must_contain
-                .iter()
-                .filter(|t| !report.contains(t.as_str()))
-                .collect();
+            let missing = missing_needles(&case.must_contain, report);
             checks.push(Check {
                 name: "取不到的写明",
                 pass: missing.is_empty(),
-                detail: if missing.is_empty() {
+                detail: labels("没出现", &missing),
+            });
+        }
+        if !case.must_not_contain.is_empty() {
+            let found = forbidden_found(&case.must_not_contain, report);
+            checks.push(Check {
+                name: "没有不该用的写法",
+                pass: found.is_empty(),
+                detail: if found.is_empty() {
                     String::new()
                 } else {
-                    format!(
-                        "没出现：{}",
-                        missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("、")
-                    )
+                    format!("出现了：{}", found.join("、"))
                 },
             });
         }
@@ -375,9 +460,20 @@ async fn run_case(
         elapsed_ms,
         error,
         report_path: report_rel.map(|rel| workspace.join(rel).display().to_string()),
+        reply: case.reply.then_some(reply).flatten(),
+        tools_used: unique(&ok_tools),
         checks,
         untraceable,
     })
+}
+
+fn labels(prefix: &str, needles: &[&Needle]) -> String {
+    if needles.is_empty() {
+        String::new()
+    } else {
+        let names: Vec<String> = needles.iter().map(|n| n.label()).collect();
+        format!("{prefix}：{}", names.join("、"))
+    }
 }
 
 fn unique(names: &[String]) -> Vec<String> {
@@ -402,6 +498,9 @@ fn print_case(result: &CaseResult) {
     if let Some(path) = &result.report_path {
         println!("  报告：{path}");
     }
+    if !result.tools_used.is_empty() {
+        println!("  用过的工具：{}", result.tools_used.join("、"));
+    }
     println!(
         "  {}，{} 步，{:.1} 秒，{:.4} 美元，{}",
         if result.pass { "通过" } else { "未通过" },
@@ -424,4 +523,39 @@ fn tokens_line(usage: &Usage) -> String {
         "输入 {} token（缓存命中 {hit}%），输出 {} token",
         usage.prompt_tokens, usage.completion_tokens
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn needles_match_any_of_their_wordings() {
+        let set: EvalSet = serde_saphyr::from_str(
+            "cases:\n  - id: a\n    agent: x\n    question: q\n    reply: true\n    must_contain: [林雯, [2026-12-12, 12 月 12 日]]\n    must_not_contain: [DXY]\n",
+        )
+        .unwrap();
+        let case = &set.cases[0];
+        assert!(case.reply);
+        assert!(missing_needles(&case.must_contain, "林雯负责，12 月 12 日交付").is_empty());
+        let missing = missing_needles(&case.must_contain, "林雯负责");
+        assert_eq!(missing.len(), 1);
+        assert_eq!(labels("没出现", &missing), "没出现：2026-12-12 / 12 月 12 日");
+        assert_eq!(
+            forbidden_found(&case.must_not_contain, "广义美元指数（不是 DXY）"),
+            ["DXY"]
+        );
+        assert!(forbidden_found(&case.must_not_contain, "广义美元指数").is_empty());
+    }
+
+    /// 仓库里的评测集都要能解析（字段写错会被拒）。
+    #[test]
+    fn shipped_eval_sets_parse() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals");
+        for name in ["macro-smoke.yaml", "team-context.yaml"] {
+            let text = std::fs::read_to_string(dir.join(name)).unwrap();
+            let set: EvalSet = serde_saphyr::from_str(&text).unwrap_or_else(|e| panic!("{name}：{e}"));
+            assert!(!set.cases.is_empty(), "{name} 没有题");
+        }
+    }
 }

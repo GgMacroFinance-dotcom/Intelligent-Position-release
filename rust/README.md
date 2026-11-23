@@ -53,6 +53,8 @@ WebSocket 接口在 `/ws`。发一条消息：
 表格里的数字带观测日期、取不到的写明“未取得”、报告小节齐全。打印每题的结果、花费、token 用量和提示词缓存命中率，`--out` 写 JSON，`--model` 换掉被测岗位的模型。
 全部通过时退出码为 0。宏观评测的第二题要用 FRED，跑之前要设 `WHICHAPI_API_KEY`（见 `../macro-mcp/README.md`）。现在的评测集只有两个宏观问题，用来发现明显退步，不足以比较模型；结果存在 `docs/ip/evals/`。
 
+团队上下文评测：`evals/team-context/run.sh` 起一个本机的 `tcms serve`，装上 `evals/team-context/context/` 里造的上下文仓库，用 `evals/team-context.yaml` 的 10 道题比较不接、接上、小预算三种配置。这一套题看员工在对话里的最后一条回复（`reply: true`），检查必含项（一项可以写几种说法）和不该出现的写法（`must_not_contain`）。`--echo` 换成回声假模型，不花钱，只看团队上下文进没进提示词。2026-11-23 用真实模型跑过（[记录](../docs/ip/evals/2026-11-23-team-context/README.md)）。
+
 性能基准：
 
 ```sh
@@ -204,7 +206,7 @@ docker compose up -d --build
 - [x] 第 5 步：人在对话里说“记住……”“以后别……”“忘掉……”时，员工用 `memory_note` 记一条更正，下次合并时生效，保留期内每次合并都带上，忘掉的内容不会被带回来。程序只允许人的消息引起的一轮里记，外部渠道的对话和从它派出去的执行对话不能记。只用假模型测过
 - [x] 第 6 步：控制台“记忆”页。按岗位看决策者笔记、岗位记忆摘要、各对话的记忆和被读过的次数、人要求的更正；笔记和摘要可以直接改，对话记忆可以抹掉，更正可以删，整个岗位可以清空（决策者笔记不动）。对话页顶部可以按对话关掉记忆，关掉的对话不提炼、也不能记更正。只用假模型测过，页面在本机浏览器里点过
 - [x] 第 7 步：用真实模型跑一遍（2026-11-15，gpt-6-luna，合并另用 gpt-6-astra 对比）。提炼、合并、`memory_search` / `memory_read`、`memory_note`、抹掉、按对话关记忆、清空都按设计工作；合并提示词有两处会被抄进摘要，已改并重跑确认；员工是否照摘要做还没验证。见 [`docs/ip/memory-2026-11-15-real-run.md`](../docs/ip/memory-2026-11-15-real-run.md)
-- [x] 团队上下文（backlog D-5，团队上下文系统 TCMS 的第 6 步，见 [`docs/ip/team-context.md`](../docs/ip/team-context.md)）：`team_context` 给岗位指定一项带这个岗位 TCMS 令牌的 `mcp_servers`（启动时检查它只给这一个岗位用）。每轮开头调一次 `context_get`，固定前缀放进系统提示词、紧跟组织规则，按任务挑的部分放在对话开头，同一个对话不换，提示词缓存能命中；外部引擎在开新会话时拿到这两部分。员工用 `context_search`、`context_read`、`context_propose`，`context_get`、`context_changes` 不给模型。TCMS 出错时这一轮不带、照常进行。`ip check` 用每个岗位的令牌试取一次包；`ip bench team` 量每轮取包的开销（p95 约 0.2 毫秒，目标 5 毫秒），接入 CI。只用假模型测过，TCMS 用的是测试里的假服务和本机起的真实 `tcms serve`；真实模型评测还没做
+- [x] 团队上下文（backlog D-5，团队上下文系统 TCMS 的第 6 步，见 [`docs/ip/team-context.md`](../docs/ip/team-context.md)）：`team_context` 给岗位指定一项带这个岗位 TCMS 令牌的 `mcp_servers`（启动时检查它只给这一个岗位用）。每轮开头调一次 `context_get`，固定前缀放进系统提示词、紧跟组织规则，按任务挑的部分放在对话开头，同一个对话不换，提示词缓存能命中；外部引擎在开新会话时拿到这两部分。员工用 `context_search`、`context_read`、`context_propose`，`context_get`、`context_changes` 不给模型。TCMS 出错时这一轮不带、照常进行。`ip check` 用每个岗位的令牌试取一次包；`ip bench team` 量每轮取包的开销（p95 约 0.2 毫秒，目标 5 毫秒），接入 CI。测试里 TCMS 是假服务、模型是假的。2026-11-23 用真实模型和本机起的真实 `tcms serve` 评测过（[记录](../docs/ip/evals/2026-11-23-team-context/README.md)）：`gpt-6-luna` 不接 0/30、接上 30/30、小预算 30/30，`gpt-6-astra` 不接 1/10（判分误判）、接上 10/10、小预算 10/10，合计约 0.48 美元；题目是专门造的，只说明链路通了。Docker 部署里和 TCMS 一起跑还没做
 
 ## 许可
 
