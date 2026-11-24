@@ -161,6 +161,8 @@
 
    卷里有内容、远端是空的时推上去；卷是空的、远端有内容时拉下来；两边都有内容、又不是从同一个仓库来的时，git 不合并，日志里一直报错，先定以哪边为准。两边同时改了同一处、合并不了时，服务器这边的提交推到远端的旁支 `tcms/main-unmerged`，在自己的克隆里合并它、推回 `main`；合并好之前，审核页上的批准会停下来，提议还是待审核。ssh 远端、分支、同步间隔（`TCMS_REMOTE_BRANCH`、`TCMS_SYNC_SECS`）和别的情况见 TCMS 仓库 `docs/deploy-docker.md` 的“推到自己的 git 远端”。
 
+   人推上去以后默认最多等 60 秒才进来。想推上去马上同步：在 `.env` 里写 `TCMS_WEBHOOK_SECRET=$(openssl rand -hex 32)`，重新起 tcms，再在 GitHub、Gitea 或 GitLab 的仓库设置里加一个 webhook，地址 `https://<域名>/hooks/push`，密钥填一样的，只选推送事件。tcms 的端口只给本机，要让远端连得到，在主机的 HTTPS 反向代理里只把 `/hooks/push` 转给 `127.0.0.1:7341`（这个地址靠签名认人，不回数据）。三家各怎么填见 TCMS 仓库 `docs/deploy-docker.md` 的“推上去马上同步”。没在这套部署里试过。
+
 TCMS 的镜像默认从 `main` 构建。`.env` 里的 `TCMS_REF` 可以换成分支或标签；`TCMS_BUILD_CONTEXT` 可以指向本机的一份源码。
 
 ## 容器里的路径
