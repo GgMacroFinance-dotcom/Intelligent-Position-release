@@ -84,7 +84,6 @@ pub async fn store_at(path: impl AsRef<Path>) -> Store {
 
 /// 删掉已经退出的测试进程留下的 schema（名字里带进程号）。测试中途 panic 或用了 [`store_at`] 都会留下。
 fn drop_stale_schemas(url: &str) {
-    let url = url.to_string();
     blocking(
         move |client| async move {
             let Ok(rows) = client
@@ -108,12 +107,12 @@ fn drop_stale_schemas(url: &str) {
                 }
             }
         },
-        url,
+        DbConfig::new(url),
     );
 }
 
 /// 在另一个线程里用自己的运行时连库做一件事：调用方可能正处在测试的运行时里，不能在这里 `block_on`。
-fn blocking<F, Fut>(work: F, url: String)
+fn blocking<F, Fut>(work: F, config: DbConfig)
 where
     F: FnOnce(tokio_postgres::Client) -> Fut + Send + 'static,
     Fut: std::future::Future<Output = ()>,
@@ -123,10 +122,10 @@ where
             return;
         };
         runtime.block_on(async move {
-            let Ok(pg) = url.parse::<tokio_postgres::Config>() else {
+            let Ok((pg, tls, _)) = config.pg_config() else {
                 return;
             };
-            let Ok((client, connection)) = pg.connect(tokio_postgres::NoTls).await else {
+            let Ok((client, connection)) = pg.connect(tls).await else {
                 return;
             };
             tokio::spawn(connection);
@@ -147,7 +146,7 @@ impl Drop for Guard {
                     .batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
                     .await;
             },
-            self.0.url.clone(),
+            self.0.clone(),
         );
     }
 }

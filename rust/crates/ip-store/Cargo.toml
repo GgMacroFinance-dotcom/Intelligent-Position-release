@@ -10,6 +10,9 @@ repository.workspace = true
 ip-core.workspace = true
 tokio-postgres.workspace = true
 deadpool-postgres.workspace = true
+tokio-postgres-rustls.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
 rusqlite = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
@@ -27,6 +30,9 @@ import-sqlite = ["dep:rusqlite"]
 [dev-dependencies]
 rusqlite.workspace = true
 tempfile = "3"
+# TLS 测试：生成测试用的 CA 和证书，起假的 TLS 服务器。
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [lints]

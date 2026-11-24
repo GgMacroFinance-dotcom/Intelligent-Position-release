@@ -10,7 +10,6 @@ use std::path::Path;
 
 use rusqlite::OpenFlags;
 use rusqlite::types::ValueRef;
-use tokio_postgres::NoTls;
 use tokio_postgres::types::ToSql;
 
 use crate::writer::{clean_text, jsonb_safe};
@@ -251,7 +250,8 @@ impl Store {
         }
         // 建 schema、跑迁移；拿到的 Store 用完就丢，导入用自己的连接和事务。
         drop(Store::connect(config).await?);
-        let (mut client, connection) = config.pg_config()?.connect(NoTls).await?;
+        let (pg, tls, _) = config.pg_config()?;
+        let (mut client, connection) = pg.connect(tls).await?;
         tokio::spawn(async move {
             if let Err(error) = connection.await {
                 tracing::warn!(%error, "导入用的数据库连接断开");

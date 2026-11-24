@@ -15,6 +15,7 @@ mod schema;
 mod segment;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+mod tls;
 mod writer;
 
 use std::sync::Arc;
@@ -22,12 +23,13 @@ use std::sync::Arc;
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
 use ip_core::{AgentId, Approval, ApprovalId, Message, MessageId, RoleId, Task, TaskId, ThreadId};
 use tokio::sync::oneshot;
+use tokio_postgres::Row;
 use tokio_postgres::types::ToSql;
-use tokio_postgres::{NoTls, Row};
 
 #[cfg(any(test, feature = "import-sqlite"))]
 pub use import::ImportReport;
 pub use segment::{index_text, match_query, tokens};
+use tls::TlsMode;
 
 /// 全库搜索时参与相关度排序的最近命中条数。SQLite 时是 2000；PostgreSQL 的 `ts_rank`
 /// 逐条解析位置信息，2000 条要 7 毫秒左右，减到 1000。
@@ -256,7 +258,8 @@ impl DbConfig {
         }
     }
 
-    fn pg_config(&self) -> Result<tokio_postgres::Config> {
+    /// 解析连接串，返回 tokio-postgres 的配置和 TLS 连接器（`sslmode`、`sslrootcert` 见 `tls` 模块）。
+    fn pg_config(&self) -> Result<(tokio_postgres::Config, tls::Tls, TlsMode)> {
         let valid = !self.schema.is_empty()
             && self.schema.len() <= 63
             && self.schema.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')
@@ -270,10 +273,7 @@ impl DbConfig {
                 self.schema
             )));
         }
-        let mut config: tokio_postgres::Config = self
-            .url
-            .parse()
-            .map_err(|e: tokio_postgres::Error| StoreError::Config(format!("连接串解析不了：{e}")))?;
+        let (mut config, tls, mode) = tls::parse(&self.url)?;
         // plan_cache_mode：预编译语句执行几次以后 PostgreSQL 会改用不看参数值的通用计划，
         // 搜索的范围条件（`pos > $5`）这时会选错索引，p95 从 7 毫秒涨到 12 毫秒以上。每次按参数重新规划。
         config.options(format!(
@@ -283,7 +283,7 @@ impl DbConfig {
         if config.get_application_name().is_none() {
             config.application_name("ip");
         }
-        Ok(config)
+        Ok((config, tls, mode))
     }
 }
 
@@ -318,8 +318,9 @@ impl Store {
     }
 
     async fn connect_with_guard(config: &DbConfig, guard: Option<Arc<dyn Send + Sync>>) -> Result<Self> {
-        let pg = config.pg_config()?;
-        let (mut client, connection) = pg.connect(NoTls).await?;
+        let (pg, tls, mode) = config.pg_config()?;
+        tracing::info!(tls = ?mode, schema = %config.schema, "连接数据库");
+        let (mut client, connection) = pg.connect(tls.clone()).await?;
         tokio::spawn(async move {
             if let Err(error) = connection.await {
                 tracing::warn!(%error, "数据库写连接断开");
@@ -328,7 +329,7 @@ impl Store {
         schema::migrate(&mut client, &config.schema).await?;
         let manager = Manager::from_config(
             pg,
-            NoTls,
+            tls,
             ManagerConfig {
                 recycling_method: RecyclingMethod::Fast,
             },

@@ -115,7 +115,7 @@ docker compose up -d --build
 
 - [x] 仓库与 CI：workspace、12 个 crate 骨架、GitHub Actions、基准框架、许可与贡献指南（#3）
 - [x] `ip-core`：组织、岗位、数字员工、对话、消息；岗位用 YAML 定义（#4）
-- [x] `ip-store`：建表、事件日志、批量写、中文搜索、`ip bench store`（#4）。2026-11-22 从 SQLite 换成 PostgreSQL（backlog D-6），旧库用 `ip store import-sqlite` 导入
+- [x] `ip-store`：建表、事件日志、批量写、中文搜索、`ip bench store`（#4）。2026-11-22 从 SQLite 换成 PostgreSQL（backlog D-6），旧库用 `ip store import-sqlite` 导入；2026-11-24 加了连外部库的 TLS（连接串里的 `sslmode`、`sslrootcert`，见 `docs/ip/deploy-docker.md`）
 - [x] `ip-models`：OpenAI 兼容端点（DeepSeek、vLLM、SGLang、llama.cpp 通用）、流式输出、工具调用、限流和重试、测试用脚本模型（#5）；调用方丢掉流（排队、重试退避、等响应头、读正文时都算）或收到协议结束事件时立即断开连接、交还并发名额（#68，用假 HTTP 服务测）
 - [x] 模型调用故障处理（E-11）：每次尝试等待响应头默认最多 30 秒，正常流式生成不受该时限限制。错误正文限时、限量读取；Chat Completions 意外断流报错，结束后的数据忽略。用假 HTTP 服务和流解析测试覆盖。
 - [x] `ip-tools`：shell 和文件工具；shell 跑在 bubblewrap 沙箱里（只读系统目录、断网、清空环境变量），超时整组终止，输出限长；文件工具从工作目录的文件描述符出发打开（Linux 用 `openat2(RESOLVE_BENEATH)`，其他系统逐级 `O_NOFOLLOW`），检查和打开是同一步，不怕检查后路径被换成指向外部的符号链接（#66，本机测试含并发换目录的压力测试）

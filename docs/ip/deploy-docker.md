@@ -333,8 +333,32 @@ git pull && docker compose up -d --build
 `deploy/postgres-init/01-roles.sh` 建 `ip_app` 角色和 `ip` schema（填了 `TCMS_DB_PASSWORD` 时另建团队上下文系统的 `tcms_app` 和 `tcms`），
 两个角色互相没有权限。`.env` 里的 `POSTGRES_PASSWORD`、`IP_DB_PASSWORD` 只在数据卷第一次建出来时生效。
 I.P. 启动时自己建表、跑迁移。改用自己已有的 PostgreSQL（RDS、Supabase 等）时，在库里照 `01-roles.sh` 建好角色和 schema，
-把 `IP_DATABASE_URL` 换成那个库的连接串，去掉 compose 里的 `postgres` 服务。现在只支持不加密的连接，
-连外部库要 TLS 的情况还没做（backlog D-6）。Supabase 用直连地址或 session 模式的连接池地址，不能用 transaction 模式（6543 端口）。
+把 `IP_DATABASE_URL` 换成那个库的连接串，去掉 compose 里的 `postgres` 服务。Supabase 用直连地址或 session 模式的连接池地址，
+不能用 transaction 模式（6543 端口）。
+
+**连外部库的 TLS**：和 libpq 一样写在连接串里（`sslmode`、`sslrootcert`），I.P. 用 rustls：
+
+| `sslmode` | 加密 | 查证书链 | 查主机名 |
+| --- | --- | --- | --- |
+| `disable` | 不加密 | — | — |
+| `prefer`（不写时） | 服务器支持就加密，否则明文 | 不查 | 不查 |
+| `require` | 必须加密 | 不查 | 不查 |
+| `verify-ca` | 必须加密 | 查 | 不查 |
+| `verify-full` | 必须加密 | 查 | 查 |
+
+- 连外部库用 `verify-full`。`prefer`、`require` 只防被动窃听，挡不住冒充数据库的中间人。
+- Supabase、RDS 的服务器证书由它们自己的 CA 签，不在系统根证书里：下载它们的 CA 文件（Supabase 在项目的 Database 设置里，
+  RDS 是 AWS 的 global bundle），挂进容器，连接串写成
+  `postgres://ip_app:<密码>@<主机>:5432/<库>?sslmode=verify-full&sslrootcert=/srv/ip/db-ca.pem`。
+- `sslrootcert=system` 或不写时用系统根证书（认 `SSL_CERT_FILE`、`SSL_CERT_DIR`），适合证书由公共 CA 签的库。
+  和 libpq 不同：libpq 不写时读 `~/.postgresql/root.crt`。
+- 写了 `sslrootcert` 而 `sslmode` 是 `prefer` 或 `require` 时按 `verify-ca` 做（libpq 对 `require` 也是这样）。
+- `verify-ca`、`verify-full`、`sslrootcert` 只认 `postgres://` 形式的连接串，`host=… dbname=…` 形式只认前三种。
+  不支持客户端证书（`sslcert`、`sslkey`）。服务启动时日志里记一行 `连接数据库 tls=VerifyFull`，可以核对。
+- compose 里自带的 `postgres` 服务没开 SSL，走容器网络，默认的 `prefer` 就是明文，不用改。
+
+这几种模式用测试里的假 TLS 服务器测过；`verify-full`（含 SCRAM 的 channel binding）还在本机一个开了 SSL、
+用自签 CA 的 PostgreSQL 16 上跑过全部存储测试。还没连过真的 Supabase 或 RDS。
 
 **从 SQLite 版升级**：以前的数据在 `ip-data` 卷的 `ip.db` 里。先停服务、备份 `ip-data` 卷（见下面），拉新代码后
 `docker compose up -d postgres`，再导入，成功后启动：
