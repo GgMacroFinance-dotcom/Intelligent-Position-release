@@ -32,6 +32,8 @@ pub enum Failure {
     Status(u16, Option<u64>),
     /// `{"ok": false, "error": …}`。
     Error(String),
+    /// 为上传地址检查等测试指定回应。
+    Reply(Value),
 }
 
 #[derive(Default)]
@@ -39,6 +41,8 @@ struct Inner {
     addr: Mutex<Option<SocketAddr>>,
     calls: Mutex<Vec<(String, Value)>>,
     acks: Mutex<Vec<String>>,
+    scopes: Mutex<Option<String>>,
+    files: AtomicUsize,
     opens: AtomicUsize,
     sockets: AtomicUsize,
     ts: AtomicUsize,
@@ -72,6 +76,11 @@ impl FakeSlack {
     /// 给 `SlackConfig::api_url` 用。
     pub fn api_url(&self) -> String {
         format!("http://{}/api", self.addr)
+    }
+
+    /// 设置 auth.test 返回的权限列表。
+    pub fn set_scopes(&self, scopes: &str) {
+        *self.state.scopes.lock().unwrap() = Some(scopes.to_owned());
     }
 
     pub fn set_user(&self, id: &str, display_name: &str) {
@@ -213,8 +222,25 @@ fn query_object(uri: &Uri) -> Value {
     Value::Object(map)
 }
 
-async fn api(State(s): State<Arc<Inner>>, Path(method): Path<String>, uri: Uri, body: Bytes) -> Response {
+async fn api(
+    State(s): State<Arc<Inner>>,
+    Path(method): Path<String>,
+    uri: Uri,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> Response {
     let mut request = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| query_object(&uri));
+    if method == "files.getUploadURLExternal" {
+        let mut url = reqwest::Url::parse("http://localhost").unwrap();
+        url.set_query(Some(std::str::from_utf8(&body).unwrap()));
+        request = Value::Object(
+            url.query_pairs()
+                .map(|(k, v)| (k.into_owned(), Value::String(v.into_owned())))
+                .collect(),
+        );
+    } else if method == "upload" {
+        request = json!({"markdown":std::str::from_utf8(&body).unwrap(),"authorization":headers.contains_key("authorization")});
+    }
     if request.is_null() {
         request = query_object(&uri);
     }
@@ -233,10 +259,17 @@ async fn api(State(s): State<Arc<Inner>>, Path(method): Path<String>, uri: Uri, 
                 None => (status, "").into_response(),
             };
         }
+        Some(Failure::Reply(v)) => return axum::Json(v).into_response(),
         Some(Failure::Error(e)) => return axum::Json(json!({ "ok": false, "error": e })).into_response(),
         None => {}
     }
     let reply = match method.as_str() {
+        "files.getUploadURLExternal" => {
+            let addr = s.addr.lock().unwrap().unwrap();
+            json!({"ok":true,"file_id":format!("F{}",s.files.fetch_add(1, Ordering::SeqCst)+1),"upload_url":format!("http://{addr}/api/upload")})
+        }
+        "upload" => return "OK".into_response(),
+        "files.completeUploadExternal" => json!({"ok":true}),
         "apps.connections.open" => {
             s.opens.fetch_add(1, Ordering::SeqCst);
             let addr = s.addr.lock().unwrap().unwrap();
@@ -256,7 +289,13 @@ async fn api(State(s): State<Arc<Inner>>, Path(method): Path<String>, uri: Uri, 
         "chat.postEphemeral" => json!({ "ok": true, "message_ts": "200.1" }),
         _ => json!({ "ok": false, "error": "unknown_method" }),
     };
-    axum::Json(reply).into_response()
+    let mut response = axum::Json(reply).into_response();
+    if method == "auth.test"
+        && let Some(scopes) = s.scopes.lock().unwrap().as_ref()
+    {
+        response.headers_mut().insert("x-oauth-scopes", scopes.parse().unwrap());
+    }
+    response
 }
 
 async fn ws(State(s): State<Arc<Inner>>, upgrade: WebSocketUpgrade) -> Response {

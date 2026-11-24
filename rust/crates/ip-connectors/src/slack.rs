@@ -92,6 +92,7 @@ impl RetryPolicy {
 #[derive(Clone, Debug)]
 struct Me {
     user_id: String,
+    missing_files_scope: bool,
     team_id: String,
 }
 
@@ -101,6 +102,7 @@ pub struct SlackChannel {
     /// 建 Socket Mode 连接用，按 `HTTPS_PROXY`/`NO_PROXY` 走代理（D-37）。
     ws: WsConnector,
     me: OnceCell<Me>,
+    scope_warned: std::sync::atomic::AtomicBool,
     names: Mutex<HashMap<String, (String, Instant)>>,
 }
 
@@ -159,9 +161,13 @@ impl SlackChannel {
     fn with_connector(config: SlackConfig, ws: WsConnector) -> Arc<Self> {
         Arc::new(Self {
             config,
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("建立 Slack HTTP 客户端"),
             ws,
             me: OnceCell::new(),
+            scope_warned: Default::default(),
             names: Mutex::default(),
         })
     }
@@ -181,9 +187,16 @@ impl SlackChannel {
         if let Some(b) = body {
             req = req.json(b);
         }
-        let resp = req.send().await.map_err(|e| ApiError::Network(e.to_string()))?;
+        Self::response(req).await
+    }
+
+    async fn checked(req: reqwest::RequestBuilder) -> Result<reqwest::Response, ApiError> {
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| ApiError::Network(e.without_url().to_string()))?;
         let status = resp.status().as_u16();
-        if status != 200 {
+        if !resp.status().is_success() {
             let after = resp
                 .headers()
                 .get("retry-after")
@@ -192,6 +205,14 @@ impl SlackChannel {
                 .map(Duration::from_secs);
             return Err(ApiError::Status(status, after));
         }
+        Ok(resp)
+    }
+
+    async fn response(req: reqwest::RequestBuilder) -> Result<Value, ApiError> {
+        Self::decode(Self::checked(req).await?).await
+    }
+
+    async fn decode(resp: reqwest::Response) -> Result<Value, ApiError> {
         let v: Value = resp.json().await.map_err(|e| ApiError::Network(e.to_string()))?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             Ok(v)
@@ -208,8 +229,20 @@ impl SlackChannel {
     async fn me(&self) -> Result<&Me, ApiError> {
         self.me
             .get_or_try_init(|| async {
-                let v = self.call("auth.test", &self.config.bot_token, "", None).await?;
+                let resp = Self::checked(
+                    self.http
+                        .post(self.url("auth.test"))
+                        .bearer_auth(&self.config.bot_token),
+                )
+                .await?;
+                let missing_files_scope = resp
+                    .headers()
+                    .get("x-oauth-scopes")
+                    .and_then(|v| v.to_str().ok())
+                    .is_some_and(|v| !v.split(',').any(|s| s.trim() == "files:write"));
+                let v = Self::decode(resp).await?;
                 Ok(Me {
+                    missing_files_scope,
                     user_id: str_of(&v, "user_id").to_string(),
                     team_id: str_of(&v, "team_id").to_string(),
                 })
@@ -256,8 +289,14 @@ impl SlackChannel {
             .await
             .map_err(|e| format!("应用级令牌不能用（apps.connections.open）：{e}"))?;
         Ok(format!(
-            "工作区 {}，机器人 {}，Socket Mode 可用",
-            me.team_id, me.user_id
+            "工作区 {}，机器人 {}，Socket Mode 可用{}",
+            me.team_id,
+            me.user_id,
+            if me.missing_files_scope {
+                "；报告会贴成文字，请补上 files:write 并重装应用"
+            } else {
+                ""
+            }
         ))
     }
 
@@ -507,12 +546,79 @@ impl SlackChannel {
         })
     }
 
+    async fn report(
+        &self,
+        channel: &str,
+        thread_ts: &str,
+        filename: &str,
+        title: &str,
+        markdown: &str,
+    ) -> Result<Delivered, DeliverError> {
+        let request = self
+            .http
+            .post(self.url("files.getUploadURLExternal"))
+            .bearer_auth(&self.config.bot_token)
+            .form(&[("filename", filename), ("length", &markdown.len().to_string())]);
+        let upload = match Self::response(request).await {
+            Err(ApiError::Slack(e)) if e == "missing_scope" => {
+                if !self.scope_warned.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    tracing::warn!(channel=%self.config.name,"请在 Slack 后台补上 files:write 并重装应用");
+                }
+                return self
+                    .post_text(
+                        channel,
+                        thread_ts,
+                        &format!(
+                            "**{title}**（`{filename}`。应用还没有 files:write 权限，正文直接贴在这里）\n{markdown}"
+                        ),
+                    )
+                    .await;
+            }
+            other => other?,
+        };
+        let id = str_of(&upload, "file_id");
+        let url = reqwest::Url::parse(str_of(&upload, "upload_url"))
+            .map_err(|_| DeliverError::Permanent("无效的 Slack 上传地址".into()))?;
+        let trusted = url.scheme() == "https"
+            && url
+                .host_str()
+                .is_some_and(|h| h == "slack.com" || h.ends_with(".slack.com"));
+        #[cfg(any(test, feature = "fake"))]
+        let trusted = trusted
+            || (url.host_str() == Some("127.0.0.1")
+                && reqwest::Url::parse(&self.config.api_url).is_ok_and(|api| api.origin() == url.origin()));
+        if !trusted || !url.username().is_empty() || url.password().is_some() || id.is_empty() {
+            return Err(DeliverError::Permanent("拒绝不可信的 Slack 上传地址或空文件 id".into()));
+        }
+        Self::checked(
+            self.http
+                .post(url)
+                .header("content-type", "application/octet-stream")
+                .body(markdown.to_owned()),
+        )
+        .await?;
+        self.bot(
+            "files.completeUploadExternal",
+            &json!({"files":[{"id":id,"title":title}],"channel_id":channel,"thread_ts":thread_ts}),
+        )
+        .await?;
+        Ok(Delivered {
+            external_ref: id.to_owned(),
+        })
+    }
+
     async fn send(&self, out: &Outbound) -> Result<Delivered, DeliverError> {
         let key = out.conversation().0.as_str();
         let Some((_team, channel, thread_ts)) = split_conversation(key) else {
             return Err(DeliverError::Permanent(format!("不是 Slack 会话：{key}")));
         };
         match out {
+            Outbound::Report {
+                filename,
+                title,
+                markdown,
+                ..
+            } => self.report(channel, thread_ts, filename, title, markdown).await,
             Outbound::Text { text, .. } => self.post_text(channel, thread_ts, text).await,
             Outbound::Card { approval, .. } => {
                 let body = json!({

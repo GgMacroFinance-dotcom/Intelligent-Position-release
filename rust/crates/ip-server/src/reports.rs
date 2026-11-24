@@ -103,7 +103,7 @@ pub fn read_in(workspaces: &HashMap<AgentId, PathBuf>, agent: &AgentId, path: &s
     let real_dir = dir.canonicalize().map_err(|_| not_found())?;
     let real_ws = ws.canonicalize().map_err(|_| not_found())?;
     let real = file.canonicalize().map_err(|_| not_found())?;
-    if real.parent() != Some(real_dir.as_path()) || !real_dir.starts_with(&real_ws) {
+    if real.parent() != Some(real_dir.as_path()) || real_dir != real_ws.join(REPORTS_DIR) {
         return Err(not_found());
     }
     let f = open_regular(&real, &meta).map_err(|e| match e {
@@ -166,7 +166,7 @@ fn workspace<'a>(workspaces: &'a HashMap<AgentId, PathBuf>, agent: &AgentId) -> 
 }
 
 /// 文件名只能是一层、不以点开头、以 `.md` 结尾。
-fn valid_name(name: &str) -> Result<(), String> {
+pub(crate) fn valid_name(name: &str) -> Result<(), String> {
     let ok = !name.is_empty()
         && !name.starts_with('.')
         && !name.contains(['/', '\\', '\0'])
@@ -282,9 +282,15 @@ mod tests {
         let ws2 = other.path().join("ws2");
         std::fs::create_dir_all(&ws2).unwrap();
         std::os::unix::fs::symlink(other.path().join("outside"), ws2.join(REPORTS_DIR)).unwrap();
-        let map = HashMap::from([(AgentId::from("a"), ws2)]);
+        let map = HashMap::from([(AgentId::from("a"), ws2.clone())]);
         assert!(read_in(&map, &"a".into(), "reports/x.md").is_err());
         assert!(list_in(&map, Some(&"a".into()), 10).unwrap().is_empty());
+        // 工作目录内其他位置的文件也不能当成报告发送。
+        std::fs::remove_file(ws2.join(REPORTS_DIR)).unwrap();
+        std::fs::create_dir(ws2.join("private")).unwrap();
+        std::fs::write(ws2.join("private/x.md"), "内部资料").unwrap();
+        std::os::unix::fs::symlink(ws2.join("private"), ws2.join(REPORTS_DIR)).unwrap();
+        assert!(read_in(&map, &"a".into(), "reports/x.md").is_err());
     }
 
     /// 检查之后文件被换掉（换成别的文件、符号链接、管道）时不读，也不会卡在管道上。

@@ -405,7 +405,14 @@ async fn run_batch(
                         &[&before_ms],
                     )
                     .await?;
-                Ok(count(inbox + dropped))
+                // 只有报告按七天去重；卡片引用和原有消息记录沿用原来的保留规则。
+                let reports = c
+                    .execute(
+                        "DELETE FROM channel_deliveries WHERE item LIKE 'report:%' AND at_ms < $1",
+                        &[&before_ms],
+                    )
+                    .await?;
+                Ok(count(inbox + dropped + reports))
             }),
             Op::StashEnvelope {
                 channel,

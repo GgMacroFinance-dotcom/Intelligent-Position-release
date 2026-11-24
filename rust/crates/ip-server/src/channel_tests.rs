@@ -69,6 +69,16 @@ fn role(id: &str, model: &str) -> Role {
 /// 协调员 coord-1（模型脚本 `coord`）和 `macros` 个宏观研究员 macro-1、macro-2……（共用脚本 `research`）。
 /// 脚本用完后会重复最后一轮，所以最后一轮要是文字。
 pub(crate) async fn build(db: &Path, coord: Vec<ScriptedTurn>, research: Vec<ScriptedTurn>, macros: usize) -> App {
+    build_with_workspace(db, coord, research, macros, None).await
+}
+
+pub(crate) async fn build_with_workspace(
+    db: &Path,
+    coord: Vec<ScriptedTurn>,
+    research: Vec<ScriptedTurn>,
+    macros: usize,
+    workspace: Option<&Path>,
+) -> App {
     let store = ip_store::testing::store_at(db).await;
     let mut models = ModelRegistry::new();
     models.insert("coord", Arc::new(ScriptedModel::new(coord)));
@@ -98,7 +108,9 @@ pub(crate) async fn build(db: &Path, coord: Vec<ScriptedTurn>, research: Vec<Scr
             .spawn_agent(AgentSetup {
                 agent: a.clone(),
                 role: r.clone(),
-                toolbox: None,
+                toolbox: workspace.filter(|_| a.id.as_str() == "macro-1").map(|ws| {
+                    ip_tools::Toolbox::new(ws, ip_tools::Sandbox::None, ip_tools::Limits::default()).unwrap()
+                }),
                 mcp: None,
                 data: None,
                 engine: None,
@@ -109,7 +121,11 @@ pub(crate) async fn build(db: &Path, coord: Vec<ScriptedTurn>, research: Vec<Scr
         roles: vec![coordinator, research_role],
     };
     let router = ip_router::Router::new(serde_saphyr::from_str(RULES).unwrap(), &org, &agents).unwrap();
-    App::new(runtime, org, None).with_router(router)
+    let app = App::new(runtime, org, None).with_router(router);
+    match workspace {
+        Some(ws) => app.with_workspaces(std::collections::HashMap::from([("macro-1".into(), ws.to_owned())])),
+        None => app,
+    }
 }
 
 async fn org(coord: Vec<ScriptedTurn>, research: Vec<ScriptedTurn>, macros: usize) -> Org {
@@ -122,7 +138,7 @@ pub(crate) fn text(s: &str) -> ScriptedTurn {
     ScriptedTurn::Text(s.into())
 }
 
-fn tool(name: &str, args: serde_json::Value) -> ScriptedTurn {
+pub(crate) fn tool(name: &str, args: serde_json::Value) -> ScriptedTurn {
     ScriptedTurn::ToolCalls(vec![ToolCall {
         id: format!("call-{name}"),
         name: name.into(),

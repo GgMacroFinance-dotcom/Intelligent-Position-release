@@ -245,3 +245,71 @@ fn channels_config_parses_and_is_checked() {
         assert!(crate::Config::from_yaml(&text).is_err(), "{why} 应被拒绝");
     }
 }
+
+#[tokio::test]
+async fn slack_report_versions_and_failure() {
+    use crate::channel_tests::{build_with_workspace, tool};
+    let dir = tempfile::tempdir().unwrap();
+    let ws = dir.path().join("macro");
+    std::fs::create_dir(&ws).unwrap();
+    let reply = || text("[数据](reports/cpi.md)");
+    let write = |body| tool("write_file", json!({"path":"reports/cpi.md","content":body}));
+    let app = build_with_workspace(
+        &dir.path().join("ip.db"),
+        vec![],
+        vec![
+            write("# 初稿"),
+            reply(),
+            reply(),
+            write("# 修订"),
+            reply(),
+            write("# 终稿"),
+            reply(),
+            text("继续"),
+        ],
+        1,
+        Some(&ws),
+    )
+    .await;
+    let fake = FakeSlack::start().await;
+    let config = SlackChannel::new(SlackConfig {
+        name: "slack".into(),
+        bot_token: "test".into(),
+        app_token: "test".into(),
+        api_url: fake.api_url(),
+        allow_channels: vec![],
+        retry: Default::default(),
+    });
+    let handle = crate::channels::start(&app, config, Default::default()).await.unwrap();
+    fake.wait_connected(1).await;
+    for i in 1..=5 {
+        if i == 4 {
+            fake.fail_next(
+                "files.completeUploadExternal",
+                Failure::Error("channel_not_found".into()),
+            );
+        }
+        fake.event(json!({"type":"app_mention","user":"U1","text":"<@UBOT> CPI","channel":"C1","thread_ts":"1.0","ts":format!("{i}.0")}));
+        let posts = fake.wait_calls("chat.postMessage", i).await;
+        if i < 5 {
+            assert_eq!(markdown(&posts[i - 1]), "数据（附件 `cpi.md`）");
+        }
+        match i {
+            1 | 3 | 4 => {
+                let n = if i == 1 { 1 } else { i - 1 };
+                let done = fake.wait_calls("files.completeUploadExternal", n).await;
+                assert_eq!(done[n - 1]["thread_ts"], "1.0");
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        fake.calls("upload")
+            .iter()
+            .map(|v| v["markdown"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["# 初稿", "# 修订", "# 终稿"]
+    );
+    assert_eq!(markdown(&fake.calls("chat.postMessage")[4]), "继续");
+    handle.stop().await;
+}

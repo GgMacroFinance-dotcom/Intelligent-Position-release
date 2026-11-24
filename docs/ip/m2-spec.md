@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.23（2026-11-22）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.24（2026-11-24）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-38（回复里提到的报告作为文件发进线程，backlog E-13，v0.24）是提议，代码和这次修改放在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -182,7 +182,7 @@ pub trait Hub: Send + Sync + 'static {
 
   | 事件 | 条件 | 发什么 |
   | --- | --- | --- |
-  | `message.appended` | 作者是员工、内容是文字、对话有绑定 | `Outbound::Text` |
+  | `message.appended` | 作者是员工、内容是文字、对话有绑定 | `Outbound::Text`，提到的报告再各发一条 `Outbound::Report`（D-38） |
   | `message.appended` | 系统消息，`notice = turn_failed` | `Outbound::Text` |
   | `message.appended` | 其他系统消息（`task_brief`、`task_report`、`approval_answer`） | 不发（D-26） |
   | `message.appended` | 工具调用、工具结果、摘要 | 不发 |
@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS channel_envelopes (
 -- 已发出的东西：防重发，以及更新卡片时要用的外部引用。
 CREATE TABLE IF NOT EXISTS channel_deliveries (
     channel      TEXT NOT NULL,
-    item         TEXT NOT NULL,   -- message:<id> | card:<approval id> | resolved:<approval id>
+    item         TEXT NOT NULL,   -- message:<id> | card:<approval id> | resolved:<approval id> | report:<会话>:<文件名>:<哈希>（D-38）
     conversation TEXT NOT NULL,
     external_ref TEXT,            -- Slack 消息的 ts；失败时为空
     state        TEXT NOT NULL,   -- sent | failed
@@ -418,6 +418,76 @@ handle.attempts();                                                    // deliver
 - 实现在 `ip-connectors/src/ws_proxy.rs`。
 - 测试：`ws_proxy` 的单元测试用本地假代理（接受 `CONNECT`、转发到本地假 WebSocket 服务器）测经代理连通、Basic 认证、`NO_PROXY` 直连、按协议选代理、407 和 403 的报错（不含凭据）、不支持的代理协议、代理连不上；Slack 测试 `socket_mode_connects_through_http_proxy` 经假代理连假 Slack，事件照常收到和确认。都是假代理、假 Slack；真实 Slack 经真实代理还没验。
 
+### D-38 回复里提到的报告作为文件发进线程 · 提议（backlog E-13）
+
+问题（2026-11-16 真实验收发现）：员工回复里写的 `reports/<文件名>.md` 是它工作目录里的相对路径。在 Slack 里，写成 Markdown 链接的会变成点不开的链接，没写成链接的只是一段文字，看回复的人拿不到报告。控制台和 App 能点开（F-4、F-14），渠道没有对应的办法。
+
+不采用的做法：回复里放控制台的链接。Slack 里的人多数没配对过设备，主机也不一定有对外的地址。
+
+**分工**：认报告、读文件、改写文字放在投递器（`ip-server/src/channels.rs`），和渠道无关；渠道只负责把一份 Markdown 文件发进会话。以后接飞书、邮件，只要实现新的 `Outbound` 变体。
+
+**1. 接口（`ip-connectors`，D-02 的补充）**
+
+```rust
+pub enum Outbound {
+    // …原有三种不变…
+    /// 一份报告：作为文件发进会话。渠道发不了文件时，可以把正文当文字发（见第 4 条）。
+    Report {
+        conversation: ConversationKey,
+        filename: String,   // 不带目录，如 2026-11-16-cpi.md
+        title: String,      // 报告第一个一级标题，没有就用文件名
+        markdown: String,   // 正文，UTF-8，不超过 reports::MAX_READ_BYTES
+    },
+}
+```
+
+`Delivered.external_ref` 对报告来说是外部系统里的文件 id（Slack 的 `F…`）。
+
+**2. 投递器认报告（D-04 的补充）**
+
+只看会发进渠道的员工文字消息（D-04 表里第一行），系统消息（`turn_failed`）不看。
+
+- **认哪些**：和控制台 `web/src/markdown.js` 的规则一致：正文、Markdown 链接的地址、行内代码里出现的 `reports/<文件名>.md`；前面紧挨着路径字符的（比如 `/tmp/x/reports/a.md`）不算。文件名的规则沿用 `reports::valid_name`。同一条消息里重复提到的只算一次，按第一次出现的先后排。
+- **找谁的工作目录**：先找写这条消息的员工；他没有这份报告时，在其他员工里找，正好一位有就用他的，零位或多位都不附。读文件一律走 `reports::read_in`（挡子目录、`..`、隐藏文件、符号链接，核对真实路径），不另写一套。读文件在 `spawn_blocking` 里做。
+- **附几份**：一条消息最多附 3 份，多出的只改写文字、不附。读出来被截断（超过 1 MB）的不附。
+- **改写文字**：只改写地址是报告路径的 Markdown 链接，`[链接文字](reports/x.md)` 改成 ``链接文字（附件 `x.md`）``；没附上的（找不到、太大、超过 3 份）改成 ``链接文字（`reports/x.md`）``。不是链接的提法不动。改写只影响发进渠道的那份文字，对话里存的原文不变。
+- **顺序和防重发**：一条消息先发文字（条目名照旧 `message:<消息 id>`），再按顺序发各份报告，条目名 `report:<会话>:<文件名>:<正文 SHA-256 的前 16 个十六进制字符>`。这样同一会话里同一份报告、同一个版本 7 天内只发一次（沿用 D-04 每日清理任务，只清理 `channel_deliveries` 中超过 7 天的报告条目）；报告改过以后再被提到会再发一次。不加新表，`channel_deliveries.item` 的注释补上 `report:…`。
+- **失败**：和其他条目一样。`Retry` 退避重试、不越过；`Permanent` 记失败、打警告、跳过，不影响已经发出的文字。失败记录也占着这个条目名，所以同一会话里同一版本的报告 7 天内不会再试；报告改过以后照常再发。
+- 重启后重读同一批事件时，报告按发送时磁盘上的内容读，可能比当初回复时新。接受。
+
+**3. Slack 怎么发文件（D-14 的补充）**
+
+`files.upload` 已停用，用三步上传：
+
+1. `files.getUploadURLExternal`（表单参数 `filename`、`length`）拿 `upload_url` 和 `file_id`。
+2. 把正文原样 `POST` 到 `upload_url`。这一步不带机器人令牌，不跟随重定向；`upload_url` 必须是 `https`，主机名是 `slack.com` 或其子域，不能带用户名密码。只有在测试和 `fake` feature 下，才另外放行和 `api_url` 同源的 `127.0.0.1` 地址（发布版的 `ip` 不开 `fake`）。走同一个 `reqwest` 客户端，所以代理规则照旧。
+3. `files.completeUploadExternal`（JSON：`files: [{ id, title }]`、`channel_id`、`thread_ts`），文件出现在线程里。
+
+错误按 D-14 分可重试和永久失败。第 2 步上传成功、第 3 步失败后重试时，从第 1 步重新来（旧的 `file_id` 没完成，Slack 会自己清掉）。
+
+**4. 没有 `files:write` 权限时**
+
+已经装好的应用没有这项权限，要在 Slack 后台加上并重装。没重装时，第 1 步会回 `missing_scope`。这时不算失败：在线程里把正文当文字发出去，开头一行 ``**<标题>**（`<文件名>`。应用还没有 files:write 权限，正文直接贴在这里）``，太长就按 D-14 的规则切成几条。每个渠道第一次遇到时打一条警告日志，写明要在 Slack 后台加 `files:write` 并重装应用。
+
+**5. 应用配置和自检**
+
+- D-15 的机器人权限加 `files:write`，`examples/slack/manifest.yaml` 同步。
+- `ip check` 的 Slack 一项读 `auth.test` 回应头里的 `x-oauth-scopes`。缺 `files:write` 时这一项照常通过，另外附一句提醒，说明报告会贴成文字，要加权限并重装应用。回应里没有这个头时不提醒。
+- 验收手册和 Slack 部署说明加一句：老应用要补 `files:write` 并重装。
+
+**6. 测试和基准**
+
+- 假 Slack（`fake::slack`）支持三步上传，记下上传的正文。
+- `ip-connectors/src/slack/tests.rs`：三步上传的请求和字段、`missing_scope` 时退成文字、长报告切条、`upload_url` 不是 Slack 的地址时拒绝、错误分类。
+- `ip-server` 的渠道测试：认报告的规则（正文、链接、行内代码、前面带路径的不算、去重、顺序）、链接改写、先找作者再找唯一的其他员工、零位或多位时不附、最多 3 份、超过 1 MB 不附、`..` 和符号链接不附、同一会话同一版本只发一次、改过以后再发、报告发失败不影响文字。
+- `slack_tests.rs` 端到端：假模型写一份报告、回复里提到它，线程里先出现改写过的回复，再出现文件。
+- 基准：认报告和改写文字是每条发往渠道的员工消息都要走的路径，在 `ip bench` 里加一项（没有合适的就新开 `ip bench deliver`），目标值实现时定，写进 `rust/README.md`。
+- 只能用假 Slack 测；真实工作区里上传和 `missing_scope` 的提示要等下一次 Slack 真实验收（A-5 或 M2-5 重跑）再算验过。
+
+**7. 敏感路径**
+
+改的是 `ip-connectors/` 和 `ip-server/src/channels.rs`，属于“外部渠道”。报告正文会发到这个线程所在的 Slack 工作区，和回复本身去的是同一个地方；Slack 按工作区的保留策略存这些文件。PR 要一位工程师读过代码再合并。
+
 ### D-12 会话怎么划分 · 已实现（#25）
 
 - 会话 key：`<team_id>/<channel_id>/<thread_ts>`。顶层消息的 `thread_ts` 就是它自己的 `ts`，机器人总在这个线程里回复。
@@ -455,7 +525,7 @@ handle.attempts();                                                    // deliver
 
 仓库里提供 `examples/slack/manifest.yaml`，客户在 Slack 后台用它一键建应用。开工时对照 Slack 文档核对下面的清单：
 
-- 机器人权限：`app_mentions:read`、`chat:write`、`channels:history`、`groups:history`、`im:history`、`users:read`（不加表情，所以不需要 `reactions:write`，见 D-14）
+- 机器人权限：`app_mentions:read`、`chat:write`、`channels:history`、`groups:history`、`im:history`、`users:read`，D-38 提议再加 `files:write`（不加表情，所以不需要 `reactions:write`，见 D-14）
 - 订阅事件：`app_mention`、`message.channels`、`message.groups`、`message.im`
 - 打开交互（按钮点击会通过 Socket Mode 送达）
 - 应用级令牌：`connections:write`
@@ -984,3 +1054,4 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 | 2026-11-21 | v0.21 | 新增 D-36（已实现，backlog E-6）：Claude Code 引擎（`kind: claude_code`），和 Codex 共用进程管理；第 6 节改名为“外部引擎” |
 | 2026-11-21 | v0.22 | 新增 D-37（提议，backlog E-12）：Socket Mode 的 WebSocket 按 `HTTPS_PROXY`/`NO_PROXY` 等环境变量经 HTTP 代理的 CONNECT 隧道连接，规则和 Web API 一致；支持代理 Basic 认证；D-11 加一句指向 D-37。只用本地假代理和假 Slack 测过 |
 | 2026-11-22 | v0.23 | D-35 加 iPhone 的实现（F-21 之五，提议，等工程师审查）：通知扩展解密、改写 APNs 送来的通知，“已在别处处理”撤掉旧的、换成不响铃不亮屏的；私钥放 App 和扩展共用的钥匙串分组。`/ws` 协议和中转都不变。没在真 iPhone、真 APNs 上收过 |
+| 2026-11-24 | v0.24 | 新增 D-38（提议，backlog E-13）：员工回复里提到的 `reports/<文件名>.md` 由投递器读出、作为 `Outbound::Report` 发进同一会话，Slack 用三步上传发成文件，没有 `files:write` 时把正文贴成文字；链接改写成“附件 x.md”；同一会话同一版本 7 天内只发一次；D-15 加 `files:write`，`ip check` 提醒缺这项权限。现有清理仅涉及入站记录，此次补清理过期报告条目，保留其他投递记录 |

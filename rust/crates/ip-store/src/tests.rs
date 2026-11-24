@@ -461,6 +461,18 @@ async fn channel_inbox_deliveries_and_cursors() {
         at_ms: 2,
     };
     store.put_delivery(d.clone()).await.unwrap();
+    let report = crate::Delivery {
+        item: "report:room:x.md:1234".into(),
+        ..d.clone()
+    };
+    store.put_delivery(report.clone()).await.unwrap();
+    store.prune_inbound(2).await.unwrap();
+    assert_eq!(
+        store.delivery("slack", &report.item).await.unwrap(),
+        Some(report.clone())
+    );
+    store.prune_inbound(3).await.unwrap();
+    assert!(store.delivery("slack", &report.item).await.unwrap().is_none());
     assert_eq!(store.delivery("slack", "card:a1").await.unwrap(), Some(d));
 
     assert_eq!(store.cursor("slack").await.unwrap(), None);

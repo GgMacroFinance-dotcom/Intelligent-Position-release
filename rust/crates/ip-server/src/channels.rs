@@ -21,6 +21,8 @@ use tokio::task::JoinHandle;
 
 use crate::App;
 
+pub mod report_delivery;
+
 /// 去重记录保留多久。
 const INBOX_RETENTION: Duration = Duration::from_secs(7 * 24 * 3600);
 /// 投递器一次从事件日志读多少条。
@@ -465,16 +467,42 @@ impl Dispatcher {
                     return Ok(vec![]);
                 }
                 // 只发绑定了外部会话的对话；执行对话里的往来留在内部（D-04、T10）。
-                match store.binding_by_thread(&message.thread_id).await? {
-                    Some(b) if b.channel == self.name => vec![(
+                let Some(binding) = store
+                    .binding_by_thread(&message.thread_id)
+                    .await?
+                    .filter(|b| b.channel == self.name)
+                else {
+                    return Ok(vec![]);
+                };
+                let conversation = ConversationKey(binding.conversation);
+                let mut body = text.clone();
+                let mut files = Vec::new();
+                if let Author::Agent { agent_id } = message.author
+                    && text.contains("reports/")
+                {
+                    let workspaces = self.app.workspaces.clone();
+                    let source = text.clone();
+                    let room = conversation.clone();
+                    match tokio::task::spawn_blocking(move || {
+                        report_delivery::prepare(&source, &workspaces, &agent_id, &room)
+                    })
+                    .await
+                    {
+                        Ok(prepared) => (body, files) = prepared,
+                        Err(e) => tracing::warn!(error=%e,"准备报告失败"),
+                    }
+                }
+                files.insert(
+                    0,
+                    (
                         format!("message:{}", message.id),
                         Outbound::Text {
-                            conversation: ConversationKey(b.conversation),
-                            text: text.clone(),
+                            conversation,
+                            text: body,
                         },
-                    )],
-                    _ => vec![],
-                }
+                    ),
+                );
+                files
             }
             "approval.created" => {
                 let Ok(approval) = serde_json::from_str::<Approval>(&event.payload) else {

@@ -473,6 +473,7 @@ channels:
         std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
         let endpoint = fake_endpoint().await;
         let slack = FakeSlack::start().await;
+        slack.set_scopes("chat:write,users:read");
         let mut config = Config::from_yaml(&yaml(
             dir.path(),
             &endpoint,
@@ -516,6 +517,7 @@ channels:
             engine.detail
         );
         let channel = status_of(&r, "渠道 slack");
+        assert!(channel.detail.contains("files:write 并重装应用"));
         assert!(
             channel.status == Status::Ok && channel.detail.contains("工作区 T1"),
             "{}",
