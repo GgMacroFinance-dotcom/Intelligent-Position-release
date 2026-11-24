@@ -165,7 +165,7 @@ pub struct Binding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Delivery {
     pub channel: String,
-    /// `message:<id>`、`card:<审批 id>` 或 `resolved:<审批 id>`。
+    /// `message:<id>`、`card:<审批 id>`、`resolved:<审批 id>` 或 `report:<会话>:<文件名>:<哈希>`。
     pub item: String,
     pub conversation: String,
     /// 外部系统给的引用（Slack 消息的 ts）；失败时为空。

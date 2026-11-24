@@ -37,7 +37,7 @@ cd Intelligent-Position-release/rust && cargo build --release --locked
 | --- | --- | --- |
 | 模型（OpenAI：协调员用 `gpt-6-astra`，执行岗位用 `gpt-6-luna`） | `OPENAI_API_KEY` | OpenAI 平台 |
 | WhichAPI 的 key（宏观研究员取 FRED 数据；没有时其余数据照常） | `WHICHAPI_API_KEY` | 现在是 Render 上 whichapi-macro 服务 Environment 页里的 `MACRO_API_KEY`。设了以后取消 `ip.yaml` 里 `mcp_servers.macro.env_from` 的注释 |
-| Slack 机器人令牌（`xoxb-`） | `SLACK_BOT_TOKEN` | 用 `examples/slack/manifest.yaml` 建应用，“Install App” 后复制 Bot User OAuth Token |
+| Slack 机器人令牌（`xoxb-`） | `SLACK_BOT_TOKEN` | 用 `examples/slack/manifest.yaml` 建应用，“Install App” 后复制 Bot User OAuth Token。老应用需在 Slack 后台补上 `files:write` 并重装应用，才能发送报告附件。 |
 | Slack 应用级令牌（`xapp-`） | `SLACK_APP_TOKEN` | 应用的 “Basic Information” → “App-Level Tokens”，权限选 `connections:write` |
 | Codex（只有第 5 步要） | `CODEX_API_KEY` | OpenAI 平台 |
 | 控制台访问令牌（监听非本机地址时） | `IP_TOKEN` | 自己生成，比如 `openssl rand -hex 24` |

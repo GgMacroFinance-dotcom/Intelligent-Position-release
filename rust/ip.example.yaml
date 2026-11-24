@@ -228,6 +228,7 @@ data_sources:
 
 # 外部渠道：在 Slack 线程里和数字员工对话（见 docs/ip/m2-spec.md 第 3、4 节）。
 # 先用 examples/slack/manifest.yaml 建 Slack 应用，用的是 Socket Mode，主机不需要公网入口。
+# 老应用需补上 files:write 并重装，才能发送报告附件。
 # channels:
 #   slack:
 #     kind: slack

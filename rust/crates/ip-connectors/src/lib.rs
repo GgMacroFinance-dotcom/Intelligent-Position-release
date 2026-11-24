@@ -80,6 +80,13 @@ pub enum Outbound {
         conversation: ConversationKey,
         text: String,
     },
+    /// 员工回复里提到的报告，正文作为文件发进同一会话。
+    Report {
+        conversation: ConversationKey,
+        filename: String,
+        title: String,
+        markdown: String,
+    },
     Card {
         conversation: ConversationKey,
         approval: Approval,
@@ -96,6 +103,7 @@ impl Outbound {
     pub fn conversation(&self) -> &ConversationKey {
         match self {
             Self::Text { conversation, .. }
+            | Self::Report { conversation, .. }
             | Self::Card { conversation, .. }
             | Self::CardResolved { conversation, .. } => conversation,
         }

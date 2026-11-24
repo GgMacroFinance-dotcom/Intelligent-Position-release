@@ -575,6 +575,7 @@ fn splitting_and_parsing_helpers() {
     );
     assert_eq!(parse_choice(&json!({"action_id": "other", "value": "a:1"})), None);
     let me = Me {
+        missing_files_scope: false,
         user_id: "UBOT".into(),
         team_id: "T1".into(),
     };
@@ -628,4 +629,58 @@ async fn socket_mode_connects_through_http_proxy() {
         .await
         .unwrap()
         .unwrap();
+}
+
+#[tokio::test]
+async fn report_upload_and_scope_fallback() {
+    let r = running(&[]).await;
+    let markdown = "# 数据\n".repeat(4000);
+    let out = Outbound::Report {
+        conversation: "T1/C1/1.0".into(),
+        filename: "宏观.md".into(),
+        title: "数据".into(),
+        markdown: markdown.clone(),
+    };
+    let delivered = r.channel.deliver(&out).await.unwrap();
+    assert_eq!(delivered.external_ref, "F1");
+    assert_eq!(
+        r.fake.calls("files.getUploadURLExternal"),
+        [json!({"filename":"宏观.md","length":markdown.len().to_string()})]
+    );
+    assert_eq!(
+        r.fake.calls("upload"),
+        [json!({"markdown":markdown,"authorization":false})]
+    );
+    assert_eq!(
+        r.fake.calls("files.completeUploadExternal"),
+        [json!({"channel_id":"C1","thread_ts":"1.0","files":[{"id":"F1","title":"数据"}]})]
+    );
+    for (method, failure, retry) in [
+        (
+            "files.getUploadURLExternal",
+            Failure::Reply(json!({"ok":true,"file_id":"F","upload_url":"https://slack.com.example.org/upload"})),
+            false,
+        ),
+        ("upload", Failure::Status(429, Some(5)), true),
+        ("upload", Failure::Status(403, None), false),
+        ("files.completeUploadExternal", Failure::Status(503, None), true),
+    ] {
+        r.fake.fail_next(method, failure);
+        let err = r.channel.deliver(&out).await.unwrap_err();
+        assert_eq!(matches!(err, DeliverError::Retry { .. }), retry);
+    }
+    r.fake
+        .fail_next("files.getUploadURLExternal", Failure::Error("missing_scope".into()));
+    r.channel.deliver(&out).await.unwrap();
+    let posts = r.fake.calls("chat.postMessage");
+    assert!(posts.len() > 1);
+    assert!(posts.iter().all(|p| p["thread_ts"] == "1.0"));
+    assert!(
+        posts[0]["blocks"][0]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("**数据**（`宏观.md`。应用还没有 files:write 权限")
+    );
+    r.shutdown.cancel();
+    r.task.await.unwrap();
 }

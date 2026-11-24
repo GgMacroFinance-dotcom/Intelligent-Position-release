@@ -42,6 +42,8 @@ pub struct BenchArgs {
 enum Which {
     /// 服务启动时间和空闲常驻内存。
     Startup,
+    /// 识别并改写员工回复里的报告。
+    Deliver,
     /// 5 万条消息的写入吞吐和全文搜索延迟。
     Store,
     /// 500 个常驻数字员工的内存和并发处理延迟。
@@ -71,6 +73,25 @@ struct StartupReport {
 
 pub fn run(args: BenchArgs) -> anyhow::Result<()> {
     match args.which {
+        Which::Deliver => {
+            let reply = format!(
+                "{}[详情](reports/cpi.md)，另见 `reports/ppi.md`。",
+                "员工回复。".repeat(270)
+            );
+            let mut samples = Vec::new();
+            for _ in 0..201 {
+                let start = Instant::now();
+                std::hint::black_box(ip_server::channels::report_delivery::benchmark_rewrite(&reply));
+                samples.push(start.elapsed().as_secs_f64() * 1000.0);
+            }
+            let ms = median(&samples);
+            println!(
+                "{}",
+                serde_json::json!({"benchmark":"deliver","bytes":reply.len(),"median_ms":ms,"target_ms":1.0,"pass":ms<=1.0})
+            );
+            anyhow::ensure!(!args.check || ms <= 1.0, "报告改写基准超出 1 ms");
+            Ok(())
+        }
         Which::Startup => startup(&args),
         Which::Store => store::run(args.check),
         Which::Agents => agents::run(args.check),
