@@ -10,7 +10,7 @@
 //! utc_offset: "+08:00"             # 员工看到的消息时间按这个时区显示；省略时是 UTC
 //! org_prompt: |
 //!   你在一家 AI 原生的研究机构工作。结论先行，引用数据注明来源。
-//! sandbox: { mode: bubblewrap, network: false }
+//! sandbox: { mode: bubblewrap, network: false }   # limits: 每条命令的资源上限，见 SandboxLimitsConfig
 //! endpoints:
 //!   deepseek: { base_url: https://api.deepseek.com/v1, api_key_env: DEEPSEEK_API_KEY, max_concurrency: 16 }
 //!   local:    { base_url: http://gpu-box:8000/v1 }
@@ -197,6 +197,51 @@ pub struct SandboxConfig {
     /// 工具进程能否联网。
     #[serde(default)]
     pub network: bool,
+    /// 每条 shell 命令的资源上限，只在 `mode: bubblewrap` 时生效。
+    #[serde(default)]
+    pub limits: SandboxLimitsConfig,
+}
+
+/// `sandbox.limits`：每条 shell 命令的资源上限（backlog E-15 第二步）。省略的项用默认值，写 0 表示不限。
+///
+/// ```yaml
+/// sandbox:
+///   limits: { processes: 256, memory_mib: 1024, file_size_mib: 1024, tmp_mib: 256 }
+/// ```
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SandboxLimitsConfig {
+    /// 一条命令同时存在的进程和线程数。默认 256。
+    #[serde(default)]
+    pub processes: Option<u64>,
+    /// 每个进程可写的内存，MiB。默认 1024。
+    #[serde(default)]
+    pub memory_mib: Option<u64>,
+    /// 单个文件最大多少 MiB。默认 1024。
+    #[serde(default)]
+    pub file_size_mib: Option<u64>,
+    /// 沙箱里 `/tmp` 的总大小，MiB。默认 256。
+    #[serde(default)]
+    pub tmp_mib: Option<u64>,
+}
+
+impl SandboxLimitsConfig {
+    pub fn resolve(&self) -> ip_tools::CommandLimits {
+        const MIB: u64 = 1024 * 1024;
+        let d = ip_tools::CommandLimits::default();
+        // 省略用默认值，0 不限。
+        let pick = |v: Option<u64>, default: Option<u64>, unit: u64| match v {
+            None => default,
+            Some(0) => None,
+            Some(n) => Some(n.saturating_mul(unit)),
+        };
+        ip_tools::CommandLimits {
+            processes: pick(self.processes, d.processes, 1),
+            memory: pick(self.memory_mib, d.memory, MIB),
+            file_size: pick(self.file_size_mib, d.file_size, MIB),
+            tmp_size: pick(self.tmp_mib, d.tmp_size, MIB),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]

@@ -240,9 +240,18 @@ impl App {
         let store = Store::connect(&db).await.context("连接数据库")?;
 
         let sandbox = match config.sandbox.mode {
-            SandboxMode::Bubblewrap => Sandbox::bubblewrap(config.sandbox.network)
-                .await
-                .context("工具沙箱不可用；开发机上可在配置里写 sandbox: { mode: none }")?,
+            SandboxMode::Bubblewrap => {
+                let sandbox = Sandbox::bubblewrap(config.sandbox.network, &config.sandbox.limits.resolve())
+                    .await
+                    .context("工具沙箱不可用；开发机上可在配置里写 sandbox: { mode: none }")?;
+                for missing in sandbox.missing_limits() {
+                    tracing::warn!("工具沙箱：{missing}");
+                }
+                if let Some(limits) = sandbox.limits().describe() {
+                    tracing::info!("工具沙箱每条命令的资源上限：{limits}");
+                }
+                sandbox
+            }
             SandboxMode::None => {
                 tracing::warn!("工具沙箱已关闭：数字员工的 shell 命令直接在本机执行");
                 Sandbox::None

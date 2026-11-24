@@ -81,17 +81,7 @@ pub async fn check(config: &Config, env: &(dyn Fn(&str) -> Option<String> + Sync
 
     check_data_dir(config, &mut r);
     check_database(config, &present, &mut r).await;
-    match config.sandbox.mode {
-        SandboxMode::Bubblewrap => match ip_tools::Sandbox::bubblewrap(config.sandbox.network).await {
-            Ok(_) => r.push(Status::Ok, "工具沙箱", "bubblewrap 可用"),
-            Err(e) => r.push(
-                Status::Fail,
-                "工具沙箱",
-                format!("{e}。开发机上可以在配置里写 sandbox: {{ mode: none }}"),
-            ),
-        },
-        SandboxMode::None => r.push(Status::Warn, "工具沙箱", "已关闭：员工的 shell 命令直接在本机执行"),
-    }
+    check_sandbox(config, &mut r).await;
 
     let http = reqwest::Client::builder()
         .timeout(HTTP_TIMEOUT)
@@ -230,6 +220,94 @@ async fn check_team_context(config: &Config, hub: &ip_mcp::McpHub, r: &mut Repor
             Err(e) => r.push(Status::Fail, item, format!("经 {} 取包失败：{e}", team.server)),
         }
     }
+}
+
+/// 工具沙箱能不能用，每条命令的资源上限是否生效：在沙箱里读一次实际的 rlimit 和 `/tmp` 大小，和配置的比。
+async fn check_sandbox(config: &Config, r: &mut Report) {
+    if config.sandbox.mode == SandboxMode::None {
+        r.push(
+            Status::Warn,
+            "工具沙箱",
+            "已关闭：员工的 shell 命令直接在本机执行，也没有每条命令的资源上限",
+        );
+        return;
+    }
+    let wanted = config.sandbox.limits.resolve();
+    let sandbox = match ip_tools::Sandbox::bubblewrap(config.sandbox.network, &wanted).await {
+        Ok(s) => s,
+        Err(e) => {
+            r.push(
+                Status::Fail,
+                "工具沙箱",
+                format!("{e}。开发机上可以在配置里写 sandbox: {{ mode: none }}"),
+            );
+            return;
+        }
+    };
+    r.push(Status::Ok, "工具沙箱", "bubblewrap 可用");
+    for missing in sandbox.missing_limits() {
+        r.push(Status::Warn, "命令资源上限", missing.clone());
+    }
+    match sandbox.observe_limits().await {
+        Ok(observed) => {
+            let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").ok();
+            let root = nix::unistd::getuid().is_root();
+            for (status, detail) in limit_findings(&sandbox.limits(), &observed, kernel.as_deref(), root) {
+                r.push(status, "命令资源上限", detail);
+            }
+        }
+        Err(e) => r.push(Status::Fail, "命令资源上限", format!("在沙箱里读取实际上限失败：{e}")),
+    }
+}
+
+/// 比较要加的上限（`applied`，已去掉这台机器加不上的项）和沙箱里实际读到的（`observed`）。
+/// `kernel` 是 `/proc/sys/kernel/osrelease` 的内容，`root` 表示服务以 root 运行。
+fn limit_findings(
+    applied: &ip_tools::CommandLimits,
+    observed: &ip_tools::CommandLimits,
+    kernel: Option<&str>,
+    root: bool,
+) -> Vec<(Status, String)> {
+    let mut out = Vec::new();
+    if !applied.satisfied_by(observed) {
+        let show = |l: &ip_tools::CommandLimits| l.describe().unwrap_or_else(|| "全都不限".into());
+        out.push((
+            Status::Fail,
+            format!("没有生效：要求{}，沙箱里实际是{}", show(applied), show(observed)),
+        ));
+        return out;
+    }
+    match applied.describe() {
+        Some(text) => out.push((Status::Ok, format!("已生效：{text}"))),
+        None => out.push((
+            Status::Warn,
+            "全都不限：一条命令能用光整个容器或主机的进程数和内存".into(),
+        )),
+    }
+    if applied.processes.is_some() {
+        if root {
+            out.push((
+                Status::Warn,
+                "服务以 root 运行，进程数上限对 root 不起作用；换成普通用户运行（Docker 镜像默认是 ip 用户）".into(),
+            ));
+        }
+        let version = kernel.and_then(|k| {
+            let mut it = k.trim().split(['.', '-']).map(|p| p.parse::<u32>().ok());
+            Some((it.next()??, it.next()??))
+        });
+        if let Some((major, minor)) = version
+            && (major, minor) < (5, 14)
+        {
+            out.push((
+                Status::Warn,
+                format!(
+                    "内核 {major}.{minor} 早于 5.14：进程数按这个用户在整台机器上的总数算，服务自己的线程、MCP 子进程、\
+                     别的员工的命令都算在里面，员工的命令可能起不来；升级内核，或把 processes 调高"
+                ),
+            ));
+        }
+    }
+    out
 }
 
 fn check_data_dir(config: &Config, r: &mut Report) {
@@ -396,6 +474,63 @@ async fn check_engine(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sandbox_limits_config_defaults_and_zero() {
+        use crate::config::SandboxConfig;
+        const MIB: u64 = 1024 * 1024;
+        let c: SandboxConfig = serde_saphyr::from_str("mode: bubblewrap\n").unwrap();
+        assert_eq!(c.limits.resolve(), ip_tools::CommandLimits::default());
+        let c: SandboxConfig =
+            serde_saphyr::from_str("limits: { processes: 0, memory_mib: 512, tmp_mib: 64 }\n").unwrap();
+        let l = c.limits.resolve();
+        assert_eq!(l.processes, None, "0 表示不限");
+        assert_eq!(l.memory, Some(512 * MIB));
+        assert_eq!(
+            l.file_size,
+            ip_tools::CommandLimits::default().file_size,
+            "省略用默认值"
+        );
+        assert_eq!(l.tmp_size, Some(64 * MIB));
+        assert!(serde_saphyr::from_str::<SandboxConfig>("limits: { memory: 1 }\n").is_err());
+    }
+
+    #[test]
+    fn compares_sandbox_limits() {
+        use ip_tools::CommandLimits;
+        let wanted = CommandLimits::default();
+        let ok = limit_findings(&wanted, &wanted, Some("6.8.0-1017-azure\n"), false);
+        assert_eq!(ok.len(), 1);
+        assert_eq!(ok[0].0, Status::Ok);
+        assert!(ok[0].1.starts_with("已生效：最多 256 个进程"), "{}", ok[0].1);
+
+        let observed = CommandLimits {
+            processes: Some(63432),
+            ..wanted
+        };
+        let bad = limit_findings(&wanted, &observed, None, false);
+        assert_eq!(bad[0].0, Status::Fail);
+        assert!(bad[0].1.contains("没有生效"), "{}", bad[0].1);
+
+        let old = limit_findings(&wanted, &wanted, Some("5.10.0-28-amd64"), true);
+        let warns: Vec<&str> = old
+            .iter()
+            .filter(|f| f.0 == Status::Warn)
+            .map(|f| f.1.as_str())
+            .collect();
+        assert_eq!(warns.len(), 2, "{old:?}");
+        assert!(warns[0].contains("root") && warns[1].contains("5.10"), "{warns:?}");
+
+        // 没加上的项沿用服务自己的 rlimit，不算没生效。
+        let none = limit_findings(&CommandLimits::NONE, &wanted, None, true);
+        assert_eq!(
+            none,
+            vec![(
+                Status::Warn,
+                "全都不限：一条命令能用光整个容器或主机的进程数和内存".into()
+            )]
+        );
+    }
+
     use std::os::unix::fs::PermissionsExt;
 
     use axum::http::{HeaderMap, StatusCode};

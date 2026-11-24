@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 pub use paths::PathError;
-pub use sandbox::Sandbox;
+pub use sandbox::{CommandLimits, Sandbox};
 
 /// 单次工具调用的资源上限。
 #[derive(Clone, Debug)]
@@ -116,8 +116,7 @@ impl Toolbox {
         vec![
             ToolSpec {
                 name: "shell".into(),
-                description: "在工作目录里用 /bin/sh 执行一条命令，返回合并后的 stdout/stderr 和退出码。没有网络。"
-                    .into(),
+                description: self.shell_description(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
@@ -176,6 +175,17 @@ impl Toolbox {
                 }),
             },
         ]
+    }
+
+    /// `shell` 的说明。有资源上限时写进去，命令被上限挡住（fork 失败、写文件被 SIGXFSZ 终止、
+    /// /tmp 写满）时模型知道是怎么回事，改用更省的办法。
+    fn shell_description(&self) -> String {
+        let mut d =
+            String::from("在工作目录里用 /bin/sh 执行一条命令，返回合并后的 stdout/stderr 和退出码。没有网络。");
+        if let Some(limits) = self.sandbox.limits().describe() {
+            d.push_str(&format!("每条命令的资源上限：{limits}。"));
+        }
+        d
     }
 
     /// 执行一次工具调用。参数错误、未知工具等都以 `ok: false` 返回给模型，让它自行修正，不会 panic。
