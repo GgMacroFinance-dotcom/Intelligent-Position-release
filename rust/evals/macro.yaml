@@ -1,0 +1,133 @@
+# 宏观研报评测集（backlog B-2）：16 道固定问题，用来比较不同模型做研究员的差别。
+# 冒烟用的两题（evals/macro-smoke.yaml）也在里面，id 相同。
+# 运行：./target/release/ip eval --config ip.yaml --set evals/macro.yaml --out run.json
+# 比较模型：再加 --model openai/gpt-6-astra，换掉研究员岗位的模型。
+# 要的环境：
+# - FRED 的题（us-cpi-*、us-unemployment-*、us-credit-spreads、us-dollar）经 WhichAPI 取：先设 WHICHAPI_API_KEY，
+#   并取消 ip.yaml 里 mcp_servers.macro.env_from 的注释（见 ../macro-mcp/README.md）。
+# - us-big-tech-capex 用 SEC 的接口：要设 SEC_USER_AGENT（带联系邮箱）。
+# - china-* 四题用国家统计局网站的接口，境内网络上真实取到过（backlog A-2），境外能否访问没测。
+# 检查项都用程序判定，规则见 crates/ip-cli/src/eval/checks.rs。每题都看报告文件 reports/*.md：
+# 数字要全部来自工具结果、带观测日期，结构齐全；取不到的数据要写“未取得”。
+# 题目分四类：美国利率与资金面、美国通胀就业与信用、外部与财政、中国数据；每类里至少有一题要写“未取得”。
+cases:
+  # —— 美国利率与资金面 ——
+
+  # 冒烟题之一：有数据的问题。
+  - id: us-10y-week
+    agent: macro-1
+    question: 美国 10 年期国债收益率最近一周怎么走？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series, mcp__macro__get_treasury_curve, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # 资金面：SOFR 和 EFFR 都在纽约联储的接口里，不要 key。
+  - id: us-funding-week
+    agent: macro-1
+    question: 美国资金面最近一周怎么样？SOFR 和联邦基金有效利率相对目标区间在什么位置？写一份数据点评。
+    tools_any: [mcp__macro__get_reference_rates, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # 曲线形态：利差要用现成的数或同一天曲线上的两个点，不能混口径。
+  - id: us-curve-shape
+    agent: macro-1
+    question: 美债收益率曲线现在是什么形态？2 年和 10 年的利差是多少，和一个月前比怎么变？写一份数据点评。
+    tools_any: [mcp__macro__get_treasury_curve, mcp__macro__get_fred_series, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # 一半取不到：2030 年的曲线还没有公布。
+  - id: us-curve-2030-missing
+    agent: macro-1
+    question: 美债 3 个月和 10 年期收益率最新是多少？2030 年 1 月 2 日财政部公布的这两个期限又是多少？写一份数据点评。
+    tools_any: [mcp__macro__get_treasury_curve]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+    must_contain: [未取得]
+
+  # —— 美国通胀、就业与信用 ——
+
+  # 冒烟题之二：一半取不到，2030 年的数据不存在。
+  - id: us-cpi-missing
+    agent: macro-1
+    question: 美国最新一期 CPI（CPIAUCSL）指数是多少？2030 年 1 月的 CPI 指数又是多少？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+    must_contain: [未取得]
+
+  # 同比要让 FRED 用 units=pc1 算，不要自己算（自己算的比值追溯不到）。
+  - id: us-cpi-yoy
+    agent: macro-1
+    question: 美国 CPI 同比最近三个月分别是多少？通胀是在降温还是回升？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  - id: us-unemployment-year
+    agent: macro-1
+    question: 美国失业率（UNRATE）最新一期是多少？和一年前比变了多少？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # 信用利差用 ICE BofA 的序列。
+  - id: us-credit-spreads
+    agent: macro-1
+    question: 美国高收益债和投资级债的信用利差（OAS）现在多少？最近一个月走阔还是收窄？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # —— 外部与财政 ——
+
+  # 广义美元指数不是 DXY；DXY 本身取不到，要写“未取得”，不能拿广义美元指数顶替。
+  - id: us-dollar
+    agent: macro-1
+    question: 美元最近一个月是强是弱？分别看广义美元指数、美元兑人民币和 ICE 美元指数（DXY）。写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+    must_contain: [未取得]
+
+  # TIC 的单位是百万美元；按工具的单位写，换算成亿美元时只换单位、不另算增减。
+  - id: us-tic-holdings
+    agent: macro-1
+    question: 中国大陆和日本持有的美国国债最近几个月是增是减？写一份数据点评。
+    tools_any: [mcp__macro__get_tic_holdings, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # 工具说明里写了不是官方 X 日期：不要自己推算 X 日期。
+  - id: us-debt-limit
+    agent: macro-1
+    question: 美国联邦债务离法定上限还有多少空间？写一份数据点评。
+    tools_any: [mcp__macro__get_debt_limit, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # 公司数据：要 SEC_USER_AGENT。10-Q 的数是年初至今累计，注意 period_start。
+  - id: us-big-tech-capex
+    agent: macro-1
+    question: 微软和 Alphabet 最近一个完整财年的资本开支各是多少？写一份数据点评，说说对美国投资周期的含义。
+    tools_any: [mcp__macro__get_company_concept]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # —— 中国数据（国家统计局） ——
+
+  - id: china-cpi-ppi
+    agent: macro-1
+    question: 中国最新一期 CPI 和 PPI 同比各是多少？和上个月比怎么变？写一份数据点评。
+    tools_any: [mcp__macro__get_china_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  - id: china-pmi
+    agent: macro-1
+    question: 中国制造业 PMI 最近三个月在荣枯线上方还是下方？写一份数据点评。
+    tools_any: [mcp__macro__get_china_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # 快捷入口里没有，要先搜指标再取数。
+  - id: china-retail-sales
+    agent: macro-1
+    question: 中国社会消费品零售总额最新一期是多少？同比增长多少？写一份数据点评。
+    tools_any: [mcp__macro__get_china_indicator]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+
+  # 一半取不到：2030 年的 M2 不存在。
+  - id: china-m2-missing
+    agent: macro-1
+    question: 中国最新一期 M2 余额和同比增速是多少？2030 年 12 月的 M2 余额又是多少？写一份数据点评。
+    tools_any: [mcp__macro__get_china_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+    must_contain: [未取得]

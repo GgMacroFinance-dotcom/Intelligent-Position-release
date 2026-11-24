@@ -552,10 +552,38 @@ mod tests {
     #[test]
     fn shipped_eval_sets_parse() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals");
-        for name in ["macro-smoke.yaml", "team-context.yaml"] {
+        for name in ["macro-smoke.yaml", "macro.yaml", "team-context.yaml"] {
             let text = std::fs::read_to_string(dir.join(name)).unwrap();
             let set: EvalSet = serde_saphyr::from_str(&text).unwrap_or_else(|e| panic!("{name}：{e}"));
             assert!(!set.cases.is_empty(), "{name} 没有题");
+            let mut ids: Vec<&str> = set.cases.iter().map(|c| c.id.as_str()).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), set.cases.len(), "{name} 里有重复的 id");
         }
+    }
+
+    /// 比较模型用的评测集 10 到 20 题（backlog B-2），冒烟的两题原样包含在里面。
+    #[test]
+    fn macro_set_contains_the_smoke_cases() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals");
+        let load = |name: &str| -> EvalSet {
+            serde_saphyr::from_str(&std::fs::read_to_string(dir.join(name)).unwrap()).unwrap()
+        };
+        let (smoke, full) = (load("macro-smoke.yaml"), load("macro.yaml"));
+        assert!((10..=20).contains(&full.cases.len()), "macro.yaml 有 {} 题", full.cases.len());
+        for case in &smoke.cases {
+            let same = full.cases.iter().find(|c| c.id == case.id).expect("冒烟题不在 macro.yaml 里");
+            assert_eq!(same.question, case.question, "{} 的题面两边不一样", case.id);
+            assert_eq!(same.tools_any, case.tools_any, "{} 的工具要求两边不一样", case.id);
+        }
+        // 每题都看报告，并且有题要写“未取得”。
+        assert!(full.cases.iter().all(|c| !c.reply && !c.sections.is_empty()));
+        let missing = full
+            .cases
+            .iter()
+            .filter(|c| c.must_contain.iter().any(|n| n.found_in("未取得")))
+            .count();
+        assert!(missing >= 3, "要写“未取得”的题只有 {missing} 道");
     }
 }
