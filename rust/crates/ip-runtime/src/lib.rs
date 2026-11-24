@@ -314,6 +314,16 @@ impl Runtime {
         memory::consolidate::run_pass(&self.shared, now_ms).await
     }
 
+    /// 跑一轮“把岗位记忆提给团队上下文”：接了 TCMS、开了 `share_memory` 的岗位，岗位记忆摘要有新的一版时，
+    /// 挑出对整个团队都成立的几条，用 `context_propose` 提到团队范围。`hub` 是接 TCMS 的 MCP 服务器。
+    pub async fn memory_share(
+        &self,
+        hub: Option<&ip_mcp::McpHub>,
+        now_ms: i64,
+    ) -> Result<memory::share::ShareReport, RuntimeError> {
+        memory::share::run_pass(&self.shared, hub, now_ms).await
+    }
+
     /// 后台多久跑一轮记忆提炼；没开记忆时是 `None`。
     pub fn memory_interval(&self) -> Option<std::time::Duration> {
         let memory = &self.shared.config.memory;

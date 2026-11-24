@@ -60,6 +60,10 @@ pub struct TeamRole {
     /// 在 TCMS 里的团队，可以不写（TCMS 按 `teams.yaml` 查）；写了要和令牌一致。
     #[serde(default)]
     pub team: Option<String>,
+    /// 把岗位记忆里对整个团队都成立的内容提给 TCMS，写进 `team:<团队>`，人批准以后才生效
+    /// （[`crate::memory::share`]）。要写 `team`、要开岗位记忆。默认不开：每有新的一版岗位记忆，多调一次模型。
+    #[serde(default)]
+    pub share_memory: bool,
 }
 
 /// 由 harness 调、不给模型的工具。
