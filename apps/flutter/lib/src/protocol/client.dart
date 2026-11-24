@@ -303,6 +303,10 @@ extension IpRequests on IpClient {
 
   Future<List<Role>> listRoles() => _list(const w.RequestListRoles(), Role.fromJson);
 
+  /// 搜所有对话里的消息（中文按二字切分），最新的在前。
+  Future<List<w.SearchHit>> search(String query, {int limit = 30}) =>
+      _list(w.RequestSearch(query: query, limit: limit), w.SearchHit.fromJson);
+
   Future<List<Agent>> listAgents() => _list(const w.RequestListAgents(), Agent.fromJson);
 
   Future<List<ThreadSummary>> listThreads({int limit = 100}) =>

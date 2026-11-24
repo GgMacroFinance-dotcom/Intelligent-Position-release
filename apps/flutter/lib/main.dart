@@ -15,6 +15,8 @@ import 'src/storage.dart';
 import 'src/ui/common.dart';
 import 'src/ui/connect_page.dart';
 import 'src/ui/home_page.dart';
+import 'src/ui/shell/settings.dart' show themeChoice;
+import 'src/ui/shell/tokens.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -41,9 +43,6 @@ void main() {
     );
   }
 }
-
-/// 和网页控制台一样的主色。
-const _accent = Color(0xFF2F5BD3);
 
 class IpApp extends StatefulWidget {
   const IpApp({super.key, required this.state});
@@ -78,15 +77,20 @@ class _IpAppState extends State<IpApp> {
   Widget build(BuildContext context) {
     return AppScope(
       state: widget.state,
-      child: MaterialApp(
-        title: 'intelligent-position',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorSchemeSeed: _accent, useMaterial3: true),
-        darkTheme: ThemeData(colorSchemeSeed: _accent, brightness: Brightness.dark, useMaterial3: true),
-        locale: const Locale('zh', 'CN'),
-        supportedLocales: const [Locale('zh', 'CN')],
-        localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        home: const _Root(),
+      // 设计重构第一步：照 dusk bot 的浅色和深色（lib/src/ui/shell/tokens.dart）。设置里能选跟随系统、浅色、深色。
+      child: ValueListenableBuilder(
+        valueListenable: themeChoice,
+        builder: (context, mode, _) => MaterialApp(
+          title: 'intelligent-position',
+          debugShowCheckedModeBanner: false,
+          theme: shellTheme(Brightness.light),
+          darkTheme: shellTheme(Brightness.dark),
+          themeMode: mode,
+          locale: const Locale('zh', 'CN'),
+          supportedLocales: const [Locale('zh', 'CN')],
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          home: const _Root(),
+        ),
       ),
     );
   }

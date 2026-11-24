@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ip_app/src/ui/shell/desktop_shell.dart';
 import 'package:ip_app/src/protocol/client.dart';
 
 import 'fake_host.dart';
@@ -141,7 +142,8 @@ void main() {
     final h = Harness();
     await h.savePaired();
     await h.start(tester, size: const Size(1280, 800));
-    expect(find.byType(NavigationRail), findsOneWidget);
+    // 宽窗口是三栏外壳（设计重构第一步）：左栏里有“对话”，点开后列表和对话并排。
+    expect(find.byType(DesktopShell), findsOneWidget);
     await tester.tap(find.text('对话'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('最近 CPI 怎么样'));

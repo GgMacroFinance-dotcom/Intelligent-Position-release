@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ip_app/src/ui/shell/desktop_shell.dart';
 import 'package:ip_app/src/ui/chat_page.dart';
 
 import 'harness.dart';
@@ -161,7 +162,8 @@ void main() {
     final h = withTasks();
     await h.savePaired();
     await h.start(tester, size: const Size(1280, 800));
-    expect(find.byType(NavigationRail), findsOneWidget);
+    // 宽窗口是三栏外壳：“我”在左栏底部，点了是设置弹窗。
+    expect(find.byType(DesktopShell), findsOneWidget);
     await tester.tap(find.byTooltip('我'));
     await tester.pumpAndSettle();
     await h.scrollMe(tester, find.text('断开并忘掉这台主机'));
