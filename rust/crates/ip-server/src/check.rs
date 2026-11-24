@@ -251,7 +251,13 @@ async fn check_sandbox(config: &Config, r: &mut Report) {
     match sandbox.observe_limits().await {
         Ok(observed) => {
             let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").ok();
-            let root = nix::unistd::getuid().is_root();
+            // 真实用户 id，`/proc/self/status` 的 `Uid:` 第一列。读不到时按不是 root 算。
+            let root = std::fs::read_to_string("/proc/self/status").is_ok_and(|s| {
+                s.lines()
+                    .find_map(|l| l.strip_prefix("Uid:"))
+                    .and_then(|v| v.split_whitespace().next())
+                    == Some("0")
+            });
             for (status, detail) in limit_findings(&sandbox.limits(), &observed, kernel.as_deref(), root) {
                 r.push(status, "命令资源上限", detail);
             }

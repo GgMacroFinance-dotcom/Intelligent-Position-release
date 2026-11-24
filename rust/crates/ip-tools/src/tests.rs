@@ -501,15 +501,22 @@ async fn bwrap_limits_memory_per_process() {
 
 /// 这个用户在整台机器上现有的进程和线程数。
 fn tasks_of_current_user() -> usize {
-    let uid = nix::unistd::getuid().as_raw().to_string();
+    let real_uid = |status: &str| {
+        status
+            .lines()
+            .find_map(|l| l.strip_prefix("Uid:"))
+            .and_then(|v| v.split_whitespace().next())
+            .map(str::to_owned)
+    };
+    let Some(uid) = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| real_uid(&s))
+    else {
+        return 0;
+    };
     let Ok(dir) = std::fs::read_dir("/proc") else { return 0 };
     dir.filter_map(|e| std::fs::read_to_string(e.ok()?.path().join("status")).ok())
-        .filter(|s| {
-            s.lines()
-                .find_map(|l| l.strip_prefix("Uid:"))
-                .and_then(|v| v.split_whitespace().next())
-                == Some(uid.as_str())
-        })
+        .filter(|s| real_uid(s).as_deref() == Some(uid.as_str()))
         .filter_map(|s| {
             s.lines()
                 .find_map(|l| l.strip_prefix("Threads:"))?
