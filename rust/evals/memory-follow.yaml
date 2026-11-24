@@ -1,0 +1,53 @@
+# 员工照不照岗位记忆摘要做（backlog D-1 收尾，docs/ip/context-memory-design.md 第 7 节）。
+# 宏观冒烟评测的两个问题各跑两遍，中间插一次人的纠正：第一遍不带这条规矩，纠正之后马上提炼、合并岗位记忆，
+# 第二遍在新对话里问同样的问题，看报告有没有照着规矩写，同时冒烟评测原有的检查项不能退步。
+#
+# 规矩选的是“报告最后加一节‘下一步关注’”：员工平时不会自己写这一节，有没有照做一眼能判出来。
+# 纠正是在单独一个对话里说的，第二遍的对话里看不到它，只能从系统提示词里的岗位记忆摘要知道。
+#
+# 运行（在 rust/ 下）：./target/release/ip eval --config <ip.yaml> --set evals/memory-follow.yaml --out run.json
+#   - 题目按顺序跑，不要用 --only。
+#   - 数据库要用一个空的 schema（库里已经有对话时会拒绝运行），宏观研究员所在岗位要开着记忆（默认开）。
+#   - 第二个问题要用 get_fred_series 取 CPI，和冒烟评测一样要 WHICHAPI_API_KEY。
+cases:
+  # 第一遍：还没有这条规矩。报告里如果已经有“下一步关注”，说明这个规矩判不出差别，这次评测不作数。
+  - id: us-10y-week-before
+    agent: macro-1
+    question: 美国 10 年期国债收益率最近一周怎么走？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series, mcp__macro__get_treasury_curve, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+    must_not_contain: [下一步关注]
+
+  - id: us-cpi-missing-before
+    agent: macro-1
+    question: 美国最新一期 CPI（CPIAUCSL）指数是多少？2030 年 1 月的 CPI 指数又是多少？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源]
+    must_contain: [未取得]
+    must_not_contain: [下一步关注]
+
+  # 人的纠正，单独一个对话。
+  - id: correction
+    agent: macro-1
+    question: 定个规矩：以后写数据点评，报告最后单独加一节“下一步关注”，列两到三个接下来要盯的数据或事件，只写是什么、为什么要盯，不写具体日期和数字。这次不用写报告，记下就行。
+    reply: true
+
+  # 不等对话凉下来，马上提炼、合并。规矩要进岗位记忆摘要。
+  - id: remember
+    agent: macro-1
+    remember: true
+    must_contain: [下一步关注]
+
+  # 第二遍：新对话，同样的问题。原有检查项照旧，另外要有“下一步关注”这一节。
+  - id: us-10y-week-after
+    agent: macro-1
+    question: 美国 10 年期国债收益率最近一周怎么走？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series, mcp__macro__get_treasury_curve, mcp__macro__macro_snapshot]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源, 下一步关注]
+
+  - id: us-cpi-missing-after
+    agent: macro-1
+    question: 美国最新一期 CPI（CPIAUCSL）指数是多少？2030 年 1 月的 CPI 指数又是多少？写一份数据点评。
+    tools_any: [mcp__macro__get_fred_series]
+    sections: [结论, 关键数据, 解读, 风险, 数据来源, 下一步关注]
+    must_contain: [未取得]

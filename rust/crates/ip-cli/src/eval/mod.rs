@@ -2,6 +2,8 @@
 //!
 //! 每次运行用一个新的临时数据目录，员工的工作目录是空的，不受之前的对话和报告影响。
 //! 评测集的格式见 `evals/macro-smoke.yaml`（看报告）和 `evals/team-context.yaml`（看回复）。
+//! 题目按顺序跑，共用一个数据目录。`remember` 这一步不发问题，而是马上跑一轮岗位记忆的提炼和合并，
+//! 让后面的题在新对话里带上新的记忆摘要，见 `evals/memory-follow.yaml`（`docs/ip/context-memory-design.md` 第 7 节）。
 
 pub mod checks;
 
@@ -10,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
 use clap::Args;
-use ip_core::{AgentId, Author, Body, ThreadId};
+use ip_core::{AgentId, Author, Body, RoleId, ThreadId};
 use ip_models::Usage;
 use ip_runtime::RuntimeEvent;
 use serde::{Deserialize, Serialize};
@@ -50,7 +52,13 @@ struct Case {
     id: String,
     /// 被测员工的 id。
     agent: String,
+    /// 发给员工的话。`remember` 这一步不用写。
+    #[serde(default)]
     question: String,
+    /// 这一步不发问题：不等对话凉下来，马上跑岗位记忆的提炼和合并，再查员工所在岗位的记忆摘要。
+    /// 只能和 `must_contain`、`must_not_contain` 一起用，查的是合并出来的摘要。
+    #[serde(default)]
+    remember: bool,
     /// 至少要有一次成功调用的工具（任一）。
     #[serde(default)]
     tools_any: Vec<String>,
@@ -132,7 +140,7 @@ struct CaseResult {
     elapsed_ms: u64,
     error: Option<String>,
     report_path: Option<String>,
-    /// `reply` 题：员工最后一条回复的全文。
+    /// `reply` 题：员工最后一条回复的全文。`remember` 这一步：合并出来的岗位记忆摘要。
     reply: Option<String>,
     /// 成功调用过的工具（去重），看员工有没有用 `context_search`、`context_read` 这些。
     tools_used: Vec<String>,
@@ -158,12 +166,27 @@ async fn run_async(args: EvalArgs) -> anyhow::Result<()> {
     if cases.is_empty() {
         bail!("没有要跑的题");
     }
+    for case in &cases {
+        let shape_ok = if case.remember {
+            case.question.is_empty() && case.tools_any.is_empty() && case.sections.is_empty() && !case.reply
+        } else {
+            !case.question.trim().is_empty()
+        };
+        if !shape_ok {
+            bail!(
+                "题目 {}：remember 这一步只能写 agent、must_contain、must_not_contain；其他题要写 question",
+                case.id
+            );
+        }
+    }
 
     let mut config = ip_server::Config::load(&args.config)?;
     let dir = std::env::temp_dir().join(format!("ip-eval-{}", ThreadId::new()));
     config.data_dir = dir.clone();
     config.channels.clear();
     config.schedules.clear();
+    // 评测里的对话刚结束就要能提炼，不等它凉下来。后台的定时提炼不启动（这里不调 `start_memory`），只在 `remember` 这一步跑。
+    config.memory.min_idle_hours = 0;
     let mut models = std::collections::BTreeMap::new();
     for case in &cases {
         let Some(agent) = config.agents.iter().find(|a| a.id == case.agent) else {
@@ -174,22 +197,40 @@ async fn run_async(args: EvalArgs) -> anyhow::Result<()> {
         let Some(role) = config.roles.iter_mut().find(|r| r.id.as_str() == role_id) else {
             bail!("员工 {} 的岗位 {role_id} 不存在", case.agent);
         };
+        if case.remember && !config.memory.enabled_for(&role.id) {
+            bail!(
+                "题目 {} 要用岗位记忆，但岗位 {role_id} 没开记忆（memory.enabled、memory.roles）",
+                case.id
+            );
+        }
         if let Some(model) = &args.model {
             role.model.default = model.clone();
         }
-        models.insert(case.agent.clone(), (role.model.default.clone(), workspace));
+        models.insert(
+            case.agent.clone(),
+            (role.model.default.clone(), workspace, role.id.clone()),
+        );
     }
     println!("临时数据目录：{}", dir.display());
     let app = ip_server::App::from_config(&config).await?;
+    // 记忆会把库里所有对话都拿来提炼，旧的对话和记忆会混进结果，也可能碰到真实部署的记忆：只在空库上跑。
+    if cases.iter().any(|c| c.remember) && !app.runtime().store().recent_threads(1).await?.is_empty() {
+        app.shutdown().await;
+        bail!("评测集里有 remember 这一步，要用一个空的数据库 schema（库里已经有对话了）");
+    }
 
     let mut results = Vec::new();
     for case in cases {
-        let (model, workspace) = &models[&case.agent];
+        let (model, workspace, role) = &models[&case.agent];
         let workspace = workspace
             .clone()
             .unwrap_or_else(|| dir.join("workspaces").join(&case.agent));
         println!("▶ {}（{}，{model}）", case.id, case.agent);
-        let result = run_case(&app, case, model, &workspace, Duration::from_secs(args.timeout_secs)).await?;
+        let result = if case.remember {
+            remember(&app, case, model, role).await?
+        } else {
+            run_case(&app, case, model, &workspace, Duration::from_secs(args.timeout_secs)).await?
+        };
         print_case(&result);
         results.push(result);
     }
@@ -467,6 +508,102 @@ async fn run_case(
     })
 }
 
+/// 最多跑几轮提炼：每轮最多提炼 `max_threads_per_pass` 个对话，评测里的对话一般一两轮就提炼完。
+const MAX_EXTRACT_PASSES: usize = 20;
+
+/// `remember` 这一步：把还没提炼的对话都提炼掉，再合并一次，查合并出来的岗位记忆摘要。
+/// 花费按岗位当天已花的钱前后相减（提炼、合并都记在岗位上）。提炼、合并不计 token 用量，所以这一步的 `usage` 是 0。
+async fn remember(app: &ip_server::App, case: &Case, model: &str, role: &RoleId) -> anyhow::Result<CaseResult> {
+    let runtime = app.runtime();
+    let spent = |today: ip_runtime::SpendToday| today.roles.get(role).copied().unwrap_or(0.0);
+    let before_usd = spent(runtime.spend_today().await?);
+    let started = Instant::now();
+
+    let mut extract = ip_runtime::memory::extract::PassReport::default();
+    for _ in 0..MAX_EXTRACT_PASSES {
+        let report = runtime.memory_pass(ip_core::now_ms()).await?;
+        extract.extracted += report.extracted;
+        extract.empty += report.empty;
+        extract.failed += report.failed;
+        extract.skipped_budget += report.skipped_budget;
+        if report.extracted + report.empty == 0 {
+            break;
+        }
+    }
+    let consolidate = runtime.memory_consolidate(ip_core::now_ms()).await?;
+    let summary = ip_runtime::memory::get(runtime.store(), ip_runtime::memory::Layer::Summary, role)
+        .await?
+        .map(|e| e.text);
+    let after_usd = spent(runtime.spend_today().await?);
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+
+    let problems: Vec<String> = [
+        (extract.failed, "提炼失败"),
+        (extract.skipped_budget, "提炼因预算跳过"),
+        (consolidate.failed, "合并失败"),
+        (consolidate.skipped_budget, "合并因预算跳过"),
+    ]
+    .iter()
+    .filter(|(n, _)| *n > 0)
+    .map(|(n, what)| format!("{what} {n} 次"))
+    .collect();
+    let error = (!problems.is_empty()).then(|| problems.join("，"));
+    let text = summary.clone().unwrap_or_default();
+    let mut checks = vec![
+        Check {
+            name: "提炼和合并没出错",
+            pass: error.is_none(),
+            detail: format!(
+                "提炼出 {} 份对话记忆（另有 {} 份没什么可记），合并出 {} 版岗位记忆摘要{}",
+                extract.extracted,
+                extract.empty,
+                consolidate.consolidated,
+                error.as_ref().map(|e| format!("；{e}")).unwrap_or_default()
+            ),
+        },
+        Check {
+            name: "有岗位记忆摘要",
+            pass: !text.trim().is_empty(),
+            detail: format!("{} 字", text.chars().count()),
+        },
+    ];
+    if !case.must_contain.is_empty() {
+        let missing = missing_needles(&case.must_contain, &text);
+        checks.push(Check {
+            name: "摘要里有要求的内容",
+            pass: missing.is_empty(),
+            detail: labels("没出现", &missing),
+        });
+    }
+    if !case.must_not_contain.is_empty() {
+        let found = forbidden_found(&case.must_not_contain, &text);
+        checks.push(Check {
+            name: "摘要里没有不该有的",
+            pass: found.is_empty(),
+            detail: if found.is_empty() {
+                String::new()
+            } else {
+                format!("出现了：{}", found.join("、"))
+            },
+        });
+    }
+    Ok(CaseResult {
+        id: case.id.clone(),
+        model: model.to_owned(),
+        pass: checks.iter().all(|c| c.pass),
+        cost_usd: (after_usd - before_usd).max(0.0),
+        usage: Usage::default(),
+        steps: 0,
+        elapsed_ms,
+        error,
+        report_path: None,
+        reply: summary,
+        tools_used: Vec::new(),
+        checks,
+        untraceable: Vec::new(),
+    })
+}
+
 fn labels(prefix: &str, needles: &[&Needle]) -> String {
     if needles.is_empty() {
         String::new()
@@ -552,7 +689,12 @@ mod tests {
     #[test]
     fn shipped_eval_sets_parse() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../evals");
-        for name in ["macro-smoke.yaml", "macro.yaml", "team-context.yaml"] {
+        for name in [
+            "macro-smoke.yaml",
+            "macro.yaml",
+            "team-context.yaml",
+            "memory-follow.yaml",
+        ] {
             let text = std::fs::read_to_string(dir.join(name)).unwrap();
             let set: EvalSet = serde_saphyr::from_str(&text).unwrap_or_else(|e| panic!("{name}：{e}"));
             assert!(!set.cases.is_empty(), "{name} 没有题");

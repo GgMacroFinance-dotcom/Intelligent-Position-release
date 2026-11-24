@@ -1,0 +1,318 @@
+{
+  "cases": [
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series、mcp__macro__get_treasury_curve、mcp__macro__macro_snapshot；实际成功调用：mcp__macro__get_fred_series、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-11-24-us-10y-yield-weekly.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "14/14 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-11-16、2026-11-17、2026-11-18、2026-11-19、2026-11-20",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "没有不该用的写法",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0007881149999999999,
+      "elapsed_ms": 22243,
+      "error": null,
+      "id": "us-10y-week-before",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": null,
+      "report_path": "/var/folders/3q/fh1r5g3935q69vrn6vd8y_440000gn/T/ip-eval-01a20e02-803c-71a0-9327-020961041412/workspaces/macro-1/reports/2026-11-24-us-10y-yield-weekly.md",
+      "steps": 3,
+      "tools_used": [
+        "mcp__macro__get_fred_series",
+        "write_file"
+      ],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 845,
+        "cached_tokens": 14859,
+        "completion_tokens": 1066,
+        "prompt_tokens": 15713
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series；实际成功调用：mcp__macro__get_fred_series、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-11-24-US-CPI数据点评.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "4/4 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-10-01",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "取不到的写明",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "没有不该用的写法",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.000969145,
+      "elapsed_ms": 22529,
+      "error": null,
+      "id": "us-cpi-missing-before",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": null,
+      "report_path": "/var/folders/3q/fh1r5g3935q69vrn6vd8y_440000gn/T/ip-eval-01a20e02-803c-71a0-9327-020961041412/workspaces/macro-1/reports/2026-11-24-US-CPI数据点评.md",
+      "steps": 3,
+      "tools_used": [
+        "mcp__macro__get_fred_series",
+        "write_file"
+      ],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 1003,
+        "cached_tokens": 15037,
+        "completion_tokens": 1385,
+        "prompt_tokens": 16049
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "回复了",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.00017843999999999998,
+      "elapsed_ms": 6234,
+      "error": null,
+      "id": "correction",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "记下了：以后写数据点评时，在报告最后单独加“下一步关注”，列 2–3 个接下来要关注的数据或事件，只说明是什么、为什么要关注，不写具体日期和数字。",
+      "report_path": null,
+      "steps": 2,
+      "tools_used": [
+        "memory_note"
+      ],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 188,
+        "cached_tokens": 9834,
+        "completion_tokens": 112,
+        "prompt_tokens": 10028
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "提炼出 3 份对话记忆（另有 0 份没什么可记），合并出 1 版岗位记忆摘要",
+          "name": "提炼和合并没出错",
+          "pass": true
+        },
+        {
+          "detail": "863 字",
+          "name": "有岗位记忆摘要",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "摘要里有要求的内容",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0014908249999999999,
+      "elapsed_ms": 21744,
+      "error": null,
+      "id": "remember",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": "## 怎么和这个团队配合\n暂无团队协作约定记录。\n\n## 干活的提示\n- 以后撰写数据点评，报告末尾单独增加“下一步关注”一节，列出两到三个后续要关注的数据或事件，并说明关注原因；不写具体日期和数字。\n- 使用 FRED 数据时，说明实际返回观测覆盖到哪一天；未返回数据的日期不纳入判断。\n- CPIAUCSL 是指数水平，不应直接当作同比或环比通胀率。若目标月份没有观测，不提供实际值或数值预测。\n- 某次十年期收益率点评使用 `mcp__macro__get_fred_series` 查询 FRED 的 DGS10 日度序列，按最近五个交易日观察，并注明数据只覆盖到实际返回的日期。\n- 某次 CPI 点评用 `mcp__macro__get_fred_series` 查询 CPIAUCSL 最新值及指定月份数据；最新值请求使用 `units: \"lin\"`、`max_age_seconds: 0`，指定月份请求设置起止日期。\n- 某次报告保存到 `reports/2026-11-24-us-10y-yield-weekly.md`，并在回复中告知文件位置。\n\n## 记忆里有什么\n- **2026-11-24｜01a20e02-8098-74f3-857c-551eef0707ca｜美国十年期收益率点评**：记录使用 FRED 查询 DGS10、按近期交易日点评并披露实际数据覆盖范围的做法；类似周度分析时可避免对缺失日期作判断。\n- **2026-11-24｜01a20e02-d780-735e-8b45-febc3b6453ea｜CPI 数据点评流程**：记录 CPIAUCSL 的查询方式、指数口径及无观测时不推断实际值或预测值的处理；撰写 CPI 点评时可参考。\n- **2026-11-24｜01a20e03-2f84-7171-ae79-8174c7d7882c｜数据点评的后续关注**：对方要求数据点评末尾增加“下一步关注”一节，列出后续关注对象及原因、不写具体日期和数字；撰写数据点评时适用。",
+      "report_path": null,
+      "steps": 0,
+      "tools_used": [],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 0,
+        "cached_tokens": 0,
+        "completion_tokens": 0,
+        "prompt_tokens": 0
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series、mcp__macro__get_treasury_curve、mcp__macro__macro_snapshot；实际成功调用：mcp__macro__get_fred_series、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-11-24-us-10y-yield-weekly.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "10/10 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-11-16、2026-11-17、2026-11-18、2026-11-19、2026-11-20",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.0016391399999999999,
+      "elapsed_ms": 22963,
+      "error": null,
+      "id": "us-10y-week-after",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": null,
+      "report_path": "/var/folders/3q/fh1r5g3935q69vrn6vd8y_440000gn/T/ip-eval-01a20e02-803c-71a0-9327-020961041412/workspaces/macro-1/reports/2026-11-24-us-10y-yield-weekly.md",
+      "steps": 4,
+      "tools_used": [
+        "mcp__macro__get_fred_series",
+        "write_file"
+      ],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 6592,
+        "cached_tokens": 17094,
+        "completion_tokens": 1286,
+        "prompt_tokens": 23698
+      }
+    },
+    {
+      "checks": [
+        {
+          "detail": "",
+          "name": "本轮正常结束",
+          "pass": true
+        },
+        {
+          "detail": "要求其一：mcp__macro__get_fred_series；实际成功调用：mcp__macro__get_fred_series、write_file",
+          "name": "调了取数工具",
+          "pass": true
+        },
+        {
+          "detail": "reports/2026-11-24-us-cpi-index-review.md",
+          "name": "写了报告",
+          "pass": true
+        },
+        {
+          "detail": "4/4 个能追溯（要求 ≥100%）",
+          "name": "数字能在工具结果里找到",
+          "pass": true
+        },
+        {
+          "detail": "和工具结果一致的日期：2026-10-01",
+          "name": "数字带观测日期",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "取不到的写明",
+          "pass": true
+        },
+        {
+          "detail": "",
+          "name": "报告结构齐全",
+          "pass": true
+        }
+      ],
+      "cost_usd": 0.00086876,
+      "elapsed_ms": 20430,
+      "error": null,
+      "id": "us-cpi-missing-after",
+      "model": "openai/gpt-6-luna",
+      "pass": true,
+      "reply": null,
+      "report_path": "/var/folders/3q/fh1r5g3935q69vrn6vd8y_440000gn/T/ip-eval-01a20e02-803c-71a0-9327-020961041412/workspaces/macro-1/reports/2026-11-24-us-cpi-index-review.md",
+      "steps": 3,
+      "tools_used": [
+        "mcp__macro__get_fred_series",
+        "write_file"
+      ],
+      "untraceable": [],
+      "usage": {
+        "cache_write_tokens": 1028,
+        "cached_tokens": 16936,
+        "completion_tokens": 1140,
+        "prompt_tokens": 17973
+      }
+    }
+  ],
+  "cost_usd": 0.005934424999999999,
+  "passed": 6,
+  "total": 6,
+  "usage": {
+    "cache_write_tokens": 9656,
+    "cached_tokens": 73760,
+    "completion_tokens": 4989,
+    "prompt_tokens": 83461
+  }
+}
