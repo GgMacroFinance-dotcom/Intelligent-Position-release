@@ -14,6 +14,8 @@ org_prompt: |
 sandbox:
   mode: bubblewrap                # 开发机没有 bwrap 时可改为 none（不隔离）
   network: false                  # 员工的 shell 命令能否联网
+  # 每条 shell 命令的资源上限（省略的项用这里写的默认值，写 0 不限）。调法见 docs/ip/deploy-docker.md“资源上限”
+  # limits: { processes: 256, memory_mib: 1024, file_size_mib: 1024, tmp_mib: 256 }
 max_steps: 16                     # 一轮里最多调用模型的次数
 context_budget_chars: 60000       # 上下文超过这么多字时，把较早的对话压缩成摘要；0 不压缩
 
