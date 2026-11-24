@@ -108,12 +108,14 @@ impl App {
     }
 
     /// 启动岗位记忆的后台提炼和合并（`docs/ip/context-memory-design.md` 5.3、5.4）。没开记忆时什么都不做，服务关闭时停止。
-    /// 启动后先跑一轮，之后每隔 `memory.interval_minutes` 跑一轮；每轮先提炼再合并。
+    /// 启动后先跑一轮，之后每隔 `memory.interval_minutes` 跑一轮；每轮先提炼再合并，再把新一版岗位记忆里
+    /// 对整个团队都成立的提给团队上下文（开了 `share_memory` 的岗位，`docs/ip/team-context.md` 第 8 节）。
     pub fn start_memory(&self) {
         let Some(interval) = self.runtime.memory_interval() else {
             return;
         };
         let runtime = self.runtime.clone();
+        let mcp = self.mcp.clone();
         let mut closing = self.closing.subscribe();
         tokio::spawn(async move {
             loop {
@@ -141,6 +143,19 @@ impl App {
                     }
                     Ok(_) => {}
                     Err(e) => tracing::warn!(error = %e, "记忆合并这一轮出错，下一轮再试"),
+                }
+                match runtime.memory_share(mcp.as_deref(), ip_core::now_ms()).await {
+                    Ok(report) if report != ip_runtime::memory::share::ShareReport::default() => {
+                        tracing::info!(
+                            checked = report.checked,
+                            proposed = report.proposed,
+                            failed = report.failed,
+                            skipped_budget = report.skipped_budget,
+                            "把岗位记忆提给团队上下文跑了一轮"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "把岗位记忆提给团队上下文这一轮出错，下一轮再试"),
                 }
                 tokio::select! {
                     () = tokio::time::sleep(interval) => {}

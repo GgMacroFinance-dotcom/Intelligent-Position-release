@@ -2,11 +2,13 @@
 //!
 //! 两样都存在设置表里，一个岗位各一条，每次请求读出来放进系统提示词。决策者笔记由人写（`ip context`）；
 //! 岗位记忆摘要可以由人写，开了记忆后也会由后台从对话里提炼（[`extract`]）再合并（[`consolidate`]）出来。
+//! 接了团队上下文的岗位还可以把摘要里对整个团队都成立的内容提给 TCMS（[`share`]）。
 
 pub mod consolidate;
 pub mod extract;
 pub mod redact;
 pub mod search;
+pub mod share;
 
 use ip_core::{RoleId, ThreadId};
 use ip_store::{Store, StoreError};

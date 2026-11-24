@@ -321,3 +321,5 @@ mcp_servers:
 #     macro-researcher:
 #       server: tcms-macro         # 上面 mcp_servers 里那一项
 #       role: macro                # TCMS 里的岗位名，要和令牌一致；省略时用 I.P. 的岗位 id
+#       # team: research           # TCMS 里的团队，可以不写；写了要和令牌一致；开 share_memory 时要写
+#       # share_memory: true       # 岗位记忆里对整个团队都成立的提给 TCMS，人批准后进团队（docs/ip/team-context.md 第 8 节），默认不开

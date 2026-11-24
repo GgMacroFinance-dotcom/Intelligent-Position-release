@@ -958,8 +958,18 @@ fn team_context_servers_carry_one_roles_token() {
     let c = Config::from_yaml(&ok).unwrap();
     assert_eq!(c.team_context.budget_tokens, 4000, "预算默认 4000");
     assert_eq!(c.team_context.roles[&"macro".into()].server, "tcms-macro");
+    assert!(
+        !c.team_context.roles[&"macro".into()].share_memory,
+        "默认不把岗位记忆提给团队"
+    );
     // 没写 team_context 时谁都不接。
     assert!(Config::from_yaml(EXAMPLE).unwrap().team_context.roles.is_empty());
+    let share = with(
+        "  roles:\n    macro: { server: tcms-macro, role: macro, team: research, share_memory: true }",
+        ", roles: [macro]",
+    );
+    assert!(Config::from_yaml(&share).unwrap().team_context.roles[&"macro".into()].share_memory);
+    let memory_off = share.replacen("org_prompt:", "memory:\n  enabled: false\norg_prompt:", 1);
     for (text, why) in [
         (
             with("  roles:\n    macro: { server: tcms-macro }", ""),
@@ -984,6 +994,14 @@ fn team_context_servers_carry_one_roles_token() {
             with("  roles:\n    macro: { sever: tcms-macro }", ", roles: [macro]"),
             "拼错的字段",
         ),
+        (
+            with(
+                "  roles:\n    macro: { server: tcms-macro, share_memory: true }",
+                ", roles: [macro]",
+            ),
+            "提给团队但没写是哪个团队",
+        ),
+        (memory_off, "提给团队但没开岗位记忆"),
     ] {
         assert!(Config::from_yaml(&text).is_err(), "{why} 应被拒绝");
     }

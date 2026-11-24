@@ -26,6 +26,7 @@ use crate::{AgentSetup, Runtime, RuntimeConfig, RuntimeEvent};
 struct FakeTcms {
     gets: Arc<Mutex<Vec<Value>>>,
     searches: Arc<Mutex<Vec<Value>>>,
+    proposes: Arc<Mutex<Vec<Value>>>,
     prefix: Arc<Mutex<String>>,
     down: Arc<AtomicBool>,
 }
@@ -85,6 +86,20 @@ impl ServerHandler for FakeTcms {
                 self.searches.lock().unwrap().push(args.clone());
                 Ok(CallToolResult::structured(json!({"hits": [{"id": "ctx_A", "title": "CPI 口径"}]})).into())
             }
+            "context_propose" => {
+                let mut proposes = self.proposes.lock().unwrap();
+                proposes.push(args.clone());
+                if self.down.load(Ordering::SeqCst) {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text("没处理的提议已经有 20 条")]).into());
+                }
+                Ok(CallToolResult::structured(json!({
+                    "proposal_id": format!("prop_{}", proposes.len()),
+                    "status": "open",
+                    "duplicate": false,
+                    "conflicts": [],
+                }))
+                .into())
+            }
             _ => Ok(CallToolResult::error(vec![ContentBlock::text("测试里没用到")]).into()),
         }
     }
@@ -95,6 +110,7 @@ struct Fixture {
     runtime: Runtime,
     model: Arc<ScriptedModel>,
     tcms: FakeTcms,
+    hub: Arc<McpHub>,
 }
 
 fn role() -> Role {
@@ -126,6 +142,7 @@ fn config() -> RuntimeConfig {
             server: "tcms".into(),
             role: Some("macro".into()),
             team: None,
+            share_memory: false,
         },
     );
     RuntimeConfig {
@@ -144,6 +161,10 @@ fn config() -> RuntimeConfig {
 
 /// 起假 TCMS、接进 MCP，再起一个员工。`engine` 给了时这个员工的每一轮交给它。
 async fn fixture(turns: Vec<ScriptedTurn>, engine: Option<Arc<dyn Engine>>) -> Fixture {
+    fixture_with(turns, engine, config()).await
+}
+
+async fn fixture_with(turns: Vec<ScriptedTurn>, engine: Option<Arc<dyn Engine>>, config: RuntimeConfig) -> Fixture {
     let tcms = FakeTcms::default();
     *tcms.prefix.lock().unwrap() = "# 团队上下文\n## 常驻条目\n[ctx_R r1] 数字注明来源。\n[/ctx_R]".into();
     let (client, server) = tokio::io::duplex(64 * 1024);
@@ -152,7 +173,7 @@ async fn fixture(turns: Vec<ScriptedTurn>, engine: Option<Arc<dyn Engine>>) -> F
         let running = handler.serve(server).await.unwrap();
         let _ = running.waiting().await;
     });
-    let hub = McpHub::default();
+    let hub = Arc::new(McpHub::default());
     hub.add("tcms", client, vec!["researcher".into()], Duration::from_secs(5))
         .await
         .unwrap();
@@ -162,13 +183,13 @@ async fn fixture(turns: Vec<ScriptedTurn>, engine: Option<Arc<dyn Engine>>) -> F
     let model = Arc::new(ScriptedModel::new(turns));
     let mut models = ModelRegistry::new();
     models.insert("fake", model.clone());
-    let runtime = Runtime::new(store, models, config());
+    let runtime = Runtime::new(store, models, config);
     runtime
         .spawn_agent(AgentSetup {
             agent: agent(),
             role: role(),
             toolbox: None,
-            mcp: Some(Arc::new(hub)),
+            mcp: Some(hub.clone()),
             data: None,
             engine,
         })
@@ -178,6 +199,7 @@ async fn fixture(turns: Vec<ScriptedTurn>, engine: Option<Arc<dyn Engine>>) -> F
         runtime,
         model,
         tcms,
+        hub,
     }
 }
 
@@ -485,4 +507,245 @@ async fn real_tcms_over_http_when_configured() {
     );
     assert!(results[0].contains("hits"), "{results:?}");
     assert!(results[1].contains("proposal_id"), "{results:?}");
+}
+
+/// 开了 `share_memory` 的配置：岗位记忆开着，团队是 research。
+fn share_config() -> RuntimeConfig {
+    let mut c = config();
+    c.memory.enabled = true;
+    let team = c.team_context.roles.get_mut(&"researcher".into()).unwrap();
+    team.team = Some("research".into());
+    team.share_memory = true;
+    c
+}
+
+#[tokio::test]
+async fn new_role_memory_is_shared_with_the_team_as_proposals() {
+    use crate::memory::{self, Layer};
+
+    let first = r#"```json
+{"items": [
+  {"kind": "procedure", "title": "图表下面注明数据来源", "body": "每张图下面写数据来源和截至日期。\n## 怎么写\n来源写全称。令牌 sk-abcdefghijklmnop123456",
+   "why": "团队里写报告的岗位都要这样。", "threads": ["thr_1", "thr_bogus"]},
+  {"kind": "rule", "title": "美国数据用 FRED", "body": "美国的宏观序列从 FRED 取。", "why": "", "threads": []},
+  {"kind": "fact", "title": "  ", "body": "没有标题的不提。"}
+]}
+```"#;
+    let second = r#"{"items": [
+  {"kind": "procedure", "title": "图表下面 注明数据来源", "body": "换个说法又提一次。"},
+  {"kind": "fact", "title": "PMI 先看新订单", "body": "看 PMI 先看新订单分项。"}
+]}"#;
+    let f = fixture_with(
+        vec![
+            ScriptedTurn::Text(first.into()),
+            ScriptedTurn::Text(second.into()),
+            ScriptedTurn::Text("这次没有合适的。".into()),
+        ],
+        None,
+        share_config(),
+    )
+    .await;
+    let store = f.runtime.store();
+    let role: ip_core::RoleId = "researcher".into();
+    let hub = Some(f.hub.as_ref());
+    let v1 = "## 怎么和这个团队配合\n图表下面注明数据来源（对话 thr_1、thr_2 都这样要求）。\n## 干活的提示\n美国数据用 FRED。\n## 记忆里有什么\n- 2026-11-20 对话 thr_1 图表";
+
+    // 还没有岗位记忆：不调模型。
+    assert_eq!(f.runtime.memory_share(hub, 1_000).await.unwrap(), Default::default());
+    assert!(f.model.requests().is_empty());
+
+    // 有了第一版：调一次模型，挑出的两条提到 team:research。
+    memory::put(store, Layer::Summary, &role, v1, 1_000).await.unwrap();
+    let report = f.runtime.memory_share(hub, 2_000).await.unwrap();
+    assert_eq!((report.checked, report.proposed, report.failed), (1, 2, 0));
+    let requests = f.model.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].tools.is_empty());
+    assert!(system_of(&requests[0].messages).contains("团队经验整理员"));
+    let input = user_texts(&requests[0].messages)[0];
+    assert!(input.contains("团队：research") && input.contains(v1), "{input}");
+    assert!(input.contains("# 已经提过的\n（没有）"), "{input}");
+    let proposes = f.tcms.proposes.lock().unwrap().clone();
+    assert_eq!(proposes.len(), 2);
+    let p = &proposes[0];
+    assert_eq!(p["action"], "create");
+    assert_eq!(p["draft"]["scope"], "team:research");
+    assert_eq!(p["draft"]["kind"], "procedure");
+    assert_eq!(p["draft"]["title"], "图表下面注明数据来源");
+    let body = p["draft"]["body"].as_str().unwrap();
+    assert!(body.contains("### 怎么写") && !body.contains("\n## "), "{body}");
+    assert!(!body.contains("abcdefghijklmnop"), "{body}");
+    let reason = p["reason"].as_str().unwrap();
+    assert!(reason.contains("宏观研究员") && reason.contains("research"), "{reason}");
+    let evidence: Vec<&str> = p["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(evidence[0].contains("岗位记忆"), "{evidence:?}");
+    // 岗位记忆里写到的对话才当证据。
+    assert!(
+        evidence.contains(&"I.P. 对话 thr_1") && !evidence.iter().any(|e| e.contains("thr_bogus")),
+        "{evidence:?}"
+    );
+    // 规则只能人写，换成经验。
+    assert_eq!(proposes[1]["draft"]["kind"], "memory");
+
+    // 同一版不再看。
+    assert_eq!(f.runtime.memory_share(hub, 3_000).await.unwrap(), Default::default());
+    assert_eq!(f.model.requests().len(), 1);
+
+    // 第二版：告诉模型提过什么；标题一样（不算空白）的不再提。
+    memory::put(
+        store,
+        Layer::Summary,
+        &role,
+        &format!("{v1}\n看 PMI 先看新订单。"),
+        4_000,
+    )
+    .await
+    .unwrap();
+    let report = f.runtime.memory_share(hub, 5_000).await.unwrap();
+    assert_eq!((report.checked, report.proposed), (1, 1));
+    let input = user_texts(&f.model.requests()[1].messages)[0].to_string();
+    assert!(
+        input.contains("- 图表下面注明数据来源") && input.contains("- 美国数据用 FRED"),
+        "{input}"
+    );
+    let proposes = f.tcms.proposes.lock().unwrap().clone();
+    assert_eq!(proposes.len(), 3);
+    assert_eq!(proposes[2]["draft"]["title"], "PMI 先看新订单");
+
+    // 模型输出看不懂：这一版算看过了，不再为它调模型。
+    memory::put(store, Layer::Summary, &role, "## 怎么和这个团队配合\n换了一版。", 6_000)
+        .await
+        .unwrap();
+    let report = f.runtime.memory_share(hub, 7_000).await.unwrap();
+    assert_eq!((report.checked, report.proposed), (1, 0));
+    assert_eq!(f.runtime.memory_share(hub, 8_000).await.unwrap(), Default::default());
+    assert_eq!(f.model.requests().len(), 3);
+    assert_eq!(f.tcms.proposes.lock().unwrap().len(), 3);
+
+    // 没有 MCP 服务器时不提，也不调模型。
+    memory::put(store, Layer::Summary, &role, "## 怎么和这个团队配合\n又一版。", 9_000)
+        .await
+        .unwrap();
+    assert_eq!(f.runtime.memory_share(None, 9_500).await.unwrap(), Default::default());
+    assert_eq!(f.model.requests().len(), 3);
+}
+
+#[tokio::test]
+async fn sharing_role_memory_is_off_unless_configured_and_survives_tcms_errors() {
+    use crate::memory::{self, Layer};
+
+    let pick = r#"{"items": [{"kind": "fact", "title": "CPI 用统计局的数", "body": "国内 CPI 用国家统计局的数。"}]}"#;
+    // 没开 share_memory：什么都不做。
+    let off = fixture_with(vec![ScriptedTurn::Text(pick.into())], None, {
+        let mut c = config();
+        c.memory.enabled = true;
+        c
+    })
+    .await;
+    let role: ip_core::RoleId = "researcher".into();
+    memory::put(
+        off.runtime.store(),
+        Layer::Summary,
+        &role,
+        "## 干活的提示\nCPI 用统计局的数。",
+        1_000,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        off.runtime.memory_share(Some(off.hub.as_ref()), 2_000).await.unwrap(),
+        Default::default()
+    );
+    assert!(off.model.requests().is_empty());
+
+    // TCMS 拒了提议（比如攒满了）：记一次失败，这一版算看过了，下一版再说。
+    let f = fixture_with(vec![ScriptedTurn::Text(pick.into())], None, share_config()).await;
+    f.tcms.down.store(true, Ordering::SeqCst);
+    memory::put(
+        f.runtime.store(),
+        Layer::Summary,
+        &role,
+        "## 干活的提示\nCPI 用统计局的数。",
+        1_000,
+    )
+    .await
+    .unwrap();
+    let hub = Some(f.hub.as_ref());
+    let report = f.runtime.memory_share(hub, 2_000).await.unwrap();
+    assert_eq!((report.checked, report.proposed, report.failed), (1, 0, 1));
+    assert_eq!(f.tcms.proposes.lock().unwrap().len(), 1);
+    assert_eq!(f.runtime.memory_share(hub, 3_000).await.unwrap(), Default::default());
+    assert_eq!(f.model.requests().len(), 1);
+}
+
+/// 把岗位记忆提给真的 `tcms serve`（和上面一样只在设了 `IP_TEST_TCMS_URL`、`IP_TEST_TCMS_TOKEN` 时跑）。
+/// 令牌的团队写在 `IP_TEST_TCMS_TEAM`，不写时是 research。提完以后用 `tcms proposals` 看得到这一条。
+#[tokio::test]
+async fn real_tcms_receives_shared_role_memory_when_configured() {
+    use crate::memory::{self, Layer};
+
+    let (Ok(url), Ok(token)) = (std::env::var("IP_TEST_TCMS_URL"), std::env::var("IP_TEST_TCMS_TOKEN")) else {
+        eprintln!("没设 IP_TEST_TCMS_URL、IP_TEST_TCMS_TOKEN，跳过");
+        return;
+    };
+    let team = std::env::var("IP_TEST_TCMS_TEAM").unwrap_or_else(|_| "research".into());
+    let mut servers = BTreeMap::new();
+    servers.insert(
+        "tcms".to_string(),
+        ip_mcp::ServerConfig {
+            url: Some(url),
+            bearer_token_env: Some("TOKEN".into()),
+            roles: vec!["researcher".into()],
+            ..ip_mcp::ServerConfig::default()
+        },
+    );
+    let hub = McpHub::connect_with_env(&servers, &|var| (var == "TOKEN").then(|| token.clone()))
+        .await
+        .unwrap();
+    assert!(hub.unavailable().is_empty(), "{:?}", hub.unavailable());
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
+    let pick = json!({"items": [{
+        "kind": "procedure",
+        "title": "图表下面注明数据来源和截至日期",
+        "body": "每张图下面写数据来源（全称）和数据截至日期。",
+        "why": "团队里写报告的岗位都这样做。",
+        "threads": ["thr_1"],
+    }]});
+    let model = Arc::new(ScriptedModel::new(vec![ScriptedTurn::Text(pick.to_string())]));
+    let mut models = ModelRegistry::new();
+    models.insert("fake", model.clone());
+    let mut config = share_config();
+    config.team_context.roles.get_mut(&"researcher".into()).unwrap().team = Some(team.clone());
+    let runtime = Runtime::new(store, models, config);
+    runtime
+        .spawn_agent(AgentSetup {
+            agent: agent(),
+            role: role(),
+            toolbox: None,
+            mcp: None,
+            data: None,
+            engine: None,
+        })
+        .unwrap();
+    let role_id: ip_core::RoleId = "researcher".into();
+    memory::put(
+        runtime.store(),
+        Layer::Summary,
+        &role_id,
+        "## 怎么和这个团队配合\n图表下面注明数据来源和截至日期（对话 thr_1、thr_2 都这样要求）。",
+        1_000,
+    )
+    .await
+    .unwrap();
+    let report = runtime.memory_share(Some(&hub), 2_000).await.unwrap();
+    eprintln!("---- 一轮的结果 ----\n{report:?}");
+    assert_eq!((report.checked, report.failed), (1, 0), "{report:?}");
+    hub.shutdown().await;
 }

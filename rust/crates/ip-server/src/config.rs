@@ -369,6 +369,10 @@ pub enum ConfigError {
     TeamContextShared(String, String),
     #[error("team_context.budget_tokens 要在 100 到 200000 之间，现在是 {0}")]
     TeamContextBudget(u32),
+    #[error("岗位 `{0}` 开了 share_memory，要写 team（TCMS 里的团队名，提议写进这个团队）")]
+    ShareMemoryTeam(String),
+    #[error("岗位 `{0}` 开了 share_memory，但没开岗位记忆（memory.enabled、memory.roles）")]
+    ShareMemoryOff(String),
     #[error("模型 `{0}` 的价格无效（要是非负数）")]
     BadPrice(String),
     #[error("岗位 `{0}` 设了 budget_per_day_usd，但模型 `{1}` 没有在端点的 prices 里配置价格")]
@@ -598,6 +602,14 @@ impl Config {
             };
             if server.roles.as_slice() != std::slice::from_ref(role) {
                 return Err(ConfigError::TeamContextShared(t.server.clone(), role.to_string()));
+            }
+            if t.share_memory {
+                if t.team.as_deref().is_none_or(str::is_empty) {
+                    return Err(ConfigError::ShareMemoryTeam(role.to_string()));
+                }
+                if !self.memory.enabled_for(role) {
+                    return Err(ConfigError::ShareMemoryOff(role.to_string()));
+                }
             }
         }
         Ok(())
