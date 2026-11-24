@@ -142,6 +142,7 @@ FRED 数据只留 Finance Macro Data API 这一个来源，`examples/public-data
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-24 | 岗位记忆可以提给团队上下文（backlog D-5，`team-context.md` 第 8 节，PR #64）：开了 `share_memory` 的岗位，岗位记忆每有新的一版，把其中对整个团队都成立的作为提议发给 TCMS，人批准后进团队范围。维护者在卡片上选了做这件事；开关默认不开是 Claude 按建议定的（每次多调一次模型），维护者可改。只用假模型测过 |
 | 2026-11-23 | 团队上下文真实模型评测（TCMS 第 7 步，backlog D-5，`evals/2026-11-23-team-context/`）：范围是维护者定的 luna 加 astra 对比、上限 10 美元，实际约 0.48 美元；luna 不接 0/30、接上 30/30、小预算 30/30，astra 不接 1/10、接上 10/10、小预算 10/10。没有新决定 |
 | 2026-11-23 | I.P. 接上团队上下文系统（TCMS 第 6 步，backlog D-5，`team-context.md`），取代 `company-context-design.md` 里内置知识库的设计；只用假模型测过，没有新决定 |
 | 2026-11-22 | 维护者定：存储层从 SQLite 改用 PostgreSQL，和团队上下文系统共用一个库、各用一个 schema（`ip`、`tcms`），只用标准 PostgreSQL、不装扩展；不留 SQLite，mobius 上单独起一个 PostgreSQL，JSON 列用 `JSONB`。方案见 `postgres-migration-plan.md`，backlog D-6，代码还没改 |
