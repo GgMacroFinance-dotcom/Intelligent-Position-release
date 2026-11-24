@@ -11,6 +11,7 @@
 //! 名字或字段写错属于配置错误，仍然直接报错。
 //!
 //! 服务器有两种接法：`command` 启动一个 stdio 子进程，`url` 连一个远程服务器（Streamable HTTP）。
+//! 每个服务器可以用 `tools` 白名单限定交给员工的工具，比如浏览器（Playwright MCP，`docs/ip/browser.md`）。
 //!
 //! 注意：stdio 服务器是 harness 直接启动的子进程，**不在** bubblewrap 沙箱里，
 //! 权限等同 harness 本身。只配置你信任的服务器。远程服务器返回的内容会原样交给模型，同样只连你信任的。
@@ -82,6 +83,11 @@ pub struct ServerConfig {
     /// 只给这些岗位用；空表示所有岗位。
     #[serde(default)]
     pub roles: Vec<RoleId>,
+    /// 只把这些工具交给员工，写服务器上的原名（如 `browser_navigate`）；省略表示服务器列出的全部。
+    /// 不在单子里的工具员工看不到、也调不了，服务器以后新加的工具也一样。
+    /// 服务器带着危险工具又关不掉时用它，比如 Playwright MCP 的 `browser_run_code_unsafe`（见 `docs/ip/browser.md`）。
+    #[serde(default)]
+    pub tools: Vec<String>,
     /// 单次调用超时，也是启动时握手的超时，默认 120 秒。
     pub timeout_secs: Option<u64>,
 }
@@ -89,6 +95,15 @@ pub struct ServerConfig {
 impl ServerConfig {
     /// 检查 `command` 和 `url` 二选一，以及各自专属的字段没有混用。不联网、不读环境变量。
     pub fn validate(&self) -> Result<(), String> {
+        let mut seen = std::collections::BTreeSet::new();
+        for tool in &self.tools {
+            if tool.trim().is_empty() {
+                return Err("tools 里有空的工具名".into());
+            }
+            if !seen.insert(tool.as_str()) {
+                return Err(format!("tools 里 {tool:?} 写了两次"));
+            }
+        }
         match (&self.url, self.command.is_empty()) {
             (None, true) => Err("要写 command（stdio）或 url（远程）其中一个".into()),
             (Some(_), false) => Err("command 和 url 只能写一个".into()),
@@ -361,7 +376,9 @@ impl McpHub {
                 transport = transport.auth_header(secret(name, var, env)?);
             }
             let transport = StreamableHttpClientTransport::from_config(transport);
-            return self.add(name, transport, config.roles.clone(), timeout).await;
+            return self
+                .add_filtered(name, transport, config.roles.clone(), &config.tools, timeout)
+                .await;
         }
         let transport = TokioChildProcess::builder(stdio_command(name, config, env)?)
             .stderr(std::process::Stdio::inherit())
@@ -371,15 +388,34 @@ impl McpHub {
                 error: e.to_string(),
             })?
             .0;
-        self.add(name, transport, config.roles.clone(), timeout).await
+        self.add_filtered(name, transport, config.roles.clone(), &config.tools, timeout)
+            .await
     }
 
-    /// 接入一个已经建好的传输通道（测试里用内存管道）。连上后这个名字从 `unavailable` 里去掉。
+    /// 接入一个已经建好的传输通道（测试里用内存管道），服务器列出的工具全部交给员工。
+    /// 连上后这个名字从 `unavailable` 里去掉。
     pub async fn add<T, E, A>(
         &self,
         name: &str,
         transport: T,
         roles: Vec<RoleId>,
+        timeout: Duration,
+    ) -> Result<(), McpError>
+    where
+        T: IntoTransport<RoleClient, E, A>,
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        self.add_filtered(name, transport, roles, &[], timeout).await
+    }
+
+    /// 同 [`add`](Self::add)，只把 `tools` 里的工具交给员工（服务器上的原名；空表示全部）。
+    /// 单子里有、服务器上没有的名字记一条警告，多半是写错了或服务器改了名。
+    pub async fn add_filtered<T, E, A>(
+        &self,
+        name: &str,
+        transport: T,
+        roles: Vec<RoleId>,
+        tools: &[String],
         timeout: Duration,
     ) -> Result<(), McpError>
     where
@@ -419,8 +455,18 @@ impl McpHub {
         if state.servers.iter().any(|s| s.name == name) {
             return Err(McpError::Duplicate(name.to_string()));
         }
+        for wanted in tools {
+            if !listed.iter().any(|t| t.name.as_ref() == wanted.as_str()) {
+                tracing::warn!(server = name, tool = %wanted, "tools 里写的工具服务器上没有，检查名字");
+            }
+        }
         let mut count = 0;
+        let mut hidden = 0;
         for tool in listed {
+            if !tools.is_empty() && !tools.iter().any(|t| t.as_str() == tool.name.as_ref()) {
+                hidden += 1;
+                continue;
+            }
             let exposed = exposed_name(name, &tool.name);
             if state.tools.contains_key(&exposed) {
                 tracing::warn!(server = name, tool = %tool.name, "MCP 工具名截断后重名，已跳过");
@@ -446,7 +492,7 @@ impl McpHub {
         state.unavailable.retain(|u| u.name != name);
         self.version.fetch_add(1, Ordering::Release);
         drop(state);
-        tracing::info!(server = name, tools = count, "MCP 服务器已连接");
+        tracing::info!(server = name, tools = count, hidden, "MCP 服务器已连接");
         Ok(())
     }
 

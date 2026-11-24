@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.24（2026-11-24）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-38（回复里提到的报告作为文件发进线程，backlog E-13，v0.24）是提议，代码和这次修改放在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.25（2026-11-24）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-38（回复里提到的报告作为文件发进线程，backlog E-13，v0.24）是提议，代码和这次修改放在同一个 PR 里，等工程师审查。D-39（浏览器走 Playwright MCP、`mcp_servers` 的 `tools` 白名单，backlog E-5，v0.25）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -44,7 +44,7 @@ M2-1 和 M2-3 改的文件基本不重叠，可以同时做。
 **本阶段不做：**
 
 - 飞书、邮件：通用接口留出位置，等有真实用户再接。
-- `ip-browser` 自研版：需要浏览器的岗位先在 `mcp_servers` 里配 Playwright MCP。注意 MCP 子进程不在沙箱里。
+- `ip-browser` 自研版：需要浏览器的岗位先在 `mcp_servers` 里配 Playwright MCP。注意 MCP 子进程不在沙箱里。2026-11-24 定了具体做法（D-39）：空壳 `ip-browser` 删掉，配法见 [browser.md](browser.md)。
 - Claude Code 引擎：原来不在本阶段，2026-11-21 做了，套用第 6 节的同一个 `Engine` 接口（D-36，backlog E-6）。
 - Slack 里逐字输出：第一版回复写完一次发出，见 Q-07。
 
@@ -1027,6 +1027,19 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 
 ---
 
+## 10. 浏览器
+
+### D-39 浏览器走 Playwright MCP，`mcp_servers` 加 `tools` 白名单 · 提议（backlog E-5）
+
+- 不自研浏览器自动化，删掉一直是空壳的 `ip-browser` crate。需要浏览器的岗位在 `mcp_servers` 里配一项 Playwright MCP（stdio，`npx -y @playwright/mcp@<写死的版本>`），推荐参数和配法见 [browser.md](browser.md)：`--headless --isolated --no-webmcp --image-responses omit`，`--blocked-origins` 写上云主机元数据地址，`cwd` 指向单独建好的目录，一个岗位一项。
+- `mcp_servers` 的每一项加可选字段 `tools`：服务器上工具的原名列表。写了的，只把单子里的工具交给员工（`specs_for` 里只有它们，`call` 调别的回“没有工具”）；省略表示服务器列出的全部，和原来一样。单子里写了、服务器上没有的名字，连上时记一条警告，不报错。名字为空或重复是配置错误。harness 自己按服务器调的 `call_json`（团队上下文取包）不受白名单影响。
+- 原因：Playwright MCP 没有关掉某个工具的开关，它的 `browser_run_code_unsafe` 在它自己的 Node 进程里执行任意代码，而 stdio 子进程不在沙箱里，只能在 I.P. 这一侧挡住。白名单而不是黑名单，是为了服务器以后新加的工具不会自动交给员工。
+- 推荐白名单 14 个工具（`browser_navigate`、`browser_navigate_back`、`browser_snapshot`、`browser_find`、`browser_click`、`browser_type`、`browser_fill_form`、`browser_select_option`、`browser_press_key`、`browser_hover`、`browser_wait_for`、`browser_tabs`、`browser_handle_dialog`、`browser_close`），不给执行代码、传本机文件、截图和看网络请求的工具，理由见 browser.md 第 3 节。
+- 不在这一步做：Docker 部署里的浏览器（单独容器、网络和数据库、TCMS 隔开，backlog E-16）；登录状态；同一岗位几个员工各用各的浏览器上下文。
+- 测试：`ip-mcp` 单元测试用假服务器测白名单（只交出单子里的、调别的被拒、写错的名字只警告、`call_json` 不受影响）和配置检查；`crates/ip-mcp/tests/playwright.rs` 用真的 Playwright MCP 跑推荐配置，设了 `IP_TEST_PLAYWRIGHT_MCP` 才跑，CI 不跑。2026-11-24 在 macOS 上用 Google Chrome 和 0.0.86 跑通过；没让模型用过，没在 Linux 和 Docker 里跑过。
+
+---
+
 ## 修订记录
 
 | 日期 | 版本 | 改动 |
@@ -1055,3 +1068,4 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 | 2026-11-21 | v0.22 | 新增 D-37（提议，backlog E-12）：Socket Mode 的 WebSocket 按 `HTTPS_PROXY`/`NO_PROXY` 等环境变量经 HTTP 代理的 CONNECT 隧道连接，规则和 Web API 一致；支持代理 Basic 认证；D-11 加一句指向 D-37。只用本地假代理和假 Slack 测过 |
 | 2026-11-22 | v0.23 | D-35 加 iPhone 的实现（F-21 之五，提议，等工程师审查）：通知扩展解密、改写 APNs 送来的通知，“已在别处处理”撤掉旧的、换成不响铃不亮屏的；私钥放 App 和扩展共用的钥匙串分组。`/ws` 协议和中转都不变。没在真 iPhone、真 APNs 上收过 |
 | 2026-11-24 | v0.24 | 新增 D-38（提议，backlog E-13）：员工回复里提到的 `reports/<文件名>.md` 由投递器读出、作为 `Outbound::Report` 发进同一会话，Slack 用三步上传发成文件，没有 `files:write` 时把正文贴成文字；链接改写成“附件 x.md”；同一会话同一版本 7 天内只发一次；D-15 加 `files:write`，`ip check` 提醒缺这项权限。现有清理仅涉及入站记录，此次补清理过期报告条目，保留其他投递记录 |
+| 2026-11-24 | v0.25 | 新增第 10 节和 D-39（提议，backlog E-5）：浏览器走 Playwright MCP，删掉空壳 `ip-browser`；`mcp_servers` 每项加可选的 `tools` 白名单，只把单子里的工具交给员工。第 1 节“本阶段不做”里那一条指向 D-39。只用真的 Playwright MCP 在 macOS 上跑过集成测试，没让模型用过 |

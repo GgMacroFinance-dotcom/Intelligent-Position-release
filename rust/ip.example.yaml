@@ -307,6 +307,18 @@ mcp_servers:
   #   env_from: { GITHUB_PERSONAL_ACCESS_TOKEN: GITHUB_TOKEN }
   #   roles: [ops-tester]
   #   timeout_secs: 60
+  # 浏览器（Playwright MCP，要 Node.js 20 以上和 Google Chrome）：配法、风险和白名单为什么这样定见 docs/ip/browser.md。
+  # 子进程不在沙箱里，tools 白名单一定要写，挡住 browser_run_code_unsafe（在它自己的进程里执行任意代码）。
+  # browser:
+  #   command: npx
+  #   args: [-y, "@playwright/mcp@0.0.86", --headless, --isolated, --no-webmcp, --image-responses, omit,
+  #          "--blocked-origins=http://169.254.169.254;http://metadata.google.internal"]
+  #   cwd: ./data/browser/web-researcher   # 浏览器能读写的唯一目录，要先建好；相对于启动 ip serve 的目录
+  #   roles: [web-researcher]              # 一个岗位一项：同一项的员工共用一个浏览器
+  #   tools: [browser_navigate, browser_navigate_back, browser_snapshot, browser_find, browser_click, browser_type,
+  #           browser_fill_form, browser_select_option, browser_press_key, browser_hover, browser_wait_for,
+  #           browser_tabs, browser_handle_dialog, browser_close]   # 省略表示服务器的全部工具
+  #   timeout_secs: 90
   # 团队上下文系统（TCMS，见下面的 team_context）：每个岗位用自己的令牌（tcms token add --role macro）配一项，只给这一个岗位用。
   # tcms-macro:
   #   url: http://127.0.0.1:7341/mcp   # 用 docker compose 起的 tcms 服务时写 http://tcms:7341/mcp

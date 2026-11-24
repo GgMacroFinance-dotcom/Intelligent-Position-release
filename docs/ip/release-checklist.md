@@ -105,7 +105,7 @@
 
 ## 发布说明里要写的已知限制
 
-- `ip-browser` 是空壳（backlog E-5）。
+- 浏览器只能配 Playwright MCP（[browser.md](browser.md)），没让模型用过；它的子进程不在沙箱里，浏览器能连到主机能连到的地方；Docker 部署里还没有浏览器（backlog E-5、E-16）。
 - 外部引擎只有 Codex，Claude Code 引擎没实现（E-6）。
 - 质量评测：冒烟集两个宏观问题，只能发现明显退步；比较模型用的 16 题（`rust/evals/macro.yaml`）已写好，还没用真实模型跑过（B-2）。
 - Slack 只支持一个 `ip` 进程连一个应用，回复不是逐字输出（[M2 规格](m2-spec.md) Q-07、Q-08）。
