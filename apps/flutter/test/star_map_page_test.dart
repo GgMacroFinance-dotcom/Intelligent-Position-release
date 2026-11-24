@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ip_app/src/ui/shell/tokens.dart';
 import 'package:ip_app/src/ui/inbox_page.dart';
 
 import 'fake_host.dart';
@@ -58,6 +59,10 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 void main() {
+  // 星图的测试按 1280 宽的视图写的；新外壳（>= Sizes.shellMin）里暂时没有星图，测试时把外壳的门槛调高。
+  setUp(() => Sizes.shellMin = 100000);
+  tearDown(() => Sizes.shellMin = 980);
+
   testWidgets('触控板的累计平移只应用一次，捏合和滚轮都围绕指针缩放', (tester) async {
     final h = staffed();
     await h.savePaired();

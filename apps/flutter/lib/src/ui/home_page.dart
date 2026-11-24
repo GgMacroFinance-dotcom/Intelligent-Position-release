@@ -10,7 +10,6 @@ import 'inbox_page.dart';
 import 'me_page.dart';
 import 'roles_page.dart';
 import 'shell/desktop_shell.dart';
-import 'shell/sidebar.dart' show ShellView;
 import 'shell/tokens.dart';
 import 'star_map_page.dart';
 import 'tasks_page.dart';
@@ -90,27 +89,15 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // 宽窗口用照 dusk bot 做的三栏外壳（设计重构第一步）；手机和窄窗口还是下面原来的导航。
+    // 宽窗口先只有黑底和左下角“我”、连接状态（设计重构，2026-11-24 维护者定）；手机和窄窗口还是下面原来的导航。
+    final state0 = AppScope.read(context);
     if (MediaQuery.sizeOf(context).width >= Sizes.shellMin) {
+      // 点通知要去的对话记下来：窗口变窄退回原来的导航时直接打开它。
       return DesktopShell(
-        initialView: switch (_tab) {
-          kTabStars => ShellView.stars,
-          kTabChat => ShellView.chat,
-          kTabTasks => ShellView.tasks,
-          kTabRoles => ShellView.roles,
-          _ => ShellView.inbox,
-        },
-        // 外壳里换了页，记下来：窗口变窄时接着显示那一页；在对话里时窄屏直接打开那个对话。
-        onViewChanged: (v) {
-          if (!mounted) return;
-          _tab = switch (v) {
-            ShellView.inbox => kTabInbox,
-            ShellView.stars => kTabStars,
-            ShellView.chat => kTabChat,
-            ShellView.tasks => kTabTasks,
-            ShellView.roles => kTabRoles,
-          };
-          _threadOpen = v == ShellView.chat;
+        onOpenThread: (id) {
+          state0.openThread(id);
+          _tab = kTabChat;
+          _threadOpen = true;
         },
       );
     }

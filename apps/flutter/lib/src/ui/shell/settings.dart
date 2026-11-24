@@ -15,8 +15,8 @@ import 'tokens.dart';
 
 enum SettingsTab { general, notify, appearance, devices, schedules, memory, rules, about }
 
-/// 设置里的外观选择（浅色、深色、跟随系统），存在内存里；重启后跟随系统。
-final themeChoice = ValueNotifier<ThemeMode>(ThemeMode.system);
+/// 设置里的外观选择（浅色、深色、跟随系统），存在内存里。默认深色（2026-11-24 维护者定：背景默认是黑的）。
+final themeChoice = ValueNotifier<ThemeMode>(ThemeMode.dark);
 
 Future<void> showSettings(BuildContext context, {SettingsTab tab = SettingsTab.general}) {
   return showGeneralDialog<void>(

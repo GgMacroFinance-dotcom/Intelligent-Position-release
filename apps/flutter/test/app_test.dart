@@ -138,12 +138,24 @@ void main() {
     await h.stop(tester);
   });
 
-  testWidgets('宽屏上导航在左边，对话列表和对话并排', (tester) async {
+  testWidgets('宽窗口里先只有黑底和左下角“我”、连接状态；点了打开设置', (tester) async {
     final h = Harness();
     await h.savePaired();
     await h.start(tester, size: const Size(1280, 800));
-    // 宽窗口是三栏外壳（设计重构第一步）：左栏里有“对话”，点开后列表和对话并排。
     expect(find.byType(DesktopShell), findsOneWidget);
+    expect(find.byType(NavigationRail), findsNothing);
+    expect(find.text('已连接 · ip.example.com'), findsOneWidget);
+    await tester.tap(find.byTooltip('我'));
+    await tester.pumpAndSettle();
+    expect(find.text('断开并忘掉这台主机'), findsOneWidget);
+    await h.stop(tester);
+  });
+
+  testWidgets('宽屏上导航在左边，对话列表和对话并排', (tester) async {
+    final h = Harness();
+    await h.savePaired();
+    await h.start(tester, size: const Size(960, 800));
+    expect(find.byType(NavigationRail), findsOneWidget);
     await tester.tap(find.text('对话'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('最近 CPI 怎么样'));
@@ -170,13 +182,14 @@ void main() {
     await tester.enterText(find.byType(TextField), '未发出的草稿');
     final editor = tester.widget<TextField>(find.byType(TextField)).controller;
 
-    for (final width in [1280.0, 880.0, 390.0, 800.0]) {
+    // 960 是对话列表和对话并排；外壳（>= 980）里暂时没有对话，不在这里切。
+    for (final width in [960.0, 880.0, 390.0, 800.0]) {
       tester.view.physicalSize = Size(width, 760);
       await tester.pumpAndSettle();
       expect(h.state.threadId, thread);
       expect(tester.widget<TextField>(find.byType(TextField)).controller, same(editor));
       expect(editor!.text, '未发出的草稿');
-      expect(find.byType(BackButton), width == 1280 ? findsNothing : findsOneWidget);
+      expect(find.byType(BackButton), width == 960 ? findsNothing : findsOneWidget);
     }
 
     await tester.binding.handlePopRoute();
@@ -202,7 +215,7 @@ void main() {
   testWidgets('宽屏默认输入框中的草稿在收窄后仍可编辑', (tester) async {
     final h = Harness();
     await h.savePaired();
-    await h.start(tester, size: const Size(1280, 800));
+    await h.start(tester, size: const Size(960, 800));
     await tester.tap(find.text('对话'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '尚未创建对话');

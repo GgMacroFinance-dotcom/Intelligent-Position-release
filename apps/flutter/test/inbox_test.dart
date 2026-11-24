@@ -132,7 +132,7 @@ void main() {
       message('m1', req['thread_id'] as String, agent: 'coord-1', text: 'reports/2026-11-21-cpi.md'),
     ];
     await h.savePaired();
-    await h.start(tester, size: const Size(1280, 800));
+    await h.start(tester, size: const Size(960, 800));
     await tester.tap(find.text('对话'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('最近 CPI 怎么样'));

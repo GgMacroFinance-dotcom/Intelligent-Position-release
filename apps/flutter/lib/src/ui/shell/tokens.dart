@@ -187,8 +187,8 @@ abstract final class Motion {
 
 /// 尺寸。
 abstract final class Sizes {
-  /// 外壳换成三栏的最小宽度：左栏 + 对话至少 420 + 一点余量。
-  static const shellMin = 980.0;
+  /// 宽窗口换成新外壳的最小宽度。测试里可以调大，好在宽窗口里测原来的页面。
+  static double shellMin = 980.0;
   static const sidebar = 288.0;
   static const sidebarMin = 240.0;
   static const sidebarMax = 420.0;

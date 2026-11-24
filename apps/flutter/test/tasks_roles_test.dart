@@ -162,7 +162,7 @@ void main() {
     final h = withTasks();
     await h.savePaired();
     await h.start(tester, size: const Size(1280, 800));
-    // 宽窗口是三栏外壳：“我”在左栏底部，点了是设置弹窗。
+    // 宽窗口：“我”在左下角，点了是设置弹窗。
     expect(find.byType(DesktopShell), findsOneWidget);
     await tester.tap(find.byTooltip('我'));
     await tester.pumpAndSettle();
