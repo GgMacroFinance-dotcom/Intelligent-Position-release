@@ -452,7 +452,7 @@ pub enum Outbound {
 - **附几份**：一条消息最多附 3 份，多出的只改写文字、不附。读出来被截断（超过 1 MB）的不附。
 - **改写文字**：只改写地址是报告路径的 Markdown 链接，`[链接文字](reports/x.md)` 改成 ``链接文字（附件 `x.md`）``；没附上的（找不到、太大、超过 3 份）改成 ``链接文字（`reports/x.md`）``。不是链接的提法不动。改写只影响发进渠道的那份文字，对话里存的原文不变。
 - **顺序和防重发**：一条消息先发文字（条目名照旧 `message:<消息 id>`），再按顺序发各份报告，条目名 `report:<会话>:<文件名>:<正文 SHA-256 的前 16 个十六进制字符>`。这样同一会话里同一份报告、同一个版本 7 天内只发一次（沿用 D-04 每日清理任务，只清理 `channel_deliveries` 中超过 7 天的报告条目）；报告改过以后再被提到会再发一次。不加新表，`channel_deliveries.item` 的注释补上 `report:…`。
-- **失败**：和其他条目一样。`Retry` 退避重试、不越过；`Permanent` 记失败、打警告、跳过，不影响已经发出的文字。
+- **失败**：和其他条目一样。`Retry` 退避重试、不越过；`Permanent` 记失败、打警告、跳过，不影响已经发出的文字。失败记录也占着这个条目名，所以同一会话里同一版本的报告 7 天内不会再试；报告改过以后照常再发。
 - 重启后重读同一批事件时，报告按发送时磁盘上的内容读，可能比当初回复时新。接受。
 
 **3. Slack 怎么发文件（D-14 的补充）**
@@ -460,7 +460,7 @@ pub enum Outbound {
 `files.upload` 已停用，用三步上传：
 
 1. `files.getUploadURLExternal`（表单参数 `filename`、`length`）拿 `upload_url` 和 `file_id`。
-2. 把正文原样 `POST` 到 `upload_url`。这一步不带机器人令牌；`upload_url` 必须是 `https`，主机名是 `slack.com` 或其子域（测试里放行假服务器的地址）。走同一个 `reqwest` 客户端，所以代理规则照旧。
+2. 把正文原样 `POST` 到 `upload_url`。这一步不带机器人令牌，不跟随重定向；`upload_url` 必须是 `https`，主机名是 `slack.com` 或其子域，不能带用户名密码。只有在测试和 `fake` feature 下，才另外放行和 `api_url` 同源的 `127.0.0.1` 地址（发布版的 `ip` 不开 `fake`）。走同一个 `reqwest` 客户端，所以代理规则照旧。
 3. `files.completeUploadExternal`（JSON：`files: [{ id, title }]`、`channel_id`、`thread_ts`），文件出现在线程里。
 
 错误按 D-14 分可重试和永久失败。第 2 步上传成功、第 3 步失败后重试时，从第 1 步重新来（旧的 `file_id` 没完成，Slack 会自己清掉）。
