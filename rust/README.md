@@ -51,7 +51,7 @@ WebSocket 接口在 `/ws`。发一条消息：
 质量评测：`ip eval --config ip.yaml --set evals/macro-smoke.yaml` 用真实模型跑评测集里的固定问题，每次用一个新的临时数据目录。
 检查项都用程序判定：本轮正常结束、调了取数工具、写了报告、报告里的数字能在工具结果里找到（允许四舍五入、单位换算和两数之差）、
 表格里的数字带观测日期、取不到的写明“未取得”、报告小节齐全。打印每题的结果、花费、token 用量和提示词缓存命中率，`--out` 写 JSON，`--model` 换掉被测岗位的模型。
-全部通过时退出码为 0。宏观评测的第二题要用 FRED，跑之前要设 `WHICHAPI_API_KEY`（见 `../macro-mcp/README.md`）。现在的评测集只有两个宏观问题，用来发现明显退步，不足以比较模型；结果存在 `docs/ip/evals/`。
+全部通过时退出码为 0。宏观评测的第二题要用 FRED，跑之前要设 `WHICHAPI_API_KEY`（见 `../macro-mcp/README.md`）。`evals/macro-smoke.yaml` 只有两个宏观问题，用来发现明显退步，不足以比较模型。比较模型用 `evals/macro.yaml`（16 题，含冒烟的两题；backlog B-2），加 `--model openai/gpt-6-astra` 换研究员的模型；其中一题要 `SEC_USER_AGENT`，中国四题用国家统计局网站，境外能否访问没测；这套题还没用真实模型跑过。结果存在 `docs/ip/evals/`。
 
 团队上下文评测：`evals/team-context/run.sh` 起一个本机的 `tcms serve`，装上 `evals/team-context/context/` 里造的上下文仓库，用 `evals/team-context.yaml` 的 10 道题比较不接、接上、小预算三种配置。这一套题看员工在对话里的最后一条回复（`reply: true`），检查必含项（一项可以写几种说法）和不该出现的写法（`must_not_contain`）。`--echo` 换成回声假模型，不花钱，只看团队上下文进没进提示词。2026-11-23 用真实模型跑过（[记录](../docs/ip/evals/2026-11-23-team-context/README.md)）。
 
