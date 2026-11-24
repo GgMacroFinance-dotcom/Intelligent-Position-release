@@ -1176,10 +1176,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ip-browser"
-version = "0.8.0"
-
-[[package]]
 name = "ip-cli"
 version = "0.8.0"
 dependencies = [

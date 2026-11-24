@@ -136,6 +136,56 @@ async fn servers_can_be_limited_to_roles() {
     assert!(!out.ok && out.output.contains("不能用"));
 }
 
+/// `tools` 白名单：不在单子里的工具员工看不到、也调不了；harness 自己按服务器调（`call_json`）不受影响。
+#[tokio::test]
+async fn tools_can_be_limited_to_a_list() {
+    let (client, server) = tokio::io::duplex(64 * 1024);
+    tokio::spawn(async move {
+        let running = Fake.serve(server).await.unwrap();
+        let _ = running.waiting().await;
+    });
+    let hub = McpHub::default();
+    let tools = vec!["echo".to_string(), "odd.name/x".to_string(), "missing".to_string()];
+    hub.add_filtered("fake", client, Vec::new(), &tools, Duration::from_millis(500))
+        .await
+        .unwrap();
+    let role = RoleId::from("any");
+    let names: Vec<String> = hub.specs_for(&role).into_iter().map(|s| s.name).collect();
+    assert_eq!(
+        names,
+        ["mcp__fake__echo", "mcp__fake__odd_name_x"],
+        "按原名匹配，写错的名字只记警告"
+    );
+    let out = hub.call(&role, "mcp__fake__fail", "{}").await.unwrap();
+    assert!(!out.ok && out.output.contains("没有工具"), "{}", out.output);
+    let out = hub
+        .call(&role, "mcp__fake__echo", r#"{"text": "在单子里"}"#)
+        .await
+        .unwrap();
+    assert_eq!(out.output, "在单子里");
+    let e = hub
+        .call_json("fake", "fail", serde_json::Map::new(), Duration::from_millis(500))
+        .await
+        .unwrap_err();
+    assert_eq!(e, "坏了", "harness 按服务器调，不看白名单");
+    hub.shutdown().await;
+}
+
+#[test]
+fn tools_list_is_checked() {
+    let with = |tools: &[&str]| ServerConfig {
+        command: "x".into(),
+        tools: tools.iter().map(|t| t.to_string()).collect(),
+        ..Default::default()
+    };
+    assert!(with(&[]).validate().is_ok());
+    assert!(with(&["browser_navigate", "browser_snapshot"]).validate().is_ok());
+    assert!(with(&["a", "a"]).validate().unwrap_err().contains("两次"));
+    assert!(with(&[" "]).validate().unwrap_err().contains("空的"));
+    let parsed: ServerConfig = serde_json::from_value(json!({"command": "x", "tools": ["a"]})).unwrap();
+    assert_eq!(parsed.tools, ["a"]);
+}
+
 #[test]
 fn names_are_checked_and_sanitized() {
     assert!(check_name("github").is_ok());

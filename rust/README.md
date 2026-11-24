@@ -102,9 +102,8 @@ docker compose up -d --build
 | `ip-server` | `/healthz`、`/ws` 接口，`ip.yaml` 配置 | M0 |
 | `ip-cli` | 命令行 `ip`：`serve`、`bench` | M0 |
 | `ip-router` | 消息 → 岗位 → 员工 / 模型的自动路由（规则 v1） | M1 |
-| `ip-mcp` | MCP 客户端（rmcp，stdio 子进程或远程 Streamable HTTP，按岗位授权）；服务端 `/mcp` 把组织工具开放给外部引擎（M2） | M1 |
+| `ip-mcp` | MCP 客户端（rmcp，stdio 子进程或远程 Streamable HTTP，按岗位授权，可按服务器限定交出哪些工具）；浏览器也走这里（Playwright MCP，见 [`docs/ip/browser.md`](../docs/ip/browser.md)）；服务端 `/mcp` 把组织工具开放给外部引擎（M2） | M1 |
 | `ip-data` | 数据源与只读取数工具（`data_catalog`、`data_series`，同比 / 环比），按岗位授权 | M1 |
-| `ip-browser` | 浏览器自动化、截图预处理 | M2 |
 | `ip-connectors` | 外部渠道的通用接口（`Channel`、`Hub`）和测试用的假渠道、假 Slack 服务器；Slack 渠道（Socket Mode）已接入，飞书、邮件以后接在这里 | M2 |
 | `ip-engines` | 外部引擎：把岗位的每一轮交给外部编程智能体；有 Codex（`codex exec --json`）和 Claude Code（`claude -p --output-format stream-json`，D-36），组织工具经 `/mcp` 回调 | M2 |
 | `ip-relay` | 手机 App 锁屏推送的中转（独立程序 `ip-relay`）：收主机发来的 Web Push 密文，原样转给 APNs、FCM；设备推送令牌封在订阅地址里，不用数据库（D-35） | App |
@@ -169,6 +168,7 @@ docker compose up -d --build
 - [x] 运维测试岗位维护模型中转站的工具（backlog D-4 ①）：`examples/ops-gateway` 里的巡检（状态、版本、鉴权、计价漂移、模型探测、TLS、容器、服务、磁盘、备份）、New API 新版本检查、上游新模型检查、每晚用量和报错日报，岗位手册模板，`ip.example.yaml` 加了五个定时任务（默认关）。harness 自己的模型价格每月 1 号从 OpenRouter 的模型目录读，人确认后写回 `ip.yaml`（`model_prices.py`）。`drill.sh` 用假中转站、假 OpenRouter 和假主机命令跑 41 个场景，CI 跑；日报的 SQL 在 PostgreSQL 16 上核对过。没在真中转站上跑过
 - [x] 定时任务：`ip.yaml` 的 `schedules`（五段 cron + `utc_offset` 时区），到点给岗位或员工发一条消息、开一段新对话，不写 `to` 时按路由规则分派；停机期间错过的不补跑；上次运行结果存数据库；控制台任务页显示下次运行时间，可立即运行
 - [x] MCP 远程接入和 Finance Macro Data API：`mcp_servers` 可以写 `url` 连远程服务器（Streamable HTTP，令牌用 `bearer_token_env`；必须是 https，只有本机地址可以用 http；同一台主机上的私有网络写 `allow_http: true` 才能用 http，2026-11-23 加，给 docker compose 里连 `tcms` 服务用）。宏观研报岗位的美国和全球数据改为直接调 Finance Macro Data API（which-api 仓库的 `packages/macro-mcp`，12 个工具），中国数据仍用 `ip data pull` 拉的国家统计局序列。用本机启动的同一版服务（0.2.0）联调过：握手、列工具、取 FRED 实时数据都通。2026-11-11 的真实验收里，真实模型经 Render 上的测试部署取到了数（见下面宏观研报岗位的真实验收一条）
+- [x] 浏览器（backlog E-5，[`docs/ip/m2-spec.md`](../docs/ip/m2-spec.md) D-39，敏感，等工程师审）：不自研，需要的岗位在 `mcp_servers` 里配 Playwright MCP，空壳 `ip-browser` 删了。`mcp_servers` 每项可以写 `tools` 白名单，只把单子里的工具交给员工，挡住 Playwright MCP 的 `browser_run_code_unsafe` 和传本机文件的工具；推荐配法和风险见 [`docs/ip/browser.md`](../docs/ip/browser.md)。`crates/ip-mcp/tests/playwright.rs` 用真的 Playwright MCP 跑推荐配置，设了 `IP_TEST_PLAYWRIGHT_MCP` 才跑；2026-11-24 在 macOS 上（Google Chrome、`@playwright/mcp` 0.0.86）跑通过，没让模型用过，没在 Linux 和 Docker 里跑过
 - [x] Finance Macro Data API 开源（backlog C-2）：9 个美国宏观数据工具放进仓库根目录的 `macro-mcp/`（MIT，Node.js 18.17 以上，零依赖），示例配置改成本机 stdio 启动。和 WhichAPI 托管版的差别：不带 API 目录工具；FRED 不直连，经 WhichAPI 托管服务取，要 `WHICHAPI_API_KEY`；快照不带 ICE BofA 的三个面板（2026-11-16 起这些序列可以用 `get_fred_series` 取，只用模拟的回复测过）。包自己的测试进 CI（`macro-mcp` 工作流）；经 WhichAPI 取 FRED 这条路包自己的测试用的是模拟；2026-11-14 的评测里配真实模型真实跑过（[记录](../docs/ip/evals/2026-11-14-e8/README.md)）
 - [x] 中国数据进 Finance Macro Data API（backlog E-2）：`macro-mcp` 有国家统计局 4 个工具：`search_china_indicators` 按中文名搜指标，`browse_china_catalog` 浏览目录，`get_china_indicator` 取任一指标（月度、季度、年度），`get_china_series` 是 CPI、PPI、PMI、M2 的快捷入口，存的 id 失效时按名字重新找到。代码和 which-api 托管版是同一份（which-api PR #14）。2026-11-15 在境内网络上真实跑通；2026-11-21 经 Render 上的托管版从境外真实取到数（[记录](../docs/ip/acceptance-2026-11-21-hosted-nbs.md)），境外主机本机启动开源版没测
 - [x] FRED 走官方 API（backlog C-2）：WhichAPI 托管服务改调 FRED 官方 API（which-api PR #13，key 配在 Render 上）；`macro-mcp` 的 `get_fred_series` 把 `units` 转发过去，算同比用 `pc1`，岗位说明写明不要自己算。托管服务这条路在本机用真实 key 跑通过；Render 上部署后的调用 2026-11-15 直接请求过一次，取到了数（见[发布前清单](../docs/ip/release-checklist.md)）
