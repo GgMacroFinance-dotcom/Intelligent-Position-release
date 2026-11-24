@@ -163,14 +163,19 @@ async fn slack_event_acknowledged_before_exit_is_handled_after_restart() {
     let posts = fake.wait_calls("chat.postMessage", 1).await;
     assert_eq!(posts[0]["thread_ts"], json!("1.0"));
     assert_eq!(markdown(&posts[0]), "CPI 同比上涨 0.3%");
-    assert!(
-        app.runtime()
-            .store()
-            .pending_envelopes("slack", 10)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    // 回复是另一条路发出去的，信封处理完才记“已处理”，两件事谁先谁后不一定：等信封出队，不要只看一次。
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let pending = app.runtime().store().pending_envelopes("slack", 10).await.unwrap();
+        if pending.is_empty() {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "回复发出后信封一直没出队：{pending:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 
     fake.wait_connected(2).await;
     fake.event(mention);
