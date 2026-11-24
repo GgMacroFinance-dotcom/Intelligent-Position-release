@@ -13,6 +13,7 @@ import 'package:ip_app/src/push/lock_push.dart';
 import 'package:ip_app/src/qr/scanner.dart';
 import 'package:ip_app/src/storage.dart';
 import 'package:ip_app/src/ui/me_page.dart';
+import 'package:ip_app/src/ui/shell/cosmos.dart';
 
 import 'fake_host.dart';
 
@@ -50,6 +51,8 @@ class Harness {
   late final AppState state;
 
   Future<void> start(WidgetTester tester, {Size size = const Size(390, 844)}) async {
+    // 宽窗口的天穹一直在流动，pumpAndSettle 会等不完；测试里停在一帧。
+    CosmosBackdrop.animate = false;
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);

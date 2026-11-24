@@ -1,4 +1,5 @@
-// 桌面外壳（设计重构，2026-11-24 维护者定）：宽窗口里先只留黑底和左下角两个气泡：“我”和连接状态。
+// 桌面外壳（设计重构，2026-11-24 维护者定）：宽窗口里是字符画的文艺复兴天穹（cosmos.dart，将来就是星图），
+// 左下角两个气泡：“我”和连接状态。
 // 待办、星图、对话、任务、岗位这些功能以后用别的方式展示；在那之前，窗口变窄（< Sizes.shellMin）时
 // 还是原来的导航，功能都在（features.txt）。点“我”或连接状态打开设置弹窗。
 
@@ -7,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../../protocol/client.dart';
 import '../common.dart';
+import 'cosmos.dart';
 import 'settings.dart';
 import 'tokens.dart';
 
@@ -45,13 +47,18 @@ class _DesktopShellState extends State<DesktopShell> {
       child: Focus(
         autofocus: true,
         child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Align(
-            alignment: Alignment.bottomLeft,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
-              child: SizedBox(width: Sizes.sidebar - 24, child: _Footer(onSettings: _settings)),
-            ),
+          backgroundColor: Pigment.lapisDeep,
+          body: Stack(
+            children: [
+              const Positioned.fill(child: CosmosBackdrop()),
+              Align(
+                alignment: Alignment.bottomLeft,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
+                  child: SizedBox(width: Sizes.sidebar - 24, child: _Footer(onSettings: _settings)),
+                ),
+              ),
+            ],
           ),
         ),
       ),
