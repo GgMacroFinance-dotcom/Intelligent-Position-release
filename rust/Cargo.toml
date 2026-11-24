@@ -37,9 +37,13 @@ regex = { version = "1", default-features = false, features = ["std", "unicode",
 hyper-util = { version = "0.1.21", default-features = false, features = ["client-proxy"] }
 reqwest = { version = "0.13", features = ["json"] }
 ts-rs = { version = "12", features = ["serde-json-impl"] }
-# PostgreSQL（D-6，docs/ip/postgres-migration-plan.md）。不开 TLS 以外的可选功能。
+# PostgreSQL（D-6，docs/ip/postgres-migration-plan.md）。不开可选功能，TLS 走下面的 tokio-postgres-rustls。
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
 deadpool-postgres = { version = "0.14", default-features = false, features = ["rt_tokio_1"] }
+# 连外部库的 TLS（D-6 第 4 步）。和 reqwest、tokio-tungstenite 用同一个 rustls 和 aws-lc-rs。
+tokio-postgres-rustls = { version = "0.14", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rustls-native-certs = "0.8"
 # 只用来读旧的 SQLite 库，导入 PostgreSQL（`ip store import-sqlite`）。
 rusqlite = { version = "0.41", features = ["bundled"] }
 serde-saphyr = "2"

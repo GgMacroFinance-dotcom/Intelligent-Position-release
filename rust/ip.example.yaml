@@ -3,6 +3,7 @@
 
 data_dir: ./data                  # 各员工工作目录等；相对路径以本文件所在目录为准
 # 存储用 PostgreSQL。连接串（含密码）放在环境变量里，默认读 IP_DATABASE_URL，表放在 schema ip。
+# 连外部库要 TLS 时在连接串里加 ?sslmode=verify-full&sslrootcert=<CA 文件>（见 docs/ip/deploy-docker.md）。
 # database: { url_env: IP_DATABASE_URL, schema: ip, max_connections: 8 }
 # auth_token_env: IP_TOKEN        # 监听非本机地址（如 0.0.0.0）时必须设置
 # allowed_origins: [https://ip.example.com]  # 反向代理把 Host 改成上游地址时，写上控制台对外的地址

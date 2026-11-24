@@ -87,7 +87,7 @@ database:
   max_connections: 8
 ```
 
-第一版只支持不加密的连接（`NoTls`），够连同一台机器或同一个 compose 网络里的库；连 RDS、Supabase 这类要 TLS 的外部库，后面单独加（`tokio-postgres-rustls`）。
+第一版只支持不加密的连接（`NoTls`），够连同一台机器或同一个 compose 网络里的库。连 RDS、Supabase 这类要 TLS 的外部库，第 4 个 PR 加上了（`tokio-postgres-rustls`，2026-11-24）：照 libpq 在连接串里写 `sslmode`（`disable`、`prefer`、`require`、`verify-ca`、`verify-full`）和 `sslrootcert`（CA 文件或 `system`），不加配置项。各模式的含义和与 libpq 的差别见 `deploy-docker.md` 的“连外部库的 TLS”和 `ip-store/src/tls.rs`。
 
 连 Supabase 时用直连或 session 模式的连接池地址，不能用 transaction 模式（6543 端口），因为 `tokio-postgres` 用预编译语句。
 
@@ -137,7 +137,7 @@ mobius 上 I.P. 只跑运维员工小维，数据量小，停机几分钟可以�
 1. 本方案、backlog 加一条、`project-spec.md` 记下决定（只改文档，#55）。
 2. `ip-store` 换成 PostgreSQL，连同配置 `database`、docker-compose 和初始化脚本、CI 的 PostgreSQL、README 和部署文档。原计划把配置和部署单拆一个 PR，但不一起改的话 main 上用 Docker 部署会起不来，所以合在一起。删掉 `rusqlite`。
 3. `ip store import-sqlite` 和导入测试（`ip-store` 的 `import-sqlite` 功能，只有 `ip-cli` 打开，`rusqlite` 只用来读旧库）。
-4. 连外部库的 TLS。
+4. 连外部库的 TLS（2026-11-24 做了）。
 5. mobius 上执行（不是 PR，单独确认）。
 
 ## 9. 已定的（维护者 2026-11-22）
