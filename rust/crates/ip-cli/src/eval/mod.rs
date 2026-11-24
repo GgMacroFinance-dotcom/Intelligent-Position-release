@@ -571,9 +571,17 @@ mod tests {
             serde_saphyr::from_str(&std::fs::read_to_string(dir.join(name)).unwrap()).unwrap()
         };
         let (smoke, full) = (load("macro-smoke.yaml"), load("macro.yaml"));
-        assert!((10..=20).contains(&full.cases.len()), "macro.yaml 有 {} 题", full.cases.len());
+        assert!(
+            (10..=20).contains(&full.cases.len()),
+            "macro.yaml 有 {} 题",
+            full.cases.len()
+        );
         for case in &smoke.cases {
-            let same = full.cases.iter().find(|c| c.id == case.id).expect("冒烟题不在 macro.yaml 里");
+            let same = full
+                .cases
+                .iter()
+                .find(|c| c.id == case.id)
+                .expect("冒烟题不在 macro.yaml 里");
             assert_eq!(same.question, case.question, "{} 的题面两边不一样", case.id);
             assert_eq!(same.tools_any, case.tools_any, "{} 的工具要求两边不一样", case.id);
         }
