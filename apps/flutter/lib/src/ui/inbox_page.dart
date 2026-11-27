@@ -134,15 +134,26 @@ class _CompletionApprovalCardState extends State<_CompletionApprovalCard> {
           children: [
             Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
-                  decoration: BoxDecoration(color: const Color(0x22D97706), borderRadius: BorderRadius.circular(999)),
-                  child: Text(
-                    '${item.agentName} · 完成 · 待审批',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFFB45309)),
+                // 员工名长、时间带日期时手机宽度放不下：标签缩略，时间照常显示。
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                      decoration: BoxDecoration(
+                        color: const Color(0x22D97706),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '${item.agentName} · 完成 · 待审批',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFFB45309)),
+                      ),
+                    ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 Text(formatTime(item.createdAtMs), style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
               ],
             ),

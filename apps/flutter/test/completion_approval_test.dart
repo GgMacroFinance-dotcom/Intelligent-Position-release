@@ -10,6 +10,65 @@ import 'package:ip_app/src/ui/shell/inbox_widget.dart';
 import 'harness.dart';
 
 void main() {
+  testWidgets('主机的验收卡片（D-41）：解析员工、对话、任务，和待验收的任务去重；打回带上要改的', (tester) async {
+    final h = Harness();
+    h.host.handlers['list_approvals'] = (_) => [
+      {
+        'id': 'ap9',
+        'question': '验收 宏观研究员 交回的任务「写 CPI 点评」',
+        'options': [
+          {'label': '通过', 'consequence': '任务结项'},
+          {'label': '打回修改', 'consequence': '任务退回进行中'},
+        ],
+        'recommended': null,
+        'reason': '初稿',
+        'subject': {'kind': 'task_completion', 'agent_id': 'macro-1', 'task_id': 'k5', 'thread_id': 'tw'},
+        'state': {'state': 'pending'},
+        'created_at_ms': 2000,
+      },
+    ];
+    h.host.handlers['list_tasks'] = (_) => [
+      {
+        'id': 'k5',
+        'title': '写 CPI 点评',
+        'description': '',
+        'status': 'pending_approval',
+        'role': 'macro',
+        'assignee': 'macro-1',
+        'thread_id': 'tw',
+        'origin_thread_id': null,
+        'result': '初稿',
+        'depth': 1,
+        'created_by': {'kind': 'human', 'name': '张三'},
+        'created_at_ms': 1,
+        'updated_at_ms': 2000,
+        'due_ms': null,
+        'needs_approval': true,
+      },
+    ];
+    h.host.handlers['resolve_approval'] = (req) => {
+      ...(h.host.handlers['list_approvals']!(req) as List).first as Map<String, dynamic>,
+      'state': {'state': 'resolved', 'choice': req['choice'], 'by': '张三的手机', 'at_ms': 3000},
+    };
+    await h.savePaired();
+    await h.start(tester);
+    final card = h.state.approvals.single;
+    expect(card.isTaskCompletion, isTrue);
+    expect((card.subjectAgentId, card.subjectThreadId, card.subjectTaskId), ('macro-1', 'tw', 'k5'));
+    expect(h.state.tasks.single.isPendingApproval, isTrue);
+    final items = h.state.pendingCompletionApprovals;
+    expect(items.length, 1, reason: '卡片和待验收的任务是同一件事，只算一条');
+    expect(items.single.source, CompletionSource.backendApproval);
+    expect(items.single.summary, '初稿');
+
+    await h.state.decideCompletionApproval(items.single, CompletionDecision.reject, note: '加上 PPI');
+    final req = h.host.requests.lastWhere((r) => r['type'] == 'resolve_approval');
+    expect(req, containsPair('approval_id', 'ap9'));
+    expect(req, containsPair('choice', 1));
+    expect(req, containsPair('note', '加上 PPI'));
+    await h.stop(tester);
+  });
+
   test('5A 语义隔离：仅采集 task_completion 审批与 pending_approval 任务，不吞并 agent_question', () {
     final approvals = [
       const Approval(

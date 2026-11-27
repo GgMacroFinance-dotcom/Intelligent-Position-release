@@ -18,7 +18,7 @@ import '../../protocol/client.dart' show RequestError;
 import '../../protocol/models.dart';
 import '../common.dart';
 import '../report.dart' show openReport;
-import '../task_card.dart' show taskMeta, taskStatusText;
+import '../task_card.dart' show taskMeta, taskStatusLabel, taskStatusText;
 import 'completion_approval.dart';
 import 'tokens.dart';
 
@@ -1203,6 +1203,10 @@ class _GlassTaskCardState extends State<_GlassTaskCard> {
                     child: DropdownButton<String>(
                       key: ValueKey('inbox-task-status-${t.id}'),
                       value: taskStatusText.containsKey(t.status) ? t.status : null,
+                      hint: Text(
+                        taskStatusLabel(t.status),
+                        style: TextStyle(fontSize: 11.5, color: widget.light.color),
+                      ),
                       isDense: true,
                       dropdownColor: const Color(0xFFFFFCF5),
                       borderRadius: BorderRadius.circular(Radii.menu),

@@ -422,6 +422,7 @@ class Approval {
     required this.subjectKind,
     this.subjectThreadId,
     this.subjectAgentId,
+    this.subjectTaskId,
     this.resolution,
     required this.createdAtMs,
   });
@@ -432,6 +433,7 @@ class Approval {
     final (kind, threadId, agentId) = switch (a.subject) {
       w.ApprovalSubjectRouteMessage s => ('route_message', s.threadId, null),
       w.ApprovalSubjectAgentQuestion s => ('agent_question', s.threadId, s.agentId),
+      w.ApprovalSubjectTaskCompletion s => ('task_completion', s.threadId, s.agentId),
       w.ApprovalSubjectQuestion() => ('question', null, null),
       w.ApprovalSubjectUnknown s => ('${(s.json as Map?)?['kind']}', null, null),
     };
@@ -444,6 +446,10 @@ class Approval {
       subjectKind: kind,
       subjectThreadId: threadId,
       subjectAgentId: agentId,
+      subjectTaskId: switch (a.subject) {
+        w.ApprovalSubjectTaskCompletion s => s.taskId,
+        _ => null,
+      },
       resolution: switch (a.state) {
         w.ApprovalStateResolved s => Resolution(choice: s.choice.toInt(), by: s.by, atMs: s.atMs.toInt()),
         _ => null,
@@ -462,15 +468,15 @@ class Approval {
   /// 推荐理由或背景。
   final String reason;
 
-  /// `route_message`（路由拿不准）、`agent_question`（员工中途提问）或 `question`。
-  ///
-  /// TODO(backend-completion-approval) — 协议状态空缺说明：
-  /// 当前 Rust/wire.dart 尚未定义「任务已完成待审批」的独立 subjectKind（建议新增 `task_completion`
-  /// 或 `task_approval`，并附带 `agent_id`、`task_id`、`thread_id`）。
-  /// 在后端补齐之前，`ApprovalSubjectUnknown` 会透传未知 `kind`，但不会解析 `subjectAgentId`。
+  /// `route_message`（路由拿不准）、`agent_question`（员工中途提问）、`task_completion`
+  /// （员工交回了要验收的任务，m2-spec D-41：选项 0 通过、1 打回修改）或 `question`。
+  /// 这个版本不认识的种类原样留着，不解析员工和对话。
   final String subjectKind;
   final String? subjectThreadId;
   final String? subjectAgentId;
+
+  /// 验收卡片（`task_completion`）验收的任务。
+  final String? subjectTaskId;
 
   /// 选定了才有。
   final Resolution? resolution;
@@ -537,11 +543,8 @@ class Task {
   final String title;
   final String description;
 
-  /// `open`、`in_progress`、`blocked`、`done`、`cancelled`；这个版本不认识的状态是空字符串。
-  ///
-  /// TODO(backend-completion-approval) — 协议状态空缺说明：
-  /// 当前 Rust/wire.dart 的 `TaskStatus` 尚无「已完成待人工审批」枚举（建议新增 `pending_approval`
-  /// 或 `awaiting_approval`）。前端已通过 [isPendingApproval] 预留兼容，后端补齐并重新生成 wire.dart 后自动生效。
+  /// `open`、`in_progress`、`blocked`、`pending_approval`（已完成、等人验收，m2-spec D-41）、`done`、`cancelled`；
+  /// 这个版本不认识的状态是空字符串。`pending_approval` 只由主机设置：改成 done 等于验收通过，改成 in_progress 等于打回。
   final String status;
   final String? role;
   final String? assignee;

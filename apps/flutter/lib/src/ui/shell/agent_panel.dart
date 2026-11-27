@@ -18,7 +18,7 @@ import '../chat_page.dart' show ThreadView;
 import '../common.dart';
 import '../report.dart' show openReport;
 import '../roles_page.dart' show usd;
-import '../task_card.dart' show taskStatusText;
+import '../task_card.dart' show taskStatusLabel, taskStatusText;
 import '../tasks_page.dart' show showNewTask;
 import 'agent_sheet.dart';
 import 'completion_approval.dart';
@@ -1518,6 +1518,7 @@ class _DoingState extends State<_Doing> {
                 child: DropdownButton<String>(
                   key: ValueKey('agent-task-status-${t.id}'),
                   value: taskStatusText.containsKey(t.status) ? t.status : null,
+                  hint: Text(taskStatusLabel(t.status), style: TextStyle(fontSize: 11.5, color: c)),
                   isDense: true,
                   dropdownColor: s.menu,
                   borderRadius: BorderRadius.circular(Radii.menu),

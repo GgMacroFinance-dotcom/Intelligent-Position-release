@@ -323,8 +323,9 @@ extension IpRequests on IpClient {
 
   Future<List<Task>> listTasks({int limit = 200}) => _list(w.RequestListTasks(limit: limit), Task.fromJson);
 
-  Future<Approval> resolveApproval(String approvalId, int choice) async =>
-      Approval.fromJson(await _object(w.RequestResolveApproval(approvalId: approvalId, choice: choice)));
+  /// 选定审批卡片的一个选项。[note] 是附的话：验收卡片打回时是要改什么，主机写进负责人的对话（m2-spec D-41）。
+  Future<Approval> resolveApproval(String approvalId, int choice, {String? note}) async =>
+      Approval.fromJson(await _object(w.RequestResolveApproval(approvalId: approvalId, choice: choice, note: note)));
 
   /// 改任务的状态（`open`、`in_progress`、`blocked`、`done`、`cancelled`），回复改完的任务。
   /// 用设备令牌连上时主机按设备名署名。
@@ -340,12 +341,26 @@ extension IpRequests on IpClient {
 
   /// 新建任务。指定负责人时主机另开一个对话把任务交给他；都不指定时留给人分配。
   /// 用设备令牌连上时主机按设备名署名。
-  Future<Task> createTask(String title, {String? description, String? assignee, String? role, int? dueMs}) async =>
-      Task.fromJson(
-        await _object(
-          w.RequestCreateTask(title: title, description: description, assignee: assignee, role: role, dueMs: dueMs),
-        ),
-      );
+  /// 新建任务。[needsApproval] 是做完要人验收（m2-spec D-41）；负责人的岗位配了 `approve_completion` 时主机也会打开。
+  Future<Task> createTask(
+    String title, {
+    String? description,
+    String? assignee,
+    String? role,
+    int? dueMs,
+    bool needsApproval = false,
+  }) async => Task.fromJson(
+    await _object(
+      w.RequestCreateTask(
+        title: title,
+        description: description,
+        assignee: assignee,
+        role: role,
+        dueMs: dueMs,
+        needsApproval: needsApproval ? true : null,
+      ),
+    ),
+  );
 
   // ---------- 路由规则（F-18；看和试一试日常权限也能用，改要“管理”） ----------
 
