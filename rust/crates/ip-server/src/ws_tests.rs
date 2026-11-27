@@ -67,6 +67,7 @@ async fn start_with_schedules(
         },
         budget_per_day_usd: None,
         coordinator: false,
+        approve_completion: false,
     };
     let runtime = Runtime::new(store, models, RuntimeConfig::default());
     let agent = Agent {
@@ -1640,6 +1641,7 @@ async fn memory_background_task_distills_cooled_threads() {
         },
         budget_per_day_usd: None,
         coordinator: false,
+        approve_completion: false,
     };
     // 闲置时间设成 0，对话一结束就算凉下来，测试不用等。
     let config = RuntimeConfig {
@@ -1950,4 +1952,143 @@ async fn orbit_pins_are_shared_validated_and_kept() {
     assert_eq!(r["data"], json!([]), "{r}");
     let event = wait_event(&mut admin, "orbit_pins_changed").await;
     assert_eq!(event["pins"], json!([]));
+}
+
+/// 等一个满足 `pred` 的事件：先看请求途中已经收到的 `seen`，没有再接着读。
+async fn wait_for(ws: &mut Ws, seen: &[Value], pred: impl Fn(&Value) -> bool) -> Value {
+    if let Some(v) = seen.iter().find(|v| v["type"] == "event" && pred(&v["event"])) {
+        return v["event"].clone();
+    }
+    loop {
+        let v = next_json(ws).await;
+        if v["type"] == "event" && pred(&v["event"]) {
+            return v["event"].clone();
+        }
+    }
+}
+
+/// 要验收的任务（D-41）经 `/ws`：建任务时勾上；员工交回后推验收卡片；打回带意见写进负责人的对话；
+/// 任务页把等验收的任务改成 done 等于在卡片上选通过，通过后解除这位员工的轨道固定；别的改法被拒。
+#[tokio::test]
+async fn reviewed_tasks_over_websocket() {
+    let s = start_scripted(
+        None,
+        None,
+        vec![
+            ScriptedTurn::Text("收到，在写".into()),
+            ScriptedTurn::Text("补上了 PPI".into()),
+        ],
+    )
+    .await;
+    let mut ws = connect(s.addr, "").await.unwrap();
+    let (r, seen) = request(
+        &mut ws,
+        1,
+        json!({"type": "create_task", "title": "写 CPI 点评", "assignee": "macro-1", "needs_approval": true, "author": "张三"}),
+    )
+    .await;
+    assert_eq!(r["data"]["needs_approval"], true, "{r}");
+    let task_id: ip_core::TaskId = r["data"]["id"].as_str().unwrap().into();
+    let work_thread = r["data"]["thread_id"].as_str().unwrap().to_string();
+    wait_for(&mut ws, &seen, |e| e["type"] == "turn_finished").await;
+    let (r, _) = request(
+        &mut ws,
+        2,
+        json!({"type": "set_orbit_pins", "changes": [{"agent_id": "macro-1", "orbit_track": 0}]}),
+    )
+    .await;
+    assert_eq!(r["data"][0]["orbit_track"], 0, "{r}");
+
+    // 员工交回（真实运行里由它调用 update_task 工具）。
+    let w1 = ip_core::Author::Agent {
+        agent_id: "macro-1".into(),
+    };
+    let submit = |result: &str| ip_runtime::TaskUpdate {
+        status: Some(ip_core::TaskStatus::Done),
+        result: Some(result.into()),
+        ..Default::default()
+    };
+    s.app
+        .runtime()
+        .update_task(&task_id, submit("初稿"), &w1)
+        .await
+        .unwrap();
+    let pending_card = |e: &Value| e["type"] == "approval_changed" && e["approval"]["state"]["state"] == "pending";
+    let card = wait_for(&mut ws, &[], pending_card).await["approval"].clone();
+    assert_eq!(card["subject"]["kind"], "task_completion", "{card}");
+    assert_eq!(card["subject"]["agent_id"], "macro-1");
+    assert_eq!(card["subject"]["thread_id"], work_thread.as_str());
+    assert_eq!(card["reason"], "初稿");
+
+    // 等验收时任务页取消不了。
+    let (r, _) = request(
+        &mut ws,
+        3,
+        json!({"type": "update_task", "task_id": task_id.as_str(), "status": "cancelled"}),
+    )
+    .await;
+    assert_eq!(r["ok"], false, "{r}");
+
+    // 打回，带上要改的。
+    let (r, seen) = request(
+        &mut ws,
+        4,
+        json!({"type": "resolve_approval", "approval_id": card["id"], "choice": 1, "note": "加上 PPI", "author": "张三"}),
+    )
+    .await;
+    assert_eq!(r["ok"], true, "{r}");
+    wait_for(&mut ws, &seen, |e| e["type"] == "turn_finished").await;
+    let (h, _) = request(&mut ws, 5, json!({"type": "history", "thread_id": work_thread})).await;
+    let texts: Vec<&str> = h["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["body"]["text"].as_str())
+        .collect();
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains("张三 验收没通过") && t.contains("要改的：加上 PPI")),
+        "{texts:?}"
+    );
+    assert_eq!(texts.last(), Some(&"补上了 PPI"), "打回后负责人被叫回来接着改");
+    let (t, _) = request(&mut ws, 6, json!({"type": "list_tasks"})).await;
+    assert_eq!(t["data"][0]["status"], "in_progress");
+    let (p, _) = request(&mut ws, 7, json!({"type": "list_orbit_pins"})).await;
+    assert_eq!(p["data"].as_array().unwrap().len(), 1, "打回不解除轨道固定");
+
+    // 再交回；任务页改成 done 等于在新卡片上选通过。
+    s.app
+        .runtime()
+        .update_task(&task_id, submit("初稿 + PPI"), &w1)
+        .await
+        .unwrap();
+    let second =
+        wait_for(&mut ws, &[], |e| pending_card(e) && e["approval"]["id"] != card["id"]).await["approval"].clone();
+    let (r, seen) = request(
+        &mut ws,
+        8,
+        json!({"type": "update_task", "task_id": task_id.as_str(), "status": "done", "author": "李四"}),
+    )
+    .await;
+    assert_eq!(r["data"]["status"], "done", "{r}");
+    wait_for(&mut ws, &seen, |e| {
+        e["type"] == "orbit_pins_changed" && e["pins"] == json!([])
+    })
+    .await;
+    let (p, _) = request(&mut ws, 11, json!({"type": "list_orbit_pins"})).await;
+    assert_eq!(p["data"], json!([]), "通过后解除轨道固定");
+    let (a, _) = request(&mut ws, 9, json!({"type": "list_approvals"})).await;
+    let resolved = a["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["id"] == second["id"])
+        .unwrap()
+        .clone();
+    assert_eq!(resolved["state"]["state"], "resolved", "{resolved}");
+    assert_eq!(resolved["state"]["choice"], 0);
+    assert_eq!(resolved["state"]["by"], "李四");
+    let (a, _) = request(&mut ws, 10, json!({"type": "list_approvals", "pending_only": true})).await;
+    assert_eq!(a["data"], json!([]));
 }

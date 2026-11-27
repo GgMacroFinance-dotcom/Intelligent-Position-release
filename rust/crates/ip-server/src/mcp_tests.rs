@@ -504,6 +504,7 @@ async fn agent_gets_tools_of_a_server_that_reconnects() {
         },
         budget_per_day_usd: None,
         coordinator: false,
+        approve_completion: false,
     };
     rt.spawn_agent(ip_runtime::AgentSetup {
         agent: ip_core::Agent {

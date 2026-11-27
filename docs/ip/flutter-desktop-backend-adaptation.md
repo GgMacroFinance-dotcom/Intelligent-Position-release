@@ -3,7 +3,7 @@
 > 范围：本轮 `design/dusk-shell` 宽屏桌面外壳重构（全部前端改动位于 `apps/flutter/`，不涉及 `rust/` 与 `apps/desktop/`）。
 > 目的：汇总新加入的桌面端交互功能、代码里预留的 `TODO(backend-*)` / `BACKEND / WIRE GAP` 接口位置，以及全库扫描发现的隐性协议缺口，便于后端按需排期适配。
 >
-> **进展（2026-11-27）**：第一批（第 5、9、1 项）主机端已做，App 也接上了，规格见 `docs/ip/m2-spec.md` D-40，排期跟踪在 `docs/ip/backlog.md` F-23。下面各项的“当前前端状态”是 PR #74 合并时的样子，已做的三项在总览表里标了。
+> **进展（2026-11-27）**：第一批（第 5、9、1 项）主机端已做，App 也接上了，规格见 `docs/ip/m2-spec.md` D-40；第 2 项也已做，规格见 D-41（任务和审批卡片的字段和这里建议的一致：`pending_approval`、`task_completion`，choice 0 通过、1 打回修改）。排期跟踪在 `docs/ip/backlog.md` F-23。第 3、7 项定了改动存数据库、不写回 ip.yaml。下面各项的“当前前端状态”是 PR #74 合并时的样子，已做的在总览表里标了。
 >
 > **联调共通提示**：凡修改 `rust/crates/ip-core` 或 `rust/crates/ip-server/src/protocol.rs` 中的结构体或枚举，请同步重新生成 `apps/flutter/lib/src/protocol/wire.dart`；`apps/flutter/lib/src/protocol/models.dart` 会在编译期自动校验字段对齐。
 
@@ -14,7 +14,7 @@
 | 编号 | 类别 | 功能 / 问题点 | 当前前端状态 | 建议后端落点 |
 |---|---|---|---|---|
 | **1**（已做，D-40） | 本轮新功能（显式预留） | 三条固定轨道手动拖拽落位 & 满环级联挤出同步 | 内存闭环（跨 980px 不丢），预留批量同步钩子 | `ip-core/src/org.rs`、`ip-server/src/protocol.rs` & `ws.rs` |
-| **2** | 本轮新功能（显式预留） | 任务「完成 · 待审批」离轨停泊 & 双向审批回流 | 已兼容真实协议枚举；当前本地演示兜底 | `ip-core/src/task.rs`、`approval.rs`、`ip-runtime`、`ip-server` + 重生成 `wire.dart` |
+| **2**（已做，D-41） | 本轮新功能（显式预留） | 任务「完成 · 待审批」离轨停泊 & 双向审批回流 | 已兼容真实协议枚举；当前本地演示兜底 | `ip-core/src/task.rs`、`approval.rs`、`ip-runtime`、`ip-server` + 重生成 `wire.dart` |
 | **3** | 本轮新功能（显式预留） | 右下角 `+ 新建 Bot` 动态增删岗位/员工 & 星球形态持久化 | 本地 `AppState._localBots` 闭环，已备 Wire 载荷 | `ip-core/src/org.rs`、`ip-runtime/src/lib.rs`、`ip-server/src/config.rs` & `protocol.rs` & `ws.rs` |
 | **4** | 本轮新功能（显式预留） | 星球滚轮/左栏调重要度 → AI 资源分配传导 & 冲突先后反馈 | 仅开放缩放手感 + 顺位计算 + 空端口，后端暂不执行 | `ip-core/src/org.rs`、`ip-runtime/src/agent.rs` & `budget.rs`、`ip-server/src/protocol.rs` |
 | **5**（已做，D-40） | 全库扫出（隐性协议缺口） | 对话归属员工字段缺失（重启后左栏漏历史闲聊） | 仅靠内存 `threadAgent` + 任务/审批表拼凑 | `ip-core` / `ip-server` `ThreadSummary` & `list_threads` |

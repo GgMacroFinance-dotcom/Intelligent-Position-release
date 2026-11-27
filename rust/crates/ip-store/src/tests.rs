@@ -149,6 +149,7 @@ fn task(id: &str, status: ip_core::TaskStatus, updated: i64) -> ip_core::Task {
         created_at_ms: 1,
         updated_at_ms: updated,
         due_ms: None,
+        needs_approval: false,
     }
 }
 

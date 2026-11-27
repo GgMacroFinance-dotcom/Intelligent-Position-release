@@ -93,8 +93,51 @@ void main() {
     expect(req, containsPair('assignee', 'macro-1'));
     expect(req.containsKey('due_ms'), isFalse);
     expect(req.containsKey('author'), isFalse);
+    expect(req.containsKey('needs_approval'), isFalse, reason: '没勾“做完要我验收”不带这一项');
     expect(find.text('已新建任务：写 10 月 CPI 点评'), findsOneWidget);
     expect(find.text('未完成（3）'), findsOneWidget);
+    await h.stop(tester);
+  });
+
+  testWidgets('新建任务：指定了负责人才能勾“做完要我验收”（D-41）', (tester) async {
+    final h = withTasks();
+    await h.savePaired();
+    await h.start(tester);
+    await tester.tap(find.text('任务'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新建任务'));
+    await tester.pumpAndSettle();
+    expect(find.text('做完要我验收'), findsNothing);
+    await tester.enterText(find.widgetWithText(TextField, '标题'), '写 CPI 点评');
+    await tester.tap(find.text('暂不指定负责人'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('宏观研究员（macro）').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('new-task-needs-approval')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '新建'));
+    await tester.pumpAndSettle();
+    final req = h.host.requests.lastWhere((r) => r['type'] == 'create_task');
+    expect(req, containsPair('needs_approval', true));
+    await h.stop(tester);
+  });
+
+  testWidgets('等验收的任务显示“待验收”，选“已完成”交给主机当作验收通过', (tester) async {
+    final h = withTasks();
+    h.host.handlers['list_tasks'] = (_) => [task('k5', 'CPI 点评', status: 'pending_approval', result: '初稿')];
+    h.host.handlers['update_task'] = (req) => task('k5', 'CPI 点评', status: req['status'] as String, result: '初稿');
+    await h.savePaired();
+    await h.start(tester);
+    await tester.tap(find.text('任务'));
+    await tester.pumpAndSettle();
+    expect(find.text('待验收'), findsOneWidget);
+    await tester.tap(find.text('待验收'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('已完成').last);
+    await tester.pumpAndSettle();
+    final req = h.host.requests.lastWhere((r) => r['type'] == 'update_task');
+    expect(req, containsPair('task_id', 'k5'));
+    expect(req, containsPair('status', 'done'));
     await h.stop(tester);
   });
 

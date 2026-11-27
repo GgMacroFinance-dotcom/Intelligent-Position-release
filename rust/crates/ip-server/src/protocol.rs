@@ -108,11 +108,16 @@ pub enum Request {
         #[serde(default)]
         #[ts(optional, type = "number")]
         due_ms: Option<i64>,
+        /// 做完要人验收（D-41）。负责人的岗位配了 `approve_completion` 时不给也要。
+        #[serde(default)]
+        #[ts(optional)]
+        needs_approval: Option<bool>,
         #[serde(default)]
         #[ts(optional)]
         author: Option<String>,
     },
-    /// 改任务的状态或负责人，回复 `Task`。
+    /// 改任务的状态或负责人，回复 `Task`。等验收的任务（`pending_approval`）只能改成 done（通过）
+    /// 或 in_progress（打回），等于在它的验收卡片上选（D-41）。
     UpdateTask {
         task_id: TaskId,
         #[serde(default)]
@@ -142,6 +147,10 @@ pub enum Request {
     ResolveApproval {
         approval_id: ApprovalId,
         choice: u32,
+        /// 选的时候附的话。验收卡片打回时是要改什么，写进负责人的对话（D-41）；别的卡片不用它。
+        #[serde(default)]
+        #[ts(optional)]
+        note: Option<String>,
         #[serde(default)]
         #[ts(optional)]
         author: Option<String>,

@@ -152,6 +152,7 @@ pub async fn call(shared: &Shared, me: &Agent, thread: &ThreadId, name: &str, ar
                     thread_id: None,
                     origin_thread_id: Some(thread.clone()),
                     due_ms: a.due_ms,
+                    needs_approval: false,
                 };
                 let by = Author::Agent {
                     agent_id: me.id.clone(),
@@ -181,7 +182,13 @@ pub async fn call(shared: &Shared, me: &Agent, thread: &ThreadId, name: &str, ar
                     shared
                         .update_task(&a.task_id, update, &by)
                         .await
-                        .map(|t| format!("任务 {} 现在是 {}", t.id, status_label(t.status))),
+                        .map(|t| match t.status {
+                            TaskStatus::PendingApproval => format!(
+                                "任务 {} 已交给人验收。人通过后结论会回报给派活的人，打回时会叫你接着改；现在结束这一轮。",
+                                t.id
+                            ),
+                            s => format!("任务 {} 现在是 {}", t.id, status_label(s)),
+                        }),
                 )
             }
             Err(e) => bad_args(name, e),
@@ -257,6 +264,7 @@ fn status_label(s: TaskStatus) -> &'static str {
         TaskStatus::Open => "待开始",
         TaskStatus::InProgress => "进行中",
         TaskStatus::Blocked => "受阻",
+        TaskStatus::PendingApproval => "已完成、等人验收",
         TaskStatus::Done => "已完成",
         TaskStatus::Cancelled => "已取消",
     }

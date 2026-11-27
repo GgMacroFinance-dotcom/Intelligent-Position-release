@@ -18,7 +18,7 @@ import '../chat_page.dart' show ThreadView;
 import '../common.dart';
 import '../report.dart' show openReport;
 import '../roles_page.dart' show usd;
-import '../task_card.dart' show taskStatusText;
+import '../task_card.dart' show taskStatusLabel, taskStatusText;
 import '../tasks_page.dart' show showNewTask;
 import 'agent_sheet.dart';
 import 'completion_approval.dart';
@@ -27,6 +27,7 @@ import 'orbit.dart';
 import 'planet_importance.dart';
 import 'settings.dart';
 import 'tokens.dart';
+import '../rework_note.dart';
 
 /// 这位员工的一个对话（左栏的一行）。
 typedef AgentThread = ({String threadId, String title, int atMs, int count, bool waiting});
@@ -335,9 +336,16 @@ class _CompletionApprovalBannerState extends State<_CompletionApprovalBanner> {
   CompletionDecision? _busy;
 
   Future<void> _decide(CompletionDecision decision) async {
+    String? note;
+    if (decision == CompletionDecision.reject) {
+      // 先问要改什么；取消就不打回。
+      note = await askReworkNote(context, widget.item);
+      if (note == null || !mounted) return;
+    }
     setState(() => _busy = decision);
     try {
-      await AppScope.read(context).decideCompletionApproval(widget.item, decision);
+      await AppScope.read(context)
+          .decideCompletionApproval(widget.item, decision, note: (note?.isEmpty ?? true) ? null : note);
     } on RequestError catch (e) {
       if (mounted) showError(context, '审批操作失败：$e');
     } finally {
@@ -1518,6 +1526,7 @@ class _DoingState extends State<_Doing> {
                 child: DropdownButton<String>(
                   key: ValueKey('agent-task-status-${t.id}'),
                   value: taskStatusText.containsKey(t.status) ? t.status : null,
+                  hint: Text(taskStatusLabel(t.status), style: TextStyle(fontSize: 11.5, color: c)),
                   isDense: true,
                   dropdownColor: s.menu,
                   borderRadius: BorderRadius.circular(Radii.menu),

@@ -22,4 +22,8 @@ budget_per_day_usd: number | null,
  * 协调层岗位：接没有明确归属的需求，拆成任务派给执行岗位（App 星图中心的太阳）。最多一个岗位标这一项。
  * 只是标记，不改这个岗位的工具和提示词。是 false 时不出现在协议里，旧主机也一样没有。
  */
-coordinator?: boolean, };
+coordinator?: boolean, 
+/**
+ * 派给这个岗位员工的任务，做完都要人验收（`docs/ip/m2-spec.md` D-41）。是 false 时不出现在协议里。
+ */
+approve_completion?: boolean, };

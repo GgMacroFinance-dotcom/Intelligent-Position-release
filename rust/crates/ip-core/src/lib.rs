@@ -10,7 +10,9 @@ mod work;
 pub use ids::{AgentId, ApprovalId, MessageId, RoleId, TaskId, ThreadId};
 pub use message::{Author, Body, Message, Notice, Via};
 pub use org::{Agent, ModelSlot, ORBIT_TRACKS, OrbitPin, OrgError, OrgSpec, Role};
-pub use work::{Approval, ApprovalOption, ApprovalState, ApprovalSubject, Task, TaskStatus};
+pub use work::{
+    Approval, ApprovalOption, ApprovalState, ApprovalSubject, COMPLETION_APPROVE, COMPLETION_REWORK, Task, TaskStatus,
+};
 
 /// 当前 Unix 时间，毫秒。
 pub fn now_ms() -> i64 {

@@ -109,10 +109,8 @@ class AppState extends ChangeNotifier {
 
   // ---------- 任务完成待审批（1C + 2 + 3B + 4 + 5A，数据同源单一真相） ----------
   //
-  // TODO(backend-completion-approval) — 后端状态空缺说明：
-  // 当前主机协议（protocol/models.dart + wire.dart）尚未提供 `Task.status = pending_approval`
-  // 或 `Approval.subjectKind = task_completion`。
-  // 此处通过 [pendingCompletionApprovals] 统一聚合未来后端下发项与前端演示模拟项 [_localCompletionApprovals]，
+  // 主机的协议见 m2-spec D-41：`Task.status = pending_approval` 和 `Approval.subjectKind = task_completion`。
+  // 此处通过 [pendingCompletionApprovals] 统一聚合主机下发项与前端演示模拟项 [_localCompletionApprovals]，
   // 让左中下待审批停泊区、左上角红绿灯待办与员工三栏工作大窗共享同一份状态源，任一入口审批后三处立即同步。
   final _localCompletionApprovals = <CompletionApproval>[];
 
@@ -372,7 +370,7 @@ class AppState extends ChangeNotifier {
     return regularApprovals + blockedTasks.length + pendingCompletionApprovals.length;
   }
 
-  /// TODO(backend-completion-approval)：在后端补齐「完成待审批」协议前，触发一条本地模拟记录供实机联调与演示。
+  /// 触发一条本地模拟的「完成待审批」记录，供没连主机时演示。
   /// 若该员工已存在本地待审批项则忽略重复添加。
   void triggerDemoCompletionApproval({
     required String agentId,
@@ -403,19 +401,18 @@ class AppState extends ChangeNotifier {
   /// 规则 2：
   /// - [CompletionDecision.approve]：记录通过时间（桌面外壳据此自动解除该员工的手动轨道 pin 并飞回自动排轨）；
   /// - [CompletionDecision.reject]：标记回活跃修改态（星球飞回中环/内环继续处理）。
-  Future<void> decideCompletionApproval(CompletionApproval item, CompletionDecision decision) async {
+  /// [note] 是附的话：打回时写要改什么，主机写进负责人的对话，叫他接着改。
+  Future<void> decideCompletionApproval(CompletionApproval item, CompletionDecision decision, {String? note}) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     switch (item.source) {
       case CompletionSource.backendApproval:
-        // TODO(backend-completion-approval)：后端新增 `task_completion` Approval 后，
-        // 约定 choice 0 = 通过（后端联动将关联任务置 done），choice 1 = 打回修改（任务置回 in_progress）。
+        // 主机的验收卡片（m2-spec D-41）：choice 0 = 通过（任务结项，主机解除轨道固定），1 = 打回修改（任务退回进行中）。
         final approval = item.approval;
         if (approval != null) {
-          await resolveApproval(approval, decision == CompletionDecision.approve ? 0 : 1);
+          await resolveApproval(approval, decision == CompletionDecision.approve ? 0 : 1, note: note);
         }
       case CompletionSource.backendTask:
-        // TODO(backend-completion-approval)：后端新增 `pending_approval` TaskStatus 后，
-        // 通过 -> `done`，打回 -> `in_progress`。
+        // 只看到了 `pending_approval` 的任务、没有卡片：改成 done / in_progress，主机当作在卡片上选。
         final task = item.task;
         if (task != null) {
           await updateTask(task, decision == CompletionDecision.approve ? 'done' : 'in_progress');
@@ -796,10 +793,10 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> resolveApproval(Approval a, int choice) async {
+  Future<void> resolveApproval(Approval a, int choice, {String? note}) async {
     final c = _client;
     if (c == null) throw const RequestError('尚未连接');
-    _upsertApproval(await c.resolveApproval(a.id, choice));
+    _upsertApproval(await c.resolveApproval(a.id, choice, note: note));
     notifyListeners();
   }
 
@@ -808,10 +805,22 @@ class AppState extends ChangeNotifier {
   }
 
   /// 新建任务，指定负责人时主机另开一个对话交给他。
-  Future<Task> createTask(String title, {String? description, String? assignee, int? dueMs}) async {
+  Future<Task> createTask(
+    String title, {
+    String? description,
+    String? assignee,
+    int? dueMs,
+    bool needsApproval = false,
+  }) async {
     final c = _client;
     if (c == null) throw const RequestError('尚未连接');
-    final t = await c.createTask(title, description: description, assignee: assignee, dueMs: dueMs);
+    final t = await c.createTask(
+      title,
+      description: description,
+      assignee: assignee,
+      dueMs: dueMs,
+      needsApproval: needsApproval,
+    );
     tasks = [t, ...tasks.where((x) => x.id != t.id)];
     notifyListeners();
     return t;

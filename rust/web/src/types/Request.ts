@@ -15,11 +15,19 @@ export type Request = { "type": "list_roles" } | { "type": "list_agents" } | { "
 /**
  * 只要未完成的。
  */
-open_only?: boolean, limit?: number, } | { "type": "create_task", title: string, description?: string, role?: RoleId, assignee?: AgentId, thread_id?: ThreadId, due_ms?: number, author?: string, } | { "type": "update_task", task_id: TaskId, status?: TaskStatus, assignee?: AgentId, 
+open_only?: boolean, limit?: number, } | { "type": "create_task", title: string, description?: string, role?: RoleId, assignee?: AgentId, thread_id?: ThreadId, due_ms?: number, 
+/**
+ * 做完要人验收（D-41）。负责人的岗位配了 `approve_completion` 时不给也要。
+ */
+needs_approval?: boolean, author?: string, } | { "type": "update_task", task_id: TaskId, status?: TaskStatus, assignee?: AgentId, 
 /**
  * 交回的结论或受阻原因。
  */
-result?: string, author?: string, } | { "type": "list_approvals", pending_only?: boolean, limit?: number, } | { "type": "resolve_approval", approval_id: ApprovalId, choice: number, author?: string, } | { "type": "get_memory", role_id: RoleId, } | { "type": "save_memory_text", role_id: RoleId, layer: MemoryLayer, text: string, } | { "type": "forget_thread_memory", role_id: RoleId, thread_id: ThreadId, } | { "type": "delete_memory_note", role_id: RoleId, note_id: number, } | { "type": "clear_memory", role_id: RoleId, } | { "type": "list_memory_off_threads" } | { "type": "set_thread_memory", thread_id: ThreadId, enabled: boolean, } | { "type": "list_reports", agent_id?: AgentId, limit?: number, } | { "type": "read_report", agent_id: AgentId, path: string, } | { "type": "who_am_i" } | { "type": "list_devices" } | { "type": "create_pairing", name: string, link_base?: string, } | { "type": "rename_device", device_id: string, name: string, } | { "type": "set_device_scope", device_id: string, scope: Scope, } | { "type": "revoke_device", device_id: string, } | { "type": "get_notify_settings" } | { "type": "set_notify_settings", settings: NotifySettings, } | { "type": "push_key" } | { "type": "subscribe_push", endpoint: string, p256dh: string, auth: string, } | { "type": "unsubscribe_push", endpoint: string, } | { "type": "presence", active: boolean, } | { "type": "list_orbit_pins" } | { "type": "set_orbit_pins", changes: Array<OrbitPinChange>, } | { "type": "send", 
+result?: string, author?: string, } | { "type": "list_approvals", pending_only?: boolean, limit?: number, } | { "type": "resolve_approval", approval_id: ApprovalId, choice: number, 
+/**
+ * 选的时候附的话。验收卡片打回时是要改什么，写进负责人的对话（D-41）；别的卡片不用它。
+ */
+note?: string, author?: string, } | { "type": "get_memory", role_id: RoleId, } | { "type": "save_memory_text", role_id: RoleId, layer: MemoryLayer, text: string, } | { "type": "forget_thread_memory", role_id: RoleId, thread_id: ThreadId, } | { "type": "delete_memory_note", role_id: RoleId, note_id: number, } | { "type": "clear_memory", role_id: RoleId, } | { "type": "list_memory_off_threads" } | { "type": "set_thread_memory", thread_id: ThreadId, enabled: boolean, } | { "type": "list_reports", agent_id?: AgentId, limit?: number, } | { "type": "read_report", agent_id: AgentId, path: string, } | { "type": "who_am_i" } | { "type": "list_devices" } | { "type": "create_pairing", name: string, link_base?: string, } | { "type": "rename_device", device_id: string, name: string, } | { "type": "set_device_scope", device_id: string, scope: Scope, } | { "type": "revoke_device", device_id: string, } | { "type": "get_notify_settings" } | { "type": "set_notify_settings", settings: NotifySettings, } | { "type": "push_key" } | { "type": "subscribe_push", endpoint: string, p256dh: string, auth: string, } | { "type": "unsubscribe_push", endpoint: string, } | { "type": "presence", active: boolean, } | { "type": "list_orbit_pins" } | { "type": "set_orbit_pins", changes: Array<OrbitPinChange>, } | { "type": "send", 
 /**
  * 省略时由路由规则决定。
  */

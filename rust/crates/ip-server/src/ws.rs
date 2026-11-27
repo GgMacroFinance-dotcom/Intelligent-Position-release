@@ -417,6 +417,7 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
             assignee,
             thread_id,
             due_ms,
+            needs_approval,
             author,
         } => {
             let new = ip_runtime::NewTask {
@@ -428,6 +429,7 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
                 thread_id: None,
                 origin_thread_id: thread_id,
                 due_ms,
+                needs_approval: needs_approval.unwrap_or(false),
             };
             to_json(serde_json::to_value(
                 work::create_task(app, new, author.unwrap_or_else(|| "用户".into())).await?,
@@ -538,11 +540,12 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
         Request::ResolveApproval {
             approval_id,
             choice,
+            note,
             author,
         } => {
             let by = author.unwrap_or_else(|| "用户".into());
             to_json(serde_json::to_value(
-                work::resolve_approval(app, &approval_id, choice, by).await?,
+                work::resolve_approval(app, &approval_id, choice, by, note.as_deref()).await?,
             ))
         }
     }

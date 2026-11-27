@@ -26,4 +26,9 @@ result: string | null,
 /**
  * 委派层级：人或顶层对话派的是 1，员工在执行对话里再往下派加 1。用来挡住无限转派。
  */
-depth: number, created_by: Author, created_at_ms: number, updated_at_ms: number, due_ms: number | null, };
+depth: number, created_by: Author, created_at_ms: number, updated_at_ms: number, due_ms: number | null, 
+/**
+ * 做完要人验收：负责人交回 done 时先变成 pending_approval，发一张验收卡片，人通过才结项。
+ * 建任务时人勾上，或负责人的岗位配了 `approve_completion`。是 false 时协议里不带这一项。
+ */
+needs_approval?: boolean, };

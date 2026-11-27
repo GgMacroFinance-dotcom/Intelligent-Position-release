@@ -35,6 +35,10 @@ pub struct Role {
     #[serde(default, skip_serializing_if = "is_false")]
     #[ts(as = "Option<bool>", optional)]
     pub coordinator: bool,
+    /// 派给这个岗位员工的任务，做完都要人验收（`docs/ip/m2-spec.md` D-41）。是 false 时不出现在协议里。
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[ts(as = "Option<bool>", optional)]
+    pub approve_completion: bool,
 }
 
 fn is_false(value: &bool) -> bool {
