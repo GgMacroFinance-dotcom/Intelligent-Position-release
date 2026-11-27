@@ -13,6 +13,7 @@ fn org() -> (OrgSpec, Vec<Agent>) {
         },
         budget_per_day_usd: None,
         coordinator: false,
+        approve_completion: false,
     };
     let agent = |id: &str, role: &str| Agent {
         id: id.into(),

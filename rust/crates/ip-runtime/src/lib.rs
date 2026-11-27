@@ -519,6 +519,17 @@ impl Runtime {
         self.shared.update_task(id, update, by).await
     }
 
+    /// 人验收一个等验收的任务（D-41）：通过则结项并回报派活的对话，打回则退回进行中、叫负责人接着改。
+    pub async fn review_task(
+        &self,
+        id: &TaskId,
+        approved: bool,
+        by: &Author,
+        note: Option<&str>,
+    ) -> Result<Task, RuntimeError> {
+        self.shared.review_task(id, approved, by, note).await
+    }
+
     /// 发一张审批卡片。
     pub async fn open_approval(&self, approval: Approval) -> Result<Approval, RuntimeError> {
         self.shared.open_approval(approval).await

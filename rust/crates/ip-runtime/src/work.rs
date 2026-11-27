@@ -3,7 +3,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use ip_core::{
-    Agent, AgentId, Approval, Author, Message, Notice, Role, RoleId, Task, TaskId, TaskStatus, ThreadId, now_ms,
+    Agent, AgentId, Approval, ApprovalId, ApprovalOption, ApprovalState, ApprovalSubject, Author, Message, Notice,
+    Role, RoleId, Task, TaskId, TaskStatus, ThreadId, now_ms,
 };
 
 use crate::{RuntimeError, RuntimeEvent, Shared};
@@ -27,6 +28,8 @@ pub struct NewTask {
     /// 派活的对话，任务结束时结果写回这里。
     pub origin_thread_id: Option<ThreadId>,
     pub due_ms: Option<i64>,
+    /// 做完要人验收（D-41）。负责人的岗位配了 `approve_completion` 时不给也要。
+    pub needs_approval: bool,
 }
 
 /// 修改任务的参数；都不给时只刷新更新时间。
@@ -80,6 +83,7 @@ impl Shared {
             )));
         }
         let thread_id = new.thread_id.or_else(|| assignee.as_ref().map(|_| ThreadId::new()));
+        let needs_approval = new.needs_approval || self.role_approves(role.as_ref());
         let now = now_ms();
         let task = Task {
             id: TaskId::new(),
@@ -96,6 +100,7 @@ impl Shared {
             created_at_ms: now,
             updated_at_ms: now,
             due_ms: new.due_ms,
+            needs_approval,
         };
         let task = self.save_task(task).await?;
         self.hand_over(&task).await?;
@@ -109,7 +114,21 @@ impl Shared {
             .task(id)
             .await?
             .ok_or_else(|| RuntimeError::Invalid(format!("找不到任务 {id}")))?;
+        if task.status == TaskStatus::PendingApproval {
+            return Err(RuntimeError::Invalid(format!(
+                "任务「{}」已交给人验收，等人在验收卡片上通过或打回；在那之前不能改",
+                task.title
+            )));
+        }
+        if update.status == Some(TaskStatus::PendingApproval) {
+            return Err(RuntimeError::Invalid(
+                "pending_approval 由系统在交回要验收的任务时设置，不能直接设；做完请设为 done".into(),
+            ));
+        }
         let was_closed = finished(task.status);
+        // 要验收的任务由员工交回 done：先等人验收。人直接设 done 就是验收了。
+        let submitted =
+            update.status == Some(TaskStatus::Done) && !task.status.is_closed() && !matches!(by, Author::Human { .. });
         let reassigned = update.assignee.is_some() && update.assignee != task.assignee;
         if let Some(s) = update.status {
             task.status = s;
@@ -120,21 +139,123 @@ impl Shared {
         if reassigned {
             // 换负责人时岗位跟着负责人走。
             let (role, assignee) = self.check_assignment(None, update.assignee)?;
+            task.needs_approval |= self.role_approves(role.as_ref());
             task.role = role;
             task.assignee = assignee;
             if task.thread_id.is_none() {
                 task.thread_id = Some(ThreadId::new());
             }
         }
+        let review = submitted && task.needs_approval;
+        if review {
+            task.status = TaskStatus::PendingApproval;
+        }
         task.updated_at_ms = now_ms();
         let task = self.save_task(task).await?;
         if reassigned {
             self.hand_over(&task).await?;
         }
-        if !was_closed && finished(task.status) {
+        if review {
+            self.ask_for_review(&task, by).await?;
+        } else if !was_closed && finished(task.status) {
             self.report_back(&task, by, true).await?;
         }
         Ok(task)
+    }
+
+    /// 人验收一个等验收的任务（D-41）。通过：结项，结果回报派活的对话；打回：退回进行中，
+    /// 把 `note`（要改什么）写进负责人的对话，叫他接着改。验收卡片由调用方选定。
+    pub(crate) async fn review_task(
+        &self,
+        id: &TaskId,
+        approved: bool,
+        by: &Author,
+        note: Option<&str>,
+    ) -> Result<Task, RuntimeError> {
+        let mut task = self
+            .store
+            .task(id)
+            .await?
+            .ok_or_else(|| RuntimeError::Invalid(format!("找不到任务 {id}")))?;
+        if task.status != TaskStatus::PendingApproval {
+            return Err(RuntimeError::Invalid(format!("任务「{}」不在等验收", task.title)));
+        }
+        let note = note.map(str::trim).filter(|n| !n.is_empty());
+        let who = self.author_name(by);
+        task.status = if approved {
+            TaskStatus::Done
+        } else {
+            TaskStatus::InProgress
+        };
+        task.updated_at_ms = now_ms();
+        let task = self.save_task(task).await?;
+        let Some(thread) = task.thread_id.clone() else {
+            if approved {
+                self.report_back(&task, by, true).await?;
+            }
+            return Ok(task);
+        };
+        if approved {
+            let mut text = format!("{who} 验收通过了任务「{}」。", task.title);
+            if let Some(n) = note {
+                text.push_str(&format!("\n意见：{n}"));
+            }
+            self.post(Message::notice(thread, Notice::ApprovalAnswer, text)).await?;
+            self.report_back(&task, by, true).await?;
+        } else {
+            let mut text = format!("{who} 验收没通过，任务「{}」（id: {}）打回修改。", task.title, task.id);
+            match note {
+                Some(n) => text.push_str(&format!("\n要改的：{n}")),
+                None => text.push_str("\n没写要改什么：先用 ask_human 问清楚，再改。"),
+            }
+            text.push_str("\n改好后照旧用 update_task 设为 done，把新的结论写进 result。");
+            self.post(Message::notice(thread.clone(), Notice::ApprovalAnswer, text))
+                .await?;
+            if let Some(assignee) = &task.assignee {
+                self.dispatch(assignee, thread, false).await?;
+            }
+        }
+        Ok(task)
+    }
+
+    /// 要验收的任务交回了：发一张验收卡片，交回的结论放在卡片的说明里。
+    async fn ask_for_review(&self, task: &Task, by: &Author) -> Result<(), RuntimeError> {
+        let agent_id = match (&task.assignee, by) {
+            (Some(a), _) => a.clone(),
+            (None, Author::Agent { agent_id }) => agent_id.clone(),
+            (None, _) => return Ok(()),
+        };
+        let who = self.agent_name(&agent_id);
+        let approval = Approval {
+            id: ApprovalId::new(),
+            question: format!("验收 {who} 交回的任务「{}」", task.title),
+            options: vec![
+                ApprovalOption {
+                    label: "通过".into(),
+                    consequence: "任务结项，结果回报给派活的人".into(),
+                },
+                ApprovalOption {
+                    label: "打回修改".into(),
+                    consequence: "任务退回进行中，叫负责人按你的意见接着改".into(),
+                },
+            ],
+            recommended: None,
+            reason: task.result.clone().unwrap_or_default(),
+            subject: ApprovalSubject::TaskCompletion {
+                agent_id,
+                task_id: task.id.clone(),
+                thread_id: task.thread_id.clone(),
+            },
+            state: ApprovalState::Pending,
+            created_at_ms: now_ms(),
+        };
+        self.open_approval(approval).await?;
+        Ok(())
+    }
+
+    /// 这个岗位的任务要不要人验收。
+    fn role_approves(&self, role: Option<&RoleId>) -> bool {
+        role.is_some_and(|r| self.directory().roles.get(r).is_some_and(|r| r.approve_completion))
     }
 
     /// 把任务说明写进负责人的对话，并通知负责人开工。
@@ -155,6 +276,9 @@ impl Shared {
             "\n开始时用 update_task 设为 in_progress；做完设为 done，并把结论写进 result；\
              做不下去设为 blocked，在 result 里写明缺什么。",
         );
+        if task.needs_approval {
+            text.push_str("\n这个任务做完要人验收：设为 done 后交给人审批，通过才算结项；打回时会告诉你要改什么。");
+        }
         self.post(Message::notice(thread.clone(), Notice::TaskBrief, text))
             .await?;
         self.dispatch(assignee, thread.clone(), false).await
@@ -163,7 +287,8 @@ impl Shared {
     /// 负责人这一轮失败了（费用用满、模型出错、步数超限）：任务标为受阻，原因写回派活的对话。
     /// 不叫回派活的员工：重新派活多半还会失败，自动重试会一圈圈地花钱，交给人处理。
     pub(crate) async fn fail_task(&self, mut task: Task, reason: String) -> Result<(), RuntimeError> {
-        if finished(task.status) {
+        // 已经交给人验收的不改：结论已经交了，等人的决定。
+        if finished(task.status) || task.status == TaskStatus::PendingApproval {
             return Ok(());
         }
         task.status = TaskStatus::Blocked;
@@ -188,6 +313,9 @@ impl Shared {
             _ => "已取消",
         };
         let mut text = format!("任务「{}」（id: {}）{verb}，负责人：{who}。", task.title, task.id);
+        if task.needs_approval && task.status == TaskStatus::Done {
+            text.push_str(&format!("{} 验收通过。", self.author_name(by)));
+        }
         if let Some(r) = &task.result {
             text.push_str(&format!("\n结果：{r}"));
         }

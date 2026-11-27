@@ -35,7 +35,8 @@ import { renderMarkdown } from './markdown.js';
 /** @typedef {import('./types/NotifyLevel').NotifyLevel} NotifyLevel */
 /** @typedef {import('./types/Claimed').Claimed} Claimed */
 
-/** @type {Record<TaskStatus, string>} */
+/** 人能选的任务状态。等验收（pending_approval）只由主机设置，不在这里（D-41）。 */
+/** @type {Record<Exclude<TaskStatus, 'pending_approval'>, string>} */
 const STATUS_TEXT = { open: '待开始', in_progress: '进行中', blocked: '受阻', done: '已完成', cancelled: '已取消' };
 
 /** 员工下拉框里“自动分派”的取值。 */
@@ -582,6 +583,8 @@ function taskTable(tasks) {
                     })
                     .catch((err) => alert(err.message)),
               },
+              // 等验收（D-41）只由主机设置：显示出来但不能选；改成“已完成”或“进行中”等于在验收卡片上通过或打回。
+              t.status === 'pending_approval' ? h('option', { value: 'pending_approval', selected: true, disabled: true }, '待验收') : null,
               ...Object.entries(STATUS_TEXT).map(([v, label]) => h('option', { value: v, selected: v === t.status }, label)),
             ),
           ),
@@ -631,6 +634,15 @@ function approvalCard(a) {
           null,
           subject.kind === 'agent_question' ? `${agentName(subject.agent_id)} 提问 · ` : null,
           h('a', { href: '#/chat', onclick: () => openThread(subject.thread_id) }, '查看对话'),
+        )
+      : null,
+    subject.kind === 'task_completion'
+      ? h(
+          'p',
+          null,
+          `${agentName(subject.agent_id)} 交回的任务，等你验收`,
+          subject.thread_id ? ' · ' : null,
+          subject.thread_id ? h('a', { href: '#/chat', onclick: () => openThread(/** @type {string} */ (subject.thread_id)) }, '查看对话') : null,
         )
       : null,
     h(

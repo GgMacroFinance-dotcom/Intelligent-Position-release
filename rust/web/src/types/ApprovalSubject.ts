@@ -2,9 +2,14 @@
 import type { AgentId } from "./AgentId";
 import type { MessageId } from "./MessageId";
 import type { RoleId } from "./RoleId";
+import type { TaskId } from "./TaskId";
 import type { ThreadId } from "./ThreadId";
 
 /**
  * 审批因何而起；决定选项被选中后系统做什么。
  */
-export type ApprovalSubject = { "kind": "route_message", message_id: MessageId, thread_id: ThreadId, text: string, roles: Array<RoleId>, } | { "kind": "agent_question", agent_id: AgentId, thread_id: ThreadId, } | { "kind": "question" };
+export type ApprovalSubject = { "kind": "route_message", message_id: MessageId, thread_id: ThreadId, text: string, roles: Array<RoleId>, } | { "kind": "agent_question", agent_id: AgentId, thread_id: ThreadId, } | { "kind": "task_completion", agent_id: AgentId, task_id: TaskId, 
+/**
+ * 负责人做这件事的对话。
+ */
+thread_id?: ThreadId, } | { "kind": "question" };

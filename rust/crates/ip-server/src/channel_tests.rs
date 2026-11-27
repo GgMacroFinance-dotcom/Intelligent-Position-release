@@ -64,6 +64,7 @@ fn role(id: &str, model: &str) -> Role {
         },
         budget_per_day_usd: None,
         coordinator: false,
+        approve_completion: false,
     }
 }
 
@@ -418,7 +419,7 @@ async fn t5_console_choice_updates_the_channel_card() {
     h.say("c1", "u1", "帮我看看这个").await.unwrap();
     let card_sent = h.next(WAIT).await.unwrap();
     let card = sent_card(&card_sent).expect("应当是卡片").clone();
-    crate::work::resolve_approval(&o.app, &card.id, macro_choice(&card), "李四".into())
+    crate::work::resolve_approval(&o.app, &card.id, macro_choice(&card), "李四".into(), None)
         .await
         .unwrap();
     let sent = h.take(2, WAIT).await;

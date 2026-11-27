@@ -308,6 +308,18 @@ fn approval_alert(approval: &Approval, now_ms: i64, agent: impl Fn(&AgentId) -> 
             Some(thread_id.clone()),
             None,
         ),
+        ApprovalSubject::TaskCompletion {
+            agent_id, thread_id, ..
+        } => {
+            let who = agent(agent_id);
+            (
+                AlertKind::Approval,
+                format!("{} 交了任务，等你验收", name_of(who.as_ref(), agent_id)),
+                preview(&approval.question),
+                thread_id.clone(),
+                who.map(|a| a.role),
+            )
+        }
         ApprovalSubject::Question => (
             AlertKind::Approval,
             "等你决定".to_string(),
@@ -684,6 +696,26 @@ mod tests {
             r.observe(&RuntimeEvent::ApprovalChanged { approval }, 3, agents),
             Some(Outgoing::Dismiss("approval:ap1".into()))
         );
+
+        // 交回了要验收的任务（D-41）：要我处理，点开去负责人的对话。
+        let review = Approval {
+            id: "ap2".into(),
+            question: "验收 宏观研究员 交回的任务「写 CPI 点评」".into(),
+            options: vec![],
+            recommended: None,
+            reason: "初稿".into(),
+            subject: ApprovalSubject::TaskCompletion {
+                agent_id: "macro-1".into(),
+                task_id: "k1".into(),
+                thread_id: Some("tw".into()),
+            },
+            state: ApprovalState::Pending,
+            created_at_ms: 0,
+        };
+        let a = alert(r.observe(&RuntimeEvent::ApprovalChanged { approval: review }, 4, agents));
+        assert_eq!((a.kind, a.level), (AlertKind::Approval, AlertLevel::NeedsMe));
+        assert_eq!(a.title, "宏观研究员 交了任务，等你验收");
+        assert_eq!(a.thread_id.as_ref().map(|t| t.as_str()), Some("tw"));
     }
 
     #[test]

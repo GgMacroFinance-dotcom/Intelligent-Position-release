@@ -124,6 +124,7 @@ fn role() -> Role {
         },
         budget_per_day_usd: None,
         coordinator: false,
+        approve_completion: false,
     }
 }
 
