@@ -9,7 +9,7 @@ mod work;
 
 pub use ids::{AgentId, ApprovalId, MessageId, RoleId, TaskId, ThreadId};
 pub use message::{Author, Body, Message, Notice, Via};
-pub use org::{Agent, ModelSlot, OrgError, OrgSpec, Role};
+pub use org::{Agent, ModelSlot, ORBIT_TRACKS, OrbitPin, OrgError, OrgSpec, Role};
 pub use work::{Approval, ApprovalOption, ApprovalState, ApprovalSubject, Task, TaskStatus};
 
 /// 当前 Unix 时间，毫秒。

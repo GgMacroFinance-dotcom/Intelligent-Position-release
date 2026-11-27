@@ -1849,3 +1849,105 @@ async fn memory_page_requests_view_edit_forget_and_clear() {
     assert!(store.setting("context.notes.nobody").await.unwrap().is_none());
     server.app.close();
 }
+
+/// 读到某种事件为止（中间的回复和别的事件跳过）。
+async fn wait_event(ws: &mut Ws, kind: &str) -> Value {
+    loop {
+        let v = next_json(ws).await;
+        if v["type"] == "event" && v["event"]["type"] == kind {
+            return v["event"].clone();
+        }
+    }
+}
+
+/// 星图上人固定的轨道（D-40）：日常设备能改，整批校验，推给别的连接，重启后还在，删掉的员工不列。
+#[tokio::test]
+async fn orbit_pins_are_shared_validated_and_kept() {
+    let s = start(Some("s3cret")).await;
+    let mut admin = connect(s.addr, "?token=s3cret").await.unwrap();
+    let (token, _) = pair_device(&s, &mut admin, "李四的电脑").await;
+    let mut phone = connect(s.addr, &format!("?token={token}")).await.unwrap();
+
+    let (r, _) = request(&mut phone, 1, json!({"type": "list_orbit_pins"})).await;
+    assert_eq!(r["data"], json!([]), "{r}");
+    let (r, _) = request(
+        &mut phone,
+        2,
+        json!({"type": "set_orbit_pins", "changes": [
+            {"agent_id": "macro-1", "orbit_track": 2, "orbit_pinned_at": 1000},
+            // 同一位员工出现两次以最后一次为准（拖进去又被挤出去）。
+            {"agent_id": "macro-1", "orbit_track": 0, "orbit_pinned_at": 1700},
+        ]}),
+    )
+    .await;
+    let pinned = json!([{"agent_id": "macro-1", "orbit_track": 0, "orbit_pinned_at": 1700}]);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["data"], pinned);
+    // 别的连接收到整张表。
+    let event = wait_event(&mut admin, "orbit_pins_changed").await;
+    assert_eq!(event["pins"], pinned);
+
+    // 有一项不对就整批不改。
+    for (n, changes) in [
+        json!([{"agent_id": "nobody", "orbit_track": 1}]),
+        json!([{"agent_id": "macro-1", "orbit_track": 1}, {"agent_id": "macro-1", "orbit_track": 3}]),
+        json!([{"agent_id": "macro-1", "orbit_track": 1, "orbit_pinned_at": -1}]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (r, _) = request(
+            &mut phone,
+            10 + n as u64,
+            json!({"type": "set_orbit_pins", "changes": changes}),
+        )
+        .await;
+        assert_eq!(r["ok"], false, "{changes}: {r}");
+    }
+    let (r, _) = request(&mut admin, 20, json!({"type": "list_orbit_pins"})).await;
+    assert_eq!(r["data"], pinned);
+
+    // 重启后还在；员工从组织里删掉后不列，加回来时还在原来的轨道上。
+    let reopen = |spawn: bool| {
+        let dir = s._dir.path().join("ip.db");
+        let org = (*s.app.org).clone();
+        let agents = s.app.runtime().agents();
+        async move {
+            let store = ip_store::testing::store_at(dir).await;
+            let runtime = Runtime::new(store, ModelRegistry::new(), RuntimeConfig::default());
+            if spawn {
+                for agent in agents {
+                    runtime
+                        .spawn_agent(AgentSetup {
+                            agent,
+                            role: org.roles[0].clone(),
+                            toolbox: None,
+                            mcp: None,
+                            data: None,
+                            engine: None,
+                        })
+                        .unwrap();
+                }
+            }
+            App::new(runtime, org, None)
+        }
+    };
+    let without = reopen(false).await;
+    assert!(crate::star_map::list(&without).await.unwrap().is_empty());
+    let with = reopen(true).await;
+    assert_eq!(
+        serde_json::to_value(crate::star_map::list(&with).await.unwrap()).unwrap(),
+        pinned
+    );
+
+    // 取消固定：orbit_track 为空。
+    let (r, _) = request(
+        &mut phone,
+        30,
+        json!({"type": "set_orbit_pins", "changes": [{"agent_id": "macro-1", "orbit_track": null}]}),
+    )
+    .await;
+    assert_eq!(r["data"], json!([]), "{r}");
+    let event = wait_event(&mut admin, "orbit_pins_changed").await;
+    assert_eq!(event["pins"], json!([]));
+}

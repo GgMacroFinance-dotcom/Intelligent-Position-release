@@ -5,7 +5,7 @@
 //       * 内环（0 · 紧急/核心，上限 3）、中环（1 · 进行中/活跃，上限 4）、外环（2 · 空闲/待命，上限 7，超 14 人软兜底）；
 //       * 轨道与具体星球解耦：默认按实时状态动态入轨，也支持直接按住任意星球拖拽到目标环附近磁吸落位；
 //       * 拖动时在三条环边缘浮现 `1/3`、`2/3`、`3/3` 等容量徽章（平时隐藏保持干净）；满环拖入时按 1A 规则自动把最旧/最不急的星球平滑挤向外侧轨道；
-//       * 后端适配与协议字段约定集中在 orbit.dart 顶部注释与 _syncOrbitChangesToBackend 钩子里。
+//       * 协议字段约定在 orbit.dart 顶部注释；拖放后经 _syncOrbitChangesToBackend 交给主机（m2-spec D-40）。
 //     所有天体与天空共享单一轻量时钟 CelestialClock（前台 20fps / 失焦 3fps / 窗口或待办展开时彻底 0fps）。
 //   - 窗顶联动：点任意星球滑出浮空 macOS Liquid Glass 三栏工作窗时，太阳和全部员工星球一起平滑缩小、
 //     横排浮在窗口上沿露出的蓝天条里，当前选中的高亮，点旁边另一颗星球无需关窗即可无缝切换员工。
@@ -15,7 +15,7 @@
 //   - 角落：左上角 Apple Liquid Glass 红绿灯待办小组件；左下角 Liquid Glass“我”与连接状态；
 //     右下角 Liquid Glass「+ 新建 Bot」（方案 1：9 种实机 GPU 星球选星新建，严格排除太阳）与暂留的“面板”入口。
 
-import 'dart:async' show Timer;
+import 'dart:async' show Timer, unawaited;
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -472,30 +472,12 @@ class _DesktopShellState extends State<DesktopShell> {
     );
   }
 
-  /// 后端轨道偏好同步钩子（预留给后端适配）：
-  ///
-  /// 每次用户拖放落位后触发，[changes] 包含：
+  /// 每次拖放落位后，把改动交给主机（m2-spec D-40：`set_orbit_pins`）。[changes] 包含：
   ///   - 被拖入的星球（`evicted == false`）及其最新 `pin`（`orbit_track`, `orbit_pinned_at`）；
   ///   - 因目标环满员（3 / 4 / 7）而被 1A 级联挤出到相邻环的星球（`evicted == true`）及其最新 `pin`。
-  ///
-  /// TODO(backend-orbit-sync)：
-  ///   后端提供轨道持久化接口（建议 `PATCH /star-map/orbit-pins`，body 为
-  ///   `{"changes": [{"agent_id": c.agentId, ...c.pin.toJson()}]}`）后，
-  ///   过滤掉 `c.agentId.startsWith(_demoPrefix)` 的演示星球，将真实员工的变更批量上报即可。
+  /// 演示星球和本地新建的 Bot 不在主机上，由 [AppState.syncOrbitPins] 滤掉。
   void _syncOrbitChangesToBackend(List<OrbitPinChange> changes) {
-    assert(() {
-      final real = [
-        for (final c in changes)
-          if (!c.agentId.startsWith(_demoPrefix)) c,
-      ];
-      if (real.isNotEmpty) {
-        final summary = real
-            .map((c) => '${c.agentId}:${c.fromTrackId}->${c.toTrackId}${c.evicted ? "(挤出)" : ""}')
-            .join(', ');
-        debugPrint('[orbit-sync] 待同步后端轨道变更: $summary');
-      }
-      return true;
-    }());
+    unawaited(AppScope.read(context).syncOrbitPins(changes));
   }
 
   /// 从左上角待办卡片点“去对话”：有明确员工就直接滑出那位员工的三栏浮空窗，否则进工作台对话页。

@@ -216,6 +216,11 @@ pub enum Request {
     UnsubscribePush { endpoint: String },
     /// 页面在不在前台。在前台时不给这台设备推送，页面自己显示；页面每 20 秒报一次。回复 `null`。
     Presence { active: bool },
+    /// 回复 `OrbitPin[]`：星图上人固定了轨道的员工，按员工 id 排（`docs/ip/m2-spec.md` D-40）。
+    ListOrbitPins,
+    /// 一次拖放改动的几位员工（拖进去的和被挤出去的）一起改，回复改完后的 `OrbitPin[]`，
+    /// 并以 `orbit_pins_changed` 事件推给所有连接。有一项不对就整批不改。
+    SetOrbitPins { changes: Vec<OrbitPinChange> },
     /// 回复 `SendResult`；员工的回复随后以事件推送。
     Send {
         /// 省略时由路由规则决定。
@@ -232,6 +237,21 @@ pub enum Request {
         #[ts(optional)]
         author: Option<String>,
     },
+}
+
+/// `set_orbit_pins` 的一项。
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct OrbitPinChange {
+    pub agent_id: AgentId,
+    /// 0 内环、1 中环、2 外环；为空是取消固定，回到按紧急度自动排轨。
+    #[serde(default)]
+    #[ts(optional)]
+    pub orbit_track: Option<u8>,
+    /// 放上去的时间（Unix 毫秒），满环挤人时用来排先后；省略时用主机收到的时间。
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub orbit_pinned_at: Option<i64>,
 }
 
 /// 上下文里人能直接改的两层。

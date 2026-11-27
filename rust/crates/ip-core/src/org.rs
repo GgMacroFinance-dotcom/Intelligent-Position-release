@@ -61,6 +61,22 @@ pub struct Agent {
     pub name: String,
 }
 
+/// 星图上的固定轨道条数：0 内环、1 中环、2 外环。
+pub const ORBIT_TRACKS: u8 = 3;
+
+/// 一位员工被人拖到星图某条轨道上固定住（App 桌面外壳，`docs/ip/m2-spec.md` D-40）。
+/// 没固定的员工按紧急度自动排轨，不在这张表里。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
+pub struct OrbitPin {
+    pub agent_id: AgentId,
+    /// 0 内环、1 中环、2 外环。
+    pub orbit_track: u8,
+    /// 放上这条轨道的时间（Unix 毫秒）。满环挤人时，同是人固定的，先放进来的先被挤出去。
+    #[ts(type = "number")]
+    pub orbit_pinned_at: i64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum OrgError {
     #[error("组织定义不是合法的 YAML：{0}")]

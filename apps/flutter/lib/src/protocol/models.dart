@@ -99,8 +99,33 @@ sealed class RuntimeEvent {
     w.RuntimeEventTurnFailed e => TurnFailed(e.agentId, e.threadId, e.error),
     w.RuntimeEventTaskChanged e => TaskChanged(Task.fromWire(e.task)),
     w.RuntimeEventApprovalChanged e => ApprovalChanged(Approval.fromWire(e.approval)),
+    w.RuntimeEventOrbitPinsChanged e => OrbitPinsChanged([for (final p in e.pins) PinnedOrbit.fromWire(p)]),
     w.RuntimeEventUnknown e => UnknownEvent('${(e.json as Map?)?['type']}'),
   };
+}
+
+/// 星图上人固定了轨道的一位员工（m2-spec D-40）。
+class PinnedOrbit {
+  const PinnedOrbit({required this.agentId, required this.track, required this.pinnedAtMs});
+
+  factory PinnedOrbit.fromJson(Json j) => PinnedOrbit.fromWire(w.OrbitPin.fromJson(j));
+
+  factory PinnedOrbit.fromWire(w.OrbitPin p) =>
+      PinnedOrbit(agentId: p.agentId, track: p.orbitTrack.toInt(), pinnedAtMs: p.orbitPinnedAt.toInt());
+
+  final String agentId;
+
+  /// 0 内环、1 中环、2 外环。
+  final int track;
+
+  /// 放上这条轨道的时间（Unix 毫秒），满环挤人时排先后。
+  final int pinnedAtMs;
+}
+
+/// 主机上的星图轨道表改了（别的设备拖了员工，或者这台自己的改动生效了）。`pins` 是整张表。
+class OrbitPinsChanged extends RuntimeEvent {
+  const OrbitPinsChanged(this.pins);
+  final List<PinnedOrbit> pins;
 }
 
 class TurnStarted extends RuntimeEvent {
