@@ -35,6 +35,7 @@ fn agent(id: &str) -> Agent {
         id: id.into(),
         role: "researcher".into(),
         name: format!("员工{id}"),
+        celestial_style: None,
     }
 }
 
@@ -713,6 +714,7 @@ async fn delegated_task_reports_back_to_the_coordinator() {
                     id: id.into(),
                     role: r.id.clone(),
                     name: format!("员工{id}"),
+                    celestial_style: None,
                 },
                 role: r,
                 toolbox: None,
@@ -958,6 +960,7 @@ async fn coordinator_wakes_once_all_tasks_are_back() {
                     id: id.into(),
                     role: r.id.clone(),
                     name: format!("员工{id}"),
+                    celestial_style: None,
                 },
                 role: r,
                 toolbox: None,
@@ -2661,6 +2664,7 @@ async fn completion_waits_for_human_review() {
                     id: id.into(),
                     role: r.id.clone(),
                     name: format!("员工{id}"),
+                    celestial_style: None,
                 },
                 role: r,
                 toolbox: None,
@@ -2839,4 +2843,83 @@ async fn humans_close_reviewed_tasks_directly() {
         .await
         .unwrap_err();
     assert!(err.to_string().contains("pending_approval"), "{err}");
+}
+
+/// 在线改组织（D-42）：员工空闲时能停掉、从组织里拿掉；正在干活时拒绝；天体形态忙的时候也能改。
+#[tokio::test]
+async fn agents_can_be_removed_when_idle_and_restyled_anytime() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
+    let model = Arc::new(
+        ScriptedModel::new([ScriptedTurn::Text("在写一篇长报告".into())]).with_delay(Duration::from_millis(300)),
+    );
+    let mut models = ModelRegistry::new();
+    models.insert("fake", model.clone());
+    let runtime = Runtime::new(store, models, memory_off());
+    for id in ["a1", "a2"] {
+        runtime
+            .spawn_agent(AgentSetup {
+                agent: agent(id),
+                role: role("fake/m"),
+                toolbox: None,
+                mcp: None,
+                data: None,
+                engine: None,
+            })
+            .unwrap();
+    }
+    let mut rx = runtime.subscribe();
+    runtime
+        .send(&"a1".into(), ThreadId::new(), human(), "写报告")
+        .await
+        .unwrap();
+    // 正在干活：拒绝，形态照样能改。
+    assert!(matches!(
+        runtime.remove_agent(&"a1".into()).await,
+        Err(RuntimeError::AgentBusy(_))
+    ));
+    let styled = runtime.set_agent_style(&"a1".into(), Some("saturn".into())).unwrap();
+    assert_eq!(styled.celestial_style.as_deref(), Some("saturn"));
+    until_agent_turn_end(&mut rx, "a1").await;
+    let listed = runtime.agents();
+    assert_eq!(listed[0].celestial_style.as_deref(), Some("saturn"));
+    // 空闲了：能拿掉，之后发给他报“不存在”，派活也找不到他。
+    let removed = runtime.remove_agent(&"a1".into()).await.unwrap();
+    assert_eq!(removed.id.as_str(), "a1");
+    assert_eq!(
+        runtime.agents().iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+        ["a2"]
+    );
+    assert!(matches!(
+        runtime.send(&"a1".into(), ThreadId::new(), human(), "在吗").await,
+        Err(RuntimeError::UnknownAgent(_))
+    ));
+    let err = runtime
+        .create_task(
+            crate::NewTask {
+                title: "x".into(),
+                assignee: Some("a1".into()),
+                ..Default::default()
+            },
+            human(),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("a1"), "{err}");
+    assert!(matches!(
+        runtime.remove_agent(&"a1".into()).await,
+        Err(RuntimeError::UnknownAgent(_))
+    ));
+    // 同一个 id 能再启动。
+    runtime
+        .spawn_agent(AgentSetup {
+            agent: agent("a1"),
+            role: role("fake/m"),
+            toolbox: None,
+            mcp: None,
+            data: None,
+            engine: None,
+        })
+        .unwrap();
+    assert_eq!(runtime.agents().len(), 2);
 }

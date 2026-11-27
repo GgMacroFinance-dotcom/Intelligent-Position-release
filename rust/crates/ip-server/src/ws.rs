@@ -330,7 +330,7 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
     let limit = |l: Option<usize>, default: usize| l.unwrap_or(default).clamp(1, MAX_LIMIT);
     let to_json = |v: serde_json::Result<Value>| v.map_err(|e| e.to_string());
     match request {
-        Request::ListRoles => to_json(serde_json::to_value(&app.org.roles)),
+        Request::ListRoles => to_json(serde_json::to_value(&app.org().roles)),
         Request::ListAgents => to_json(serde_json::to_value(rt.agents())),
         Request::SpendToday => to_json(serde_json::to_value(rt.spend_today().await.map_err(|e| e.to_string())?)),
         Request::ListThreads { limit: l } => {
@@ -530,6 +530,44 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
         Request::Presence { active } => {
             let who = device.as_ref().map_or(crate::notify::SHARED, |d| d.id.as_str());
             app.push.presence(who, active, ip_core::now_ms());
+            Ok(Value::Null)
+        }
+        Request::CreateRole { role } => to_json(serde_json::to_value(crate::org_admin::create_role(app, role).await?)),
+        Request::CreateAgent {
+            agent_id,
+            role,
+            name,
+            tools,
+            celestial_style,
+        } => {
+            let new = crate::org_admin::NewAgent {
+                id: agent_id,
+                role,
+                name,
+                tools: tools.unwrap_or(true),
+                celestial_style,
+            };
+            to_json(serde_json::to_value(crate::org_admin::create_agent(app, new).await?))
+        }
+        Request::UpdateAgent {
+            agent_id,
+            name,
+            role,
+            tools,
+            celestial_style,
+        } => {
+            let patch = crate::org_admin::AgentPatch {
+                name,
+                role,
+                tools,
+                celestial_style,
+            };
+            to_json(serde_json::to_value(
+                crate::org_admin::update_agent(app, &agent_id, patch).await?,
+            ))
+        }
+        Request::DeleteAgent { agent_id } => {
+            crate::org_admin::delete_agent(app, &agent_id).await?;
             Ok(Value::Null)
         }
         Request::ListOrbitPins => to_json(serde_json::to_value(crate::star_map::list(app).await?)),

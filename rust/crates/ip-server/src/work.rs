@@ -85,12 +85,12 @@ pub async fn send_as(
                 .post(thread_id.clone(), human, text.clone())
                 .await
                 .map_err(|e| e.to_string())?;
-            let roles: Vec<RoleId> = app.org.roles.iter().map(|r| r.id.clone()).collect();
+            let org = app.org();
+            let roles: Vec<RoleId> = org.roles.iter().map(|r| r.id.clone()).collect();
             if roles.is_empty() {
                 return Err("还没有任何岗位".into());
             }
-            let options = app
-                .org
+            let options = org
                 .roles
                 .iter()
                 .map(|r| ApprovalOption {
@@ -104,7 +104,7 @@ pub async fn send_as(
                 options,
                 recommended: suggested
                     .as_ref()
-                    .and_then(|s| app.org.roles.iter().position(|r| &r.id == s))
+                    .and_then(|s| org.roles.iter().position(|r| &r.id == s))
                     .map(|i| i as u32),
                 reason: reason.clone(),
                 subject: ApprovalSubject::RouteMessage {

@@ -60,6 +60,7 @@ fn measure() -> anyhow::Result<Report> {
             id: id.clone(),
             role: RoleId::from("macro"),
             name: "宏观研究员".into(),
+            celestial_style: None,
         })
     };
     let mut rules = Rules::default();

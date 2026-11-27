@@ -1581,6 +1581,11 @@ function onEvent(e) {
       // 角标在顶栏，所有页面都要更新。
       if (page() !== 'chat') return render();
       return renderHeaderOnly();
+    case 'org_changed':
+      // 在线改了组织（D-42）：换上新的岗位和员工。
+      state.roles = e.roles;
+      state.agents = e.agents;
+      return render();
   }
   if (page() === 'chat') updateChat();
 }

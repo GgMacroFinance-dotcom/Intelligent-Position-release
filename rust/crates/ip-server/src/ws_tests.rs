@@ -74,6 +74,7 @@ async fn start_with_schedules(
         id: "macro-1".into(),
         role: "macro".into(),
         name: "小宏".into(),
+        celestial_style: None,
     };
     runtime
         .spawn_agent(AgentSetup {
@@ -489,6 +490,11 @@ async fn daily_devices_only_get_daily_requests() {
         json!({"type": "set_thread_memory", "thread_id": "t", "enabled": false}),
         json!({"type": "list_devices"}),
         json!({"type": "set_device_scope", "device_id": id, "scope": "admin"}),
+        // 在线改组织（D-42）
+        json!({"type": "create_role", "role": {"id": "r", "description": "x", "model": {"default": "fake/m"}}}),
+        json!({"type": "create_agent", "agent_id": "x", "role": "macro", "name": "x"}),
+        json!({"type": "update_agent", "agent_id": "macro-1", "celestial_style": "mars"}),
+        json!({"type": "delete_agent", "agent_id": "macro-1"}),
     ]
     .into_iter()
     .enumerate()
@@ -1291,7 +1297,7 @@ async fn send_without_agent_follows_router() {
     let store = ip_store::testing::store_at(s._dir.path().join("ip.db")).await;
     let runtime = Runtime::new(store, ModelRegistry::new(), RuntimeConfig::default());
     for a in s.app.runtime().agents() {
-        let role = s.app.org.roles[0].clone();
+        let role = s.app.org().roles[0].clone();
         runtime
             .spawn_agent(AgentSetup {
                 agent: a,
@@ -1303,7 +1309,7 @@ async fn send_without_agent_follows_router() {
             })
             .unwrap();
     }
-    let restarted = App::new(runtime, (*s.app.org).clone(), None);
+    let restarted = App::new(runtime, (*s.app.org()).clone(), None);
     crate::rules::load_saved(&restarted).await;
     assert_eq!(restarted.router().spec().rules.len(), 2);
 }
@@ -1659,6 +1665,7 @@ async fn memory_background_task_distills_cooled_threads() {
                 id: "macro-1".into(),
                 role: "macro".into(),
                 name: "小宏".into(),
+                celestial_style: None,
             },
             role: role.clone(),
             toolbox: None,
@@ -1912,7 +1919,7 @@ async fn orbit_pins_are_shared_validated_and_kept() {
     // 重启后还在；员工从组织里删掉后不列，加回来时还在原来的轨道上。
     let reopen = |spawn: bool| {
         let dir = s._dir.path().join("ip.db");
-        let org = (*s.app.org).clone();
+        let org = (*s.app.org()).clone();
         let agents = s.app.runtime().agents();
         async move {
             let store = ip_store::testing::store_at(dir).await;
@@ -2091,4 +2098,147 @@ async fn reviewed_tasks_over_websocket() {
     assert_eq!(resolved["state"]["by"], "李四");
     let (a, _) = request(&mut ws, 10, json!({"type": "list_approvals", "pending_only": true})).await;
     assert_eq!(a["data"], json!([]));
+}
+
+/// 在线改组织（D-42）：新建岗位和员工、改形态和名字、删 ip.yaml 里的员工，存进数据库、重启后还在；
+/// 和 ip.yaml 一样整份校验，不过就什么都不动。
+#[tokio::test]
+async fn org_can_be_changed_online_and_survives_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_db, database) = crate::config::test_database();
+    let text = EXAMPLE.replace("api_key_env: DEEPSEEK_API_KEY, ", "")
+        + "schedules:\n  - { id: daily, cron: \"0 9 * * *\", to: { role: macro, agent: macro-2 }, text: 早报 }\n";
+    std::fs::write(dir.path().join("ip.yaml"), &text).unwrap();
+    let mut c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    c.database = database.clone();
+    let app = App::from_config(&c).await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let r = router(Some(app.clone()));
+    tokio::spawn(async move { axum::serve(listener, r).await.unwrap() });
+    let mut ws = connect(addr, "").await.unwrap();
+    let mut n = 0;
+    let mut call = async |ws: &mut Ws, body: Value| {
+        n += 1;
+        request(ws, n, body).await
+    };
+
+    // 新建岗位：和 ip.yaml 一样校验。
+    let writer = json!({"id": "writer", "name": "撰稿", "description": "写评论文章", "model": {"default": "deepseek/deepseek-chat"}});
+    let (r, seen) = call(&mut ws, json!({"type": "create_role", "role": writer})).await;
+    assert_eq!(r["data"]["name"], "撰稿", "{r}");
+    let changed = wait_for(&mut ws, &seen, |e| e["type"] == "org_changed").await;
+    assert_eq!(changed["roles"].as_array().unwrap().len(), 2);
+    for (role, why) in [
+        (
+            json!({"id": "macro", "description": "x", "model": {"default": "deepseek/m"}}),
+            "已经有了",
+        ),
+        (
+            json!({"id": "x1", "description": "x", "model": {"default": "nope/m"}}),
+            "端点",
+        ),
+        (
+            json!({"id": "a b", "description": "x", "model": {"default": "deepseek/m"}}),
+            "只能包含",
+        ),
+        (
+            json!({"id": "x2", "description": "x", "model": {"default": "deepseek/m"}, "budget_per_day_usd": 1}),
+            "价格",
+        ),
+    ] {
+        let (r, _) = call(&mut ws, json!({"type": "create_role", "role": role})).await;
+        assert_eq!(r["ok"], false, "{why}: {r}");
+        assert!(r["error"].as_str().unwrap().contains(why), "{why}: {r}");
+    }
+
+    // 新建员工：用默认工作目录，带星图形态。
+    let (r, seen) = call(
+        &mut ws,
+        json!({"type": "create_agent", "agent_id": "w-1", "role": "writer", "name": "小撰", "celestial_style": "saturn"}),
+    )
+    .await;
+    assert_eq!(r["data"]["celestial_style"], "saturn", "{r}");
+    wait_for(&mut ws, &seen, |e| {
+        e["type"] == "org_changed" && e["agents"].as_array().unwrap().iter().any(|a| a["id"] == "w-1")
+    })
+    .await;
+    assert!(dir.path().join("data/workspaces/w-1").is_dir());
+    for (body, why) in [
+        (
+            json!({"type": "create_agent", "agent_id": "macro-1", "role": "macro", "name": "重名"}),
+            "已经有了",
+        ),
+        (
+            json!({"type": "create_agent", "agent_id": "w-2", "role": "nobody", "name": "x"}),
+            "不存在",
+        ),
+        (
+            json!({"type": "create_agent", "agent_id": "w-2", "role": "writer", "name": "x", "celestial_style": "sun"}),
+            "celestial_style",
+        ),
+        (
+            json!({"type": "create_agent", "agent_id": "w-2", "role": "writer", "name": " "}),
+            "名字",
+        ),
+    ] {
+        let (r, _) = call(&mut ws, body.clone()).await;
+        assert_eq!(r["ok"], false, "{body}: {r}");
+        assert!(r["error"].as_str().unwrap().contains(why), "{body}: {r}");
+    }
+
+    // 改：清掉形态（不用重启），改名字（重启他）。
+    let (r, _) = call(
+        &mut ws,
+        json!({"type": "update_agent", "agent_id": "w-1", "celestial_style": ""}),
+    )
+    .await;
+    assert!(r["data"].get("celestial_style").is_none(), "{r}");
+    let (r, _) = call(
+        &mut ws,
+        json!({"type": "update_agent", "agent_id": "w-1", "name": "小撰二"}),
+    )
+    .await;
+    assert_eq!(r["data"]["name"], "小撰二", "{r}");
+
+    // 删：定时任务还指着的不能删；ip.yaml 里的也能删。
+    let (r, _) = call(&mut ws, json!({"type": "delete_agent", "agent_id": "macro-2"})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(r["error"].as_str().unwrap().contains("macro-2"), "{r}");
+    let (r, _) = call(&mut ws, json!({"type": "delete_agent", "agent_id": "macro-1"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let (r, _) = call(&mut ws, json!({"type": "list_agents"})).await;
+    let ids: Vec<&str> = r["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["macro-2", "w-1"]);
+    let (r, _) = call(&mut ws, json!({"type": "send", "agent_id": "macro-1", "text": "在吗"})).await;
+    assert_eq!(r["ok"], false, "删掉的员工收不到消息：{r}");
+    drop(ws);
+    app.shutdown().await;
+
+    // 重启：照旧用这些改动。
+    let app = App::from_config(&c).await.unwrap();
+    let agents = app.runtime().agents();
+    let names: Vec<(&str, &str)> = agents.iter().map(|a| (a.id.as_str(), a.name.as_str())).collect();
+    assert_eq!(names, [("macro-2", "小观"), ("w-1", "小撰二")]);
+    assert!(app.org().role(&"writer".into()).is_some());
+
+    // ip.yaml 改得和存下的改动对不上（存下的岗位用的端点没了）：只用 ip.yaml，照常启动。
+    let mut renamed = c.clone();
+    renamed.endpoints.clear();
+    renamed.endpoints.insert(
+        "other".into(),
+        serde_saphyr::from_str("{ base_url: \"http://127.0.0.1:9/v1\" }").unwrap(),
+    );
+    for r in &mut renamed.roles {
+        r.model.default = "other/m".into();
+    }
+    app.shutdown().await;
+    let app = App::from_config(&renamed).await.unwrap();
+    let ids: Vec<String> = app.runtime().agents().iter().map(|a| a.id.to_string()).collect();
+    assert_eq!(ids, ["macro-1", "macro-2"], "存下的岗位用的端点没了：这次只用 ip.yaml");
 }

@@ -181,6 +181,7 @@ fn spawn(runtime: &Runtime, role: &Role, id: &str) -> anyhow::Result<()> {
         id: id.into(),
         role: role.id.clone(),
         name: id.into(),
+        celestial_style: None,
     };
     runtime.spawn_agent(AgentSetup {
         agent,

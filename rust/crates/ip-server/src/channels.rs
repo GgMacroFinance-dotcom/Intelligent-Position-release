@@ -481,7 +481,7 @@ impl Dispatcher {
                 if let Author::Agent { agent_id } = message.author
                     && text.contains("reports/")
                 {
-                    let workspaces = self.app.workspaces.clone();
+                    let workspaces = self.app.workspaces();
                     let source = text.clone();
                     let room = conversation.clone();
                     match tokio::task::spawn_blocking(move || {

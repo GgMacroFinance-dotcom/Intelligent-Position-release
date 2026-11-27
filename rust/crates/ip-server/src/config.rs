@@ -351,6 +351,9 @@ pub struct AgentConfig {
     /// 运维测试这类岗位指向要维护的项目。相对路径以配置文件所在目录为准，目录必须已存在。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<PathBuf>,
+    /// App 星图上用哪种天体画他（`mercury`…`neptune`、`star`，D-42）；不写时 App 按 id 挑。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub celestial_style: Option<String>,
 }
 
 fn yes() -> bool {
@@ -363,6 +366,7 @@ impl AgentConfig {
             id: self.id.as_str().into(),
             role: self.role.as_str().into(),
             name: self.name.clone(),
+            celestial_style: self.celestial_style.clone(),
         }
     }
 }
@@ -389,6 +393,10 @@ pub enum ConfigError {
     BadPushHost(String),
     #[error("数字员工 id `{0}` 重复")]
     DuplicateAgent(String),
+    #[error(
+        "数字员工 `{0}` 的 celestial_style `{1}` 不认识，只能是 mercury、venus、earth、mars、jupiter、saturn、uranus、neptune、star（太阳留给协调员）"
+    )]
+    BadCelestialStyle(String, String),
     #[error("数字员工 `{0}` 的岗位 `{1}` 不存在")]
     UnknownRole(String, String),
     #[error("路由规则错误：{0}")]
@@ -595,6 +603,11 @@ impl Config {
             }
             if !a.tools && self.engines.contains_key(&a.role) {
                 return Err(ConfigError::EngineNeedsWorkspace(a.id.clone()));
+            }
+            if let Some(style) = &a.celestial_style
+                && !ip_core::celestial_style_ok(style)
+            {
+                return Err(ConfigError::BadCelestialStyle(a.id.clone(), style.clone()));
             }
         }
         for (name, channel) in &self.channels {

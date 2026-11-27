@@ -14,6 +14,7 @@ pub mod events;
 mod mcp;
 mod memory_admin;
 pub mod notify;
+mod org_admin;
 mod origin;
 pub mod protocol;
 mod reports;
