@@ -471,6 +471,7 @@ async fn daily_devices_only_get_daily_requests() {
         json!({"type": "list_rules"}),
         json!({"type": "list_memory_off_threads"}),
         json!({"type": "spend_today"}),
+        json!({"type": "list_progress"}),
     ]
     .into_iter()
     .enumerate()
@@ -1950,4 +1951,47 @@ async fn orbit_pins_are_shared_validated_and_kept() {
     assert_eq!(r["data"], json!([]), "{r}");
     let event = wait_event(&mut admin, "orbit_pins_changed").await;
     assert_eq!(event["pins"], json!([]));
+}
+
+/// 进度表（D-42）：员工跑完一轮后记在主机上，`list_progress` 回每位员工的状态和要人看的时间点。
+#[tokio::test]
+async fn progress_board_lists_every_agent() {
+    let s = start(Some("s3cret")).await;
+    let mut ws = connect(s.addr, "?token=s3cret").await.unwrap();
+    let (r, _) = request(&mut ws, 1, json!({"type": "list_progress"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let agents = r["data"]["agents"].as_array().unwrap();
+    assert!(!agents.is_empty());
+    assert!(
+        agents.iter().all(|a| a["phase"] == "idle" && a["headline"].is_null()),
+        "{r}"
+    );
+    assert_eq!(r["data"]["attention"], json!([]));
+
+    let (r, _) = request(
+        &mut ws,
+        2,
+        json!({"type": "send", "agent_id": "macro-1", "text": "CPI 怎么样"}),
+    )
+    .await;
+    assert_eq!(r["ok"], true, "{r}");
+    wait_event(&mut ws, "turn_finished").await;
+    let (r, _) = request(&mut ws, 3, json!({"type": "list_progress"})).await;
+    let me = r["data"]["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["agent_id"] == "macro-1")
+        .unwrap()
+        .clone();
+    assert_eq!(me["phase"], "idle", "{r}");
+    assert!(r["data"]["now_ms"].as_i64().unwrap() > 0);
+    let turns = s
+        .app
+        .runtime
+        .store()
+        .recent_turns(&"macro".into(), false, 10)
+        .await
+        .unwrap();
+    assert_eq!(turns.len(), 1, "这一轮记在主机上");
 }

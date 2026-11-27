@@ -23,6 +23,35 @@ final class Agent {
 /// 数字员工 ID。
 typedef AgentId = String;
 
+/// 一位员工在干什么、手上的事做到哪了。
+final class AgentProgress {
+  const AgentProgress({required this.agentId, required this.phase, this.headline, required this.tasks});
+
+  factory AgentProgress.fromJson(Map<String, Object?> j) => AgentProgress(
+    agentId: j['agent_id'] as String,
+    phase: ProgressPhase.fromJson(j['phase']),
+    headline: j['headline'] == null ? null : Estimate.fromJson(j['headline'] as Map<String, Object?>),
+    tasks: [for (final x in j['tasks'] as List<Object?>) Estimate.fromJson(x as Map<String, Object?>)],
+  );
+
+  final AgentId agentId;
+
+  final ProgressPhase phase;
+
+  /// 头顶进度条显示的那一项：正在做的任务或这一轮；没在做时取排在最前的，或卡住的任务。没事时为空。
+  final Estimate? headline;
+
+  /// 手上每个没结束的任务。
+  final List<Estimate> tasks;
+
+  Map<String, Object?> toJson() => {
+    'agent_id': agentId,
+    'phase': phase.toJson(),
+    'headline': headline?.toJson(),
+    'tasks': [for (final x in tasks) x.toJson()],
+  };
+}
+
 /// 推给设备的一条通知。
 final class Alert {
   const Alert({
@@ -318,6 +347,97 @@ final class ApprovalSubjectUnknown extends ApprovalSubject {
 
   @override
   Object? toJson() => json;
+}
+
+enum AttentionKind {
+  question('question'),
+  blocked('blocked'),
+  failed('failed'),
+  stalled('stalled'),
+  unassigned('unassigned'),
+  overdue('overdue'),
+  dueRisk('due_risk'),
+  due('due'),
+  likelyQuestion('likely_question'),
+  result('result'),
+  reply('reply'),
+  stepLimit('step_limit'),
+  budget('budget'),
+
+  /// 这个版本还不认识的值（主机比 App 新）。
+  unknown('');
+
+  const AttentionKind(this.wire);
+
+  /// JSON 里的写法。
+  final String wire;
+
+  static AttentionKind fromJson(Object? v) =>
+      values.firstWhere((e) => e != unknown && e.wire == v, orElse: () => unknown);
+
+  String toJson() => wire;
+}
+
+/// 一个要人看的时间点。
+final class AttentionPoint {
+  const AttentionPoint({
+    required this.kind,
+    this.agentId,
+    this.roleId,
+    this.taskId,
+    this.threadId,
+    required this.atMs,
+    this.lateMs,
+    this.likelihood,
+    required this.text,
+  });
+
+  factory AttentionPoint.fromJson(Map<String, Object?> j) => AttentionPoint(
+    kind: AttentionKind.fromJson(j['kind']),
+    agentId: j['agent_id'] == null ? null : j['agent_id'] as String,
+    roleId: j['role_id'] == null ? null : j['role_id'] as String,
+    taskId: j['task_id'] == null ? null : j['task_id'] as String,
+    threadId: j['thread_id'] == null ? null : j['thread_id'] as String,
+    atMs: j['at_ms'] as num,
+    lateMs: j['late_ms'] == null ? null : j['late_ms'] as num,
+    likelihood: j['likelihood'] == null ? null : j['likelihood'] as num,
+    text: j['text'] as String,
+  );
+
+  final AttentionKind kind;
+
+  final AgentId? agentId;
+
+  final RoleId? roleId;
+
+  final TaskId? taskId;
+
+  /// 点了去哪个对话。
+  final ThreadId? threadId;
+
+  /// 预计什么时候要人看；已经发生的是发生的时刻。
+  final num atMs;
+
+  /// 最晚什么时候（80 分位）；确定的时间点为空。
+  final num? lateMs;
+
+  /// 有多大可能真的要人看，0 到 1；已经发生的是 1，按速度外推的为空。
+  final num? likelihood;
+
+  /// 给人看的一句话，不含时刻（时刻由界面按本地时区显示）。
+  final String text;
+
+  Map<String, Object?> toJson() => {
+    'kind': kind.toJson(),
+    'agent_id': agentId,
+    'role_id': roleId,
+    'task_id': taskId,
+    'thread_id': threadId,
+    'at_ms': atMs,
+    'late_ms': lateMs,
+    'likelihood': likelihood,
+    'text': text,
+  };
 }
 
 /// 消息由谁发出。
@@ -677,6 +797,110 @@ final class DeviceInfo {
     'last_seen_ms': lastSeenMs,
     'online': online,
   };
+}
+
+/// 一项估算。估不出的字段为空，`basis` 写为什么。
+final class Estimate {
+  const Estimate({
+    required this.scope,
+    required this.threadId,
+    this.taskId,
+    required this.title,
+    required this.phase,
+    required this.startedMs,
+    required this.stepsDone,
+    this.stepsExpected,
+    this.fraction,
+    this.etaMs,
+    this.etaLateMs,
+    required this.samples,
+    required this.basis,
+  });
+
+  factory Estimate.fromJson(Map<String, Object?> j) => Estimate(
+    scope: EstimateScope.fromJson(j['scope']),
+    threadId: j['thread_id'] as String,
+    taskId: j['task_id'] == null ? null : j['task_id'] as String,
+    title: j['title'] as String,
+    phase: ProgressPhase.fromJson(j['phase']),
+    startedMs: j['started_ms'] as num,
+    stepsDone: j['steps_done'] as num,
+    stepsExpected: j['steps_expected'] == null ? null : j['steps_expected'] as num,
+    fraction: j['fraction'] == null ? null : j['fraction'] as num,
+    etaMs: j['eta_ms'] == null ? null : j['eta_ms'] as num,
+    etaLateMs: j['eta_late_ms'] == null ? null : j['eta_late_ms'] as num,
+    samples: j['samples'] as num,
+    basis: j['basis'] as String,
+  );
+
+  final EstimateScope scope;
+
+  final ThreadId threadId;
+
+  final TaskId? taskId;
+
+  /// 任务标题；一轮的是“这一轮”。
+  final String title;
+
+  final ProgressPhase phase;
+
+  /// 任务建好的时刻，或这一轮开始的时刻（还在排队的是现在）。
+  final num startedMs;
+
+  /// 已经走了几步。
+  final num stepsDone;
+
+  /// 按历史估的总步数（中位数）。
+  final num? stepsExpected;
+
+  /// 0 到 1，没做完时最多 0.95；估不出时为空，界面画不定长的进度条。
+  final num? fraction;
+
+  /// 预计做完的时刻（中位数）。在等人、受阻、停着的不估。
+  final num? etaMs;
+
+  /// 最晚可能做完的时刻（80 分位）。
+  final num? etaLateMs;
+
+  /// 用了几个历史样本；0 表示没估。
+  final num samples;
+
+  /// 估算依据，给人看的一句话。
+  final String basis;
+
+  Map<String, Object?> toJson() => {
+    'scope': scope.toJson(),
+    'thread_id': threadId,
+    'task_id': taskId,
+    'title': title,
+    'phase': phase.toJson(),
+    'started_ms': startedMs,
+    'steps_done': stepsDone,
+    'steps_expected': stepsExpected,
+    'fraction': fraction,
+    'eta_ms': etaMs,
+    'eta_late_ms': etaLateMs,
+    'samples': samples,
+    'basis': basis,
+  };
+}
+
+enum EstimateScope {
+  task('task'),
+  turn('turn'),
+
+  /// 这个版本还不认识的值（主机比 App 新）。
+  unknown('');
+
+  const EstimateScope(this.wire);
+
+  /// JSON 里的写法。
+  final String wire;
+
+  static EstimateScope fromJson(Object? v) =>
+      values.firstWhere((e) => e != unknown && e.wire == v, orElse: () => unknown);
+
+  String toJson() => wire;
 }
 
 /// 没有规则命中时怎么办。
@@ -1048,6 +1272,56 @@ final class OrgSpec {
   };
 }
 
+/// `list_progress` 的回复。
+final class ProgressBoard {
+  const ProgressBoard({required this.nowMs, required this.agents, required this.attention});
+
+  factory ProgressBoard.fromJson(Map<String, Object?> j) => ProgressBoard(
+    nowMs: j['now_ms'] as num,
+    agents: [for (final x in j['agents'] as List<Object?>) AgentProgress.fromJson(x as Map<String, Object?>)],
+    attention: [for (final x in j['attention'] as List<Object?>) AttentionPoint.fromJson(x as Map<String, Object?>)],
+  );
+
+  /// 主机算这张表的时刻。App 拿它和自己的时钟对齐，两次拉取之间按预计做完的时刻把进度条往前推。
+  final num nowMs;
+
+  /// 每位员工一项，按员工 id 排。
+  final List<AgentProgress> agents;
+
+  /// 要人看的时间点，按时刻排，同一时刻可能性大的在前。
+  final List<AttentionPoint> attention;
+
+  Map<String, Object?> toJson() => {
+    'now_ms': nowMs,
+    'agents': [for (final x in agents) x.toJson()],
+    'attention': [for (final x in attention) x.toJson()],
+  };
+}
+
+enum ProgressPhase {
+  idle('idle'),
+  queued('queued'),
+  working('working'),
+  waitingHuman('waiting_human'),
+  waitingColleague('waiting_colleague'),
+  blocked('blocked'),
+  stalled('stalled'),
+  failed('failed'),
+
+  /// 这个版本还不认识的值（主机比 App 新）。
+  unknown('');
+
+  const ProgressPhase(this.wire);
+
+  /// JSON 里的写法。
+  final String wire;
+
+  static ProgressPhase fromJson(Object? v) =>
+      values.firstWhere((e) => e != unknown && e.wire == v, orElse: () => unknown);
+
+  String toJson() => wire;
+}
+
 /// `list_reports` 的一项。
 final class ReportInfo {
   const ReportInfo({required this.agentId, required this.path, required this.bytes, required this.modifiedMs});
@@ -1117,6 +1391,7 @@ sealed class Request {
       'list_roles' => RequestListRoles.fromJson(j),
       'list_agents' => RequestListAgents.fromJson(j),
       'spend_today' => RequestSpendToday.fromJson(j),
+      'list_progress' => RequestListProgress.fromJson(j),
       'list_threads' => RequestListThreads.fromJson(j),
       'history' => RequestHistory.fromJson(j),
       'search' => RequestSearch.fromJson(j),
@@ -1188,6 +1463,15 @@ final class RequestSpendToday extends Request {
 
   @override
   Map<String, Object?> toJson() => {'type': 'spend_today'};
+}
+
+final class RequestListProgress extends Request {
+  const RequestListProgress();
+
+  factory RequestListProgress.fromJson(Map<String, Object?> j) => const RequestListProgress();
+
+  @override
+  Map<String, Object?> toJson() => {'type': 'list_progress'};
 }
 
 final class RequestListThreads extends Request {

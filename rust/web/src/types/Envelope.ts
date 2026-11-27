@@ -16,7 +16,7 @@ import type { JsonValue } from "./serde_json/JsonValue";
  * 客户端发来的一帧：可选的请求 id（原样带回）加上请求本身。
  * 请求里的字段因此不能叫 `id`，指代对象时用 `task_id`、`approval_id` 这类名字。
  */
-export type Envelope = { id?: JsonValue, } & ({ "type": "list_roles" } | { "type": "list_agents" } | { "type": "spend_today" } | { "type": "list_threads", limit?: number, } | { "type": "history", thread_id: ThreadId, before_ms?: number, limit?: number, } | { "type": "search", query: string, thread_id?: ThreadId, limit?: number, } | { "type": "route", text: string, author?: string, } | { "type": "list_rules" } | { "type": "save_rules", spec: RouterSpec, accepted_draft?: string, } | { "type": "list_rule_drafts" } | { "type": "list_schedules" } | { "type": "run_schedule", schedule_id: string, } | { "type": "dismiss_rule_draft", draft_id: string, } | { "type": "list_tasks", 
+export type Envelope = { id?: JsonValue, } & ({ "type": "list_roles" } | { "type": "list_agents" } | { "type": "spend_today" } | { "type": "list_progress" } | { "type": "list_threads", limit?: number, } | { "type": "history", thread_id: ThreadId, before_ms?: number, limit?: number, } | { "type": "search", query: string, thread_id?: ThreadId, limit?: number, } | { "type": "route", text: string, author?: string, } | { "type": "list_rules" } | { "type": "save_rules", spec: RouterSpec, accepted_draft?: string, } | { "type": "list_rule_drafts" } | { "type": "list_schedules" } | { "type": "run_schedule", schedule_id: string, } | { "type": "dismiss_rule_draft", draft_id: string, } | { "type": "list_tasks", 
 /**
  * 只要未完成的。
  */

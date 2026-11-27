@@ -12,6 +12,7 @@ pub mod engine;
 mod gateway;
 pub mod memory;
 mod memory_tools;
+pub mod progress;
 mod prompt;
 pub mod team;
 #[cfg(test)]
@@ -179,6 +180,10 @@ pub(crate) struct Shared {
     pub team_openings: team::OpeningCache,
     /// `/mcp` 的地址；服务开始监听后才有。
     pub mcp_url: RwLock<Option<String>>,
+    /// 谁在跑哪一轮、谁的收件箱里排着哪些对话（估进度用，`docs/ip/progress-design.md`）。
+    pub live: progress::Live,
+    /// 各岗位的历史基线和算好的时刻，[`progress::BASELINE_TTL_MS`] 内复用。
+    pub baselines: std::sync::Mutex<HashMap<RoleId, (i64, Arc<progress::Baseline>)>>,
     agents: Weak<AgentTable>,
 }
 
@@ -211,15 +216,18 @@ impl Shared {
                 .ok_or_else(|| RuntimeError::UnknownAgent(to.clone()))?
         };
         pending.fetch_add(1, Ordering::Relaxed);
+        // 先记“在排队”再送进去：员工可能马上就开始，开始时会把它撤掉。
+        self.live.queue(to, &thread_id);
         if inbox
             .send(Work {
-                thread: thread_id,
+                thread: thread_id.clone(),
                 escalate,
             })
             .await
             .is_err()
         {
             pending.fetch_sub(1, Ordering::Relaxed);
+            self.live.unqueue(to, &thread_id);
             return Err(RuntimeError::AgentStopped(to.clone()));
         }
         Ok(())
@@ -284,6 +292,8 @@ impl Runtime {
                 grants: gateway::Grants::default(),
                 team_openings: team::OpeningCache::default(),
                 mcp_url: RwLock::default(),
+                live: progress::Live::default(),
+                baselines: std::sync::Mutex::default(),
                 agents: Arc::downgrade(&agents),
             }),
             agents,

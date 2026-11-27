@@ -15,6 +15,7 @@ pub const LOCK_EVENTS: &str = "events";
 pub(crate) const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../migrations/0001_init.sql")),
     (2, include_str!("../migrations/0002_thread_agent.sql")),
+    (3, include_str!("../migrations/0003_turns.sql")),
 ];
 
 /// 第二个键按 schema 名区分，同一个库里多个 schema（测试时每个测试一个）互不影响。

@@ -29,6 +29,8 @@ pub enum Request {
     ListAgents,
     /// 回复 `SpendToday`：今天（UTC）各岗位和语义分派的模型费用。
     SpendToday,
+    /// 回复 `ProgressBoard`：每位员工手上的事做到哪了、要人看的时间点（`docs/ip/m2-spec.md` D-42）。
+    ListProgress,
     /// 回复 `ThreadSummary[]`，新的在前。
     ListThreads {
         #[serde(default)]

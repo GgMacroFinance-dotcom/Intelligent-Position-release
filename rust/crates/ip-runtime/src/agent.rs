@@ -94,6 +94,8 @@ impl Worker {
 
     async fn turn(&self, thread: &ThreadId, escalate: bool) {
         let agent_id = self.agent.id.clone();
+        let started_ms = ip_core::now_ms();
+        self.shared.live.start(&agent_id, thread, started_ms);
         self.shared.emit(RuntimeEvent::TurnStarted {
             agent_id: agent_id.clone(),
             thread_id: thread.clone(),
@@ -116,6 +118,25 @@ impl Worker {
             .await
         {
             tracing::warn!(agent = %agent_id, %error, "token 用量没记上");
+        }
+        // 记一轮（估进度用），在发结束事件之前：客户端收到事件去拉进度时，这一轮已经在里面。
+        let last = self.shared.live.finish(&agent_id);
+        let record = ip_store::TurnRecord {
+            agent_id: agent_id.clone(),
+            role_id: self.role.id.clone(),
+            thread_id: thread.clone(),
+            started_ms,
+            finished_ms: ip_core::now_ms().max(started_ms),
+            steps: match &result {
+                Ok(steps) => *steps,
+                Err(_) => last.map_or(0, |r| r.step),
+            },
+            ok: result.is_ok(),
+            cost_usd,
+            error: result.as_ref().err().map(ToString::to_string),
+        };
+        if let Err(error) = self.shared.store.record_turn(record).await {
+            tracing::warn!(agent = %agent_id, %error, "这一轮的记录没写上");
         }
         match result {
             Ok(steps) => {
@@ -192,6 +213,7 @@ impl Worker {
         let mut prompt_parts: Option<(String, Option<String>)> = None;
 
         for step in 1..=max_steps {
+            self.shared.live.step(&self.agent.id, step);
             let mut history = self.load(thread).await?;
             if prompt_parts.is_none() {
                 let team = self.team_context(thread, team::task_text(&self.agent, &history)).await;
