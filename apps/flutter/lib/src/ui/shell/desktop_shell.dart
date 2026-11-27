@@ -312,14 +312,15 @@ class _DesktopShellState extends State<DesktopShell> {
     }
   });
 
-  void _onLocalBotCreated(LocalBotRecord record) {
+  void _onLocalBotCreated(CreatedBot created) {
     setState(() {
       _createBotOpen = false;
     });
-    // 创建完成后直接回到天穹看到新星球以手选形态落入外环，同时轻提示说明本地演示态。
+    // 创建完成后直接回到天穹看到新星球以手选形态落入外环；只建在本机时说明是本地演示。
+    final where = created.onHost ? '已在主机上新建' : '已在本机新建（本地演示，主机上没有）';
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(
-        content: Text('已将「${record.agent.name}」（${record.celestial.name}）添加到星图外环（本地演示）'),
+        content: Text('$where「${created.agent.name}」（${created.celestial.name}），落在星图外环'),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 3),
       ),

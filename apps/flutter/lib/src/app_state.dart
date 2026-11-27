@@ -188,17 +188,10 @@ class AppState extends ChangeNotifier {
     unawaited(importanceSyncPort.clearOverride(agentId));
   }
 
-  // ---------- 本地新建 Bot（方案 1 前端闭环，详见 ui/shell/local_bot.dart 后端空缺说明） ----------
+  // ---------- 新建 Bot（详见 ui/shell/local_bot.dart） ----------
   //
-  // TODO(backend-create-bot) — 后端协议空缺说明：
-  // 1. `rust/crates/ip-server/src/protocol.rs` & `ws.rs` 目前只有只读 `ListRoles` / `ListAgents`，
-  //    尚未开放 `CreateRole` / `CreateAgent` / `UpdateAgent` / `DeleteAgent` RPC（虽然 `ip-runtime` 底层已有
-  //    `Runtime::add_role` 与 `Runtime::spawn_agent`）；
-  // 2. `rust/crates/ip-core/src/org.rs` 的 `Agent` 与 `ip-server/src/config.rs` 的 `AgentConfig` 尚无
-  //    `celestial_style` 字段，无法持久化用户手选的星球形态；
-  // 3. `RuntimeEvent` 尚无 `RoleAdded` / `AgentSpawned` / `AgentRemoved` 实时广播事件。
-  // 当前由 [_localBots] 存在全局 [AppState] 中（跨 980px 缩放不丢失，且星图/顶栏/岗位页/三栏窗数据同源），
-  // 待后端补齐接口后把 [createLocalBot] / [removeLocalBot] 替换为真实 RPC 即可无缝切换。
+  // 连着主机、有“管理”权限时建在主机上（m2-spec D-42：`create_role`、`create_agent`），主机推 `org_changed`；
+  // 否则只建在本机 [_localBots] 里（跨 980px 缩放不丢失，且星图/顶栏/岗位页/三栏窗数据同源）。
   final _localBots = <LocalBotRecord>[];
 
   List<LocalBotRecord> get localBots => List.unmodifiable(_localBots);
@@ -225,12 +218,75 @@ class AppState extends ChangeNotifier {
     ];
   }
 
-  /// 用户手选的非太阳星球形态覆盖表（`agentId -> Celestial`）。
-  /// TODO(backend-create-bot)：后端 `Agent` 下发 `celestial_style` 后，此处合并远端字段与本地新建项。
+  /// 用户手选的非太阳星球形态覆盖表（`agentId -> Celestial`）：主机员工的 `celestial_style`，加上本地新建的。
   Map<String, Celestial> get celestialOverrides => {
+    for (final a in agents) a.id: ?selectableCelestialById(a.celestialStyle),
     for (final b in _localBots)
       if (b.celestial.kind != CelestialKind.sun) b.agent.id: b.celestial,
   };
+
+  /// 主机认不认在线改组织的请求；旧主机回“请求格式错误”后记成 false，之后新建 Bot 只建在本机。
+  bool _orgRequestsOnHost = true;
+
+  /// 新建 Bot 会不会建在主机上：连着、有“管理”权限、主机认这些请求。
+  bool get createsBotsOnHost => connected && isAdmin && _orgRequestsOnHost;
+
+  /// 新建 Bot：能建在主机上就建在主机上（需要时先建岗位），否则建在本机（[createLocalBot]）。
+  /// 主机拒了时抛 [RequestError]，员工没建（先建好的岗位留在主机上）。
+  Future<CreatedBot> createBot(CreateBotDraft draft) async {
+    final c = _client;
+    if (c == null || !createsBotsOnHost) {
+      final r = createLocalBot(draft);
+      return (agent: r.agent, celestial: r.celestial, onHost: false);
+    }
+    final name = draft.name.trim();
+    if (name.isEmpty) throw const RequestError('Bot 名称不能为空');
+    if (draft.celestial.kind == CelestialKind.sun) throw const RequestError('太阳仅保留给中心幕僚长，不可用于新建普通 Bot');
+    if ((draft.workspace ?? '').trim().isNotEmpty) {
+      throw const RequestError('在线新建的员工用主机默认的工作目录；要指定目录请改主机的 ip.yaml');
+    }
+    final roleIds = {for (final r in allRoles) r.id};
+    final agentIds = {for (final a in allAgents) a.id};
+    String roleId;
+    try {
+      if (draft.existingRoleId case final id? when roles.any((r) => r.id == id)) {
+        roleId = id;
+      } else {
+        final roleName = (draft.newRoleName ?? '').trim().isNotEmpty ? draft.newRoleName!.trim() : name;
+        final desc = (draft.newRoleDescription ?? '').trim();
+        final escalate = (draft.modelEscalate ?? '').trim();
+        final budget = draft.budgetPerDayUsd;
+        final role = await c.createRole(
+          id: generateUniqueSlug(roleName, prefix: 'role', existingIds: roleIds),
+          name: roleName,
+          description: desc.isNotEmpty ? desc : '$roleName的岗位职责',
+          model: draft.modelDefault.trim().isNotEmpty ? draft.modelDefault.trim() : 'openai/gpt-6-luna',
+          escalateModel: escalate.isEmpty ? null : escalate,
+          budgetPerDayUsd: (budget != null && budget > 0) ? budget : null,
+        );
+        roleId = role.id;
+        roles = [...roles.where((r) => r.id != role.id), role];
+      }
+      final agent = await c.createAgent(
+        agentId: generateUniqueSlug(name, prefix: 'bot', existingIds: agentIds),
+        role: roleId,
+        name: name,
+        tools: draft.tools,
+        celestialStyle: celestialStyleOf(draft.celestial),
+      );
+      agents = [...agents.where((a) => a.id != agent.id), agent];
+      notifyListeners();
+      return (agent: agent, celestial: draft.celestial, onHost: true);
+    } on RequestError catch (e) {
+      // 旧主机不认这些请求：之后只建在本机，这一次也建在本机。
+      if (e.message.startsWith('请求格式错误')) {
+        _orgRequestsOnHost = false;
+        final r = createLocalBot(draft);
+        return (agent: r.agent, celestial: r.celestial, onHost: false);
+      }
+      rethrow;
+    }
+  }
 
   LocalBotRecord? localBotById(String agentId) {
     for (final b in _localBots) {
@@ -241,8 +297,7 @@ class AppState extends ChangeNotifier {
 
   bool isLocalBot(String agentId) => localBotById(agentId) != null;
 
-  /// 方案 1 本地新建 Bot：校验名称与非太阳形态，生成合法唯一 ID 并立刻注入全局星图与岗位列表。
-  /// TODO(backend-create-bot)：后端补齐 `create_role` / `create_agent` 后改为发送 [CreateBotDraft.toPlannedWireJson]。
+  /// 只在本机新建 Bot：校验名称与非太阳形态，生成合法唯一 ID 并立刻注入全局星图与岗位列表。
   LocalBotRecord createLocalBot(CreateBotDraft draft, {int? nowMs}) {
     final trimmedName = draft.name.trim();
     if (trimmedName.isEmpty) {
@@ -291,8 +346,7 @@ class AppState extends ChangeNotifier {
     return record;
   }
 
-  /// 移除一条前端本地新建的 Bot（同步清理其轨道固定与演示待审批记录）。
-  /// TODO(backend-create-bot)：后端补齐 `delete_agent` 后改为调用远端接口。
+  /// 移除一条只建在本机的 Bot（同步清理其轨道固定与演示待审批记录）。主机上的员工用 [deleteHostAgent]。
   void removeLocalBot(String agentId) {
     final before = _localBots.length;
     _localBots.removeWhere((b) => b.agent.id == agentId);
@@ -302,6 +356,17 @@ class AppState extends ChangeNotifier {
     _localCompletionApprovals.removeWhere((x) => x.agentId == agentId);
     completionApprovedAtMs.remove(agentId);
     completionReworkAgents.remove(agentId);
+    notifyListeners();
+  }
+
+  /// 在主机上删掉一位员工（m2-spec D-42，要“管理”权限）。主机推 `org_changed` 后列表跟着换。
+  Future<void> deleteHostAgent(String agentId) async {
+    final c = _client;
+    if (c == null) throw const RequestError('尚未连接');
+    await c.deleteAgent(agentId);
+    agents = agents.where((a) => a.id != agentId).toList();
+    manualOrbitPins.remove(agentId);
+    manualImportanceOverrides.remove(agentId);
     notifyListeners();
   }
 
@@ -523,6 +588,7 @@ class AppState extends ChangeNotifier {
 
   void _reset() {
     me = null;
+    _orgRequestsOnHost = true;
     roles = [];
     agents = [];
     threads = [];
@@ -994,6 +1060,9 @@ class AppState extends ChangeNotifier {
         _upsertApproval(approval);
       case OrbitPinsChanged(:final pins):
         _applyHostOrbitPins(pins);
+      case OrgChanged(roles: final r, agents: final a):
+        roles = r;
+        agents = a;
       case UnknownEvent():
         return;
     }

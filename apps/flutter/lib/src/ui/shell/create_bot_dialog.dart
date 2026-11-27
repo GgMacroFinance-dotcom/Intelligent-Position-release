@@ -9,11 +9,13 @@
 //     挂在底部左侧极轻文字开关处，点开才平滑展开，平时绝不打扰第一屏纯净感。
 //   - 后端协议空缺详细文档与提案字段集中在 local_bot.dart。
 
+import 'dart:async' show unawaited;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../../protocol/client.dart' show RequestError;
 import '../../protocol/models.dart';
 import '../../star_map.dart';
 import '../common.dart';
@@ -42,7 +44,7 @@ class CreateBotModal extends StatefulWidget {
   final Map<CelestialStyle, int> usedCelestialCounts;
 
   final VoidCallback onClose;
-  final ValueChanged<LocalBotRecord> onCreated;
+  final ValueChanged<CreatedBot> onCreated;
 
   @override
   State<CreateBotModal> createState() => _CreateBotModalState();
@@ -67,6 +69,9 @@ class _CreateBotModalState extends State<CreateBotModal> {
   bool _tools = true;
   bool _initializedFromState = false;
   String? _error;
+
+  /// 正在等主机建好（建在主机上时，m2-spec D-42）。
+  bool _submitting = false;
 
   @override
   void initState() {
@@ -145,7 +150,8 @@ class _CreateBotModalState extends State<CreateBotModal> {
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_submitting) return;
     final state = AppScope.read(context);
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
@@ -180,8 +186,20 @@ class _CreateBotModalState extends State<CreateBotModal> {
       workspace: _workspaceCtrl.text.trim().isEmpty ? null : _workspaceCtrl.text.trim(),
     );
 
-    final record = state.createLocalBot(draft);
-    widget.onCreated(record);
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      final created = await state.createBot(draft);
+      if (mounted) widget.onCreated(created);
+    } on RequestError catch (e) {
+      if (mounted) setState(() => _error = '主机没能新建：$e');
+    } on ArgumentError catch (e) {
+      if (mounted) setState(() => _error = '${e.message}');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   @override
@@ -195,7 +213,7 @@ class _CreateBotModalState extends State<CreateBotModal> {
     final trimmedName = _nameCtrl.text.trim();
     final sameNameExists =
         trimmedName.isNotEmpty && state.allAgents.any((a) => a.name.trim().toLowerCase() == trimmedName.toLowerCase());
-    final canSubmit = trimmedName.isNotEmpty;
+    final canSubmit = trimmedName.isNotEmpty && !_submitting;
 
     // 统一深暮蓝 Liquid Glass 色板：带冷群青暗调，既衬亮色恒星/水星/金星，又让深蓝海王星清晰立体。
     const ink = Color(0xF5F7FAFF);
@@ -332,7 +350,7 @@ class _CreateBotModalState extends State<CreateBotModal> {
                                                   ),
                                                   onChanged: (_) => setState(() => _error = null),
                                                   onSubmitted: (_) {
-                                                    if (canSubmit) _submit();
+                                                    if (canSubmit) unawaited(_submit());
                                                   },
                                                   decoration: InputDecoration(
                                                     counterText: '',
@@ -486,7 +504,7 @@ class _CreateBotModalState extends State<CreateBotModal> {
                                                 foreground: canSubmit
                                                     ? const Color(0xFF101829)
                                                     : const Color(0x4DD6E2FA),
-                                                onTap: canSubmit ? _submit : null,
+                                                onTap: canSubmit ? () => unawaited(_submit()) : null,
                                               ),
                                             ],
                                           ),
