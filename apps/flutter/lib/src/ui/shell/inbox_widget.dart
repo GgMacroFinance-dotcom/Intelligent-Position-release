@@ -18,9 +18,10 @@ import '../../protocol/client.dart' show RequestError;
 import '../../protocol/models.dart';
 import '../common.dart';
 import '../report.dart' show openReport;
-import '../task_card.dart' show taskMeta, taskStatusText;
+import '../task_card.dart' show taskMeta, taskStatusLabel, taskStatusText;
 import 'completion_approval.dart';
 import 'tokens.dart';
+import '../rework_note.dart';
 
 /// 红 / 黄 / 绿三档紧急度分组。
 enum InboxLight {
@@ -827,9 +828,16 @@ class _GlassCompletionApprovalCardState extends State<_GlassCompletionApprovalCa
   CompletionDecision? _busy;
 
   Future<void> _decide(CompletionDecision decision) async {
+    String? note;
+    if (decision == CompletionDecision.reject) {
+      // 先问要改什么；取消就不打回。
+      note = await askReworkNote(context, widget.item);
+      if (note == null || !mounted) return;
+    }
     setState(() => _busy = decision);
     try {
-      await AppScope.read(context).decideCompletionApproval(widget.item, decision);
+      await AppScope.read(context)
+          .decideCompletionApproval(widget.item, decision, note: (note?.isEmpty ?? true) ? null : note);
     } on RequestError catch (e) {
       if (mounted) showError(context, '审批操作失败：$e');
     } finally {
@@ -1203,6 +1211,10 @@ class _GlassTaskCardState extends State<_GlassTaskCard> {
                     child: DropdownButton<String>(
                       key: ValueKey('inbox-task-status-${t.id}'),
                       value: taskStatusText.containsKey(t.status) ? t.status : null,
+                      hint: Text(
+                        taskStatusLabel(t.status),
+                        style: TextStyle(fontSize: 11.5, color: widget.light.color),
+                      ),
                       isDense: true,
                       dropdownColor: const Color(0xFFFFFCF5),
                       borderRadius: BorderRadius.circular(Radii.menu),

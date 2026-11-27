@@ -24,6 +24,7 @@ fn role(id: &str, budget: Option<f64>) -> Role {
         },
         budget_per_day_usd: budget,
         coordinator: false,
+        approve_completion: false,
     }
 }
 
@@ -51,6 +52,7 @@ fn task(id: &str, assignee: Option<&str>, status: TaskStatus) -> Task {
         created_at_ms: NOW - 60_000,
         updated_at_ms: NOW - 60_000,
         due_ms: None,
+        needs_approval: false,
     }
 }
 
@@ -517,3 +519,4 @@ fn far_predictions_are_dropped() {
     assert!(board.agents[0].headline.as_ref().unwrap().eta_ms.is_some(), "估算照给");
     assert!(board.attention.is_empty(), "24 小时以外的预测不列：{:?}", kinds(&board));
 }
+

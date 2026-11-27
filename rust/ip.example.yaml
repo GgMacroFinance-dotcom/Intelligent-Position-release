@@ -121,6 +121,7 @@ roles:
   # 执行层第二个岗位：运维测试。工作目录指向要维护的项目（见 agents 里的 workspace）。
   - id: ops-tester
     name: 运维测试
+    # approve_completion: true   # 派给这个岗位的任务做完要人验收：交回后先发验收卡片，人通过才结项
     # budget_per_day_usd: 2        # 这个岗位配了外部引擎（Codex、Claude Code）时，还要在 engines 里写 price
     description: |
       维护服务器和数据管道，编写并运行测试，发现问题后定位原因并给出修复。首要职责是维护模型中转站

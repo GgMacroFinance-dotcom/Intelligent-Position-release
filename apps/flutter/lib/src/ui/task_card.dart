@@ -8,7 +8,11 @@ import '../protocol/models.dart';
 import 'common.dart';
 
 /// 任务状态的中文名，和控制台一样。
+/// 人能选的任务状态。
 const taskStatusText = {'open': '待开始', 'in_progress': '进行中', 'blocked': '受阻', 'done': '已完成', 'cancelled': '已取消'};
+
+/// 任务状态的中文名，含只由主机设置的“待验收”（m2-spec D-41）。
+String taskStatusLabel(String status) => taskStatusText[status] ?? (status == 'pending_approval' ? '待验收' : status);
 
 /// 谁负责、谁派的、什么时候更新的。
 String taskMeta(AppState state, Task t) {
@@ -90,7 +94,9 @@ class _TaskCardState extends State<TaskCard> {
               children: [
                 Text('状态', style: muted),
                 DropdownButton<String>(
-                  value: t.status,
+                  // 等验收（pending_approval）只由主机设置，不在可选项里：显示成提示，选“已完成”或“进行中”等于通过或打回。
+                  value: taskStatusText.containsKey(t.status) ? t.status : null,
+                  hint: Text(taskStatusLabel(t.status)),
                   isDense: true,
                   onChanged: _saving || !state.connected ? null : (v) => v == null ? null : _setStatus(v),
                   items: [

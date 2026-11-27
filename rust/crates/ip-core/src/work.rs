@@ -15,6 +15,9 @@ pub enum TaskStatus {
     Open,
     InProgress,
     Blocked,
+    /// 已完成、等人验收（`needs_approval` 的任务交回 done 时由主机设置，`docs/ip/m2-spec.md` D-41）。
+    /// 人通过后变成 done，打回后变成 in_progress。不能直接设成这个状态。
+    PendingApproval,
     Done,
     Cancelled,
 }
@@ -54,6 +57,15 @@ pub struct Task {
     pub updated_at_ms: i64,
     #[ts(type = "number | null")]
     pub due_ms: Option<i64>,
+    /// 做完要人验收：负责人交回 done 时先变成 pending_approval，发一张验收卡片，人通过才结项。
+    /// 建任务时人勾上，或负责人的岗位配了 `approve_completion`。是 false 时协议里不带这一项。
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[ts(as = "Option<bool>", optional)]
+    pub needs_approval: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// 决策卡片上的一个选项。
@@ -79,9 +91,23 @@ pub enum ApprovalSubject {
     },
     /// 员工在工作中提的问题。选定后结果写进该对话，并通知这位员工接着做。
     AgentQuestion { agent_id: AgentId, thread_id: ThreadId },
+    /// 员工交回了要人验收的任务（D-41）。选项固定：0 通过（任务结项，结果回报派活人），
+    /// 1 打回修改（任务退回进行中，叫负责人接着改）。交回的结果在卡片的 `reason` 里。
+    TaskCompletion {
+        agent_id: AgentId,
+        task_id: TaskId,
+        /// 负责人做这件事的对话。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        thread_id: Option<ThreadId>,
+    },
     /// 一般问题，选中后只记录结果。
     Question,
 }
+
+/// 验收卡片的两个选项的序号。
+pub const COMPLETION_APPROVE: u32 = 0;
+pub const COMPLETION_REWORK: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "state", rename_all = "snake_case")]

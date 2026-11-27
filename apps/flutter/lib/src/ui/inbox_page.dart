@@ -10,6 +10,7 @@ import 'common.dart';
 import 'report.dart';
 import 'shell/completion_approval.dart';
 import 'task_card.dart';
+import 'rework_note.dart';
 
 /// “最近”是几天内，每类最多列几条。
 const _recent = Duration(days: 7);
@@ -108,9 +109,16 @@ class _CompletionApprovalCardState extends State<_CompletionApprovalCard> {
   CompletionDecision? _busy;
 
   Future<void> _decide(CompletionDecision decision) async {
+    String? note;
+    if (decision == CompletionDecision.reject) {
+      // 先问要改什么；取消就不打回。
+      note = await askReworkNote(context, widget.item);
+      if (note == null || !mounted) return;
+    }
     setState(() => _busy = decision);
     try {
-      await AppScope.read(context).decideCompletionApproval(widget.item, decision);
+      await AppScope.read(context)
+          .decideCompletionApproval(widget.item, decision, note: (note?.isEmpty ?? true) ? null : note);
     } on RequestError catch (e) {
       if (mounted) showError(context, '审批操作失败：$e');
     } finally {
@@ -134,15 +142,26 @@ class _CompletionApprovalCardState extends State<_CompletionApprovalCard> {
           children: [
             Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
-                  decoration: BoxDecoration(color: const Color(0x22D97706), borderRadius: BorderRadius.circular(999)),
-                  child: Text(
-                    '${item.agentName} · 完成 · 待审批',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFFB45309)),
+                // 员工名长、时间带日期时手机宽度放不下：标签缩略，时间照常显示。
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                      decoration: BoxDecoration(
+                        color: const Color(0x22D97706),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '${item.agentName} · 完成 · 待审批',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFFB45309)),
+                      ),
+                    ),
                   ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 8),
                 Text(formatTime(item.createdAtMs), style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
               ],
             ),

@@ -103,6 +103,7 @@ class _NewTaskFormState extends State<NewTaskForm> {
   final _description = TextEditingController();
   late String? _assignee = widget.initialAssignee;
   DateTime? _due;
+  bool _needsApproval = false;
   bool _saving = false;
   String? _error;
 
@@ -143,6 +144,7 @@ class _NewTaskFormState extends State<NewTaskForm> {
         description: desc.isEmpty ? null : desc,
         assignee: _assignee,
         dueMs: _due?.millisecondsSinceEpoch,
+        needsApproval: _assignee != null && _needsApproval,
       );
       if (!mounted) return;
       final messenger = ScaffoldMessenger.of(context);
@@ -216,6 +218,15 @@ class _NewTaskFormState extends State<NewTaskForm> {
           if (_assignee != null) ...[
             const SizedBox(height: 8),
             Text('建好后主机会另开一个对话，把任务交给这位员工。', style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
+            CheckboxListTile(
+              key: const ValueKey('new-task-needs-approval'),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: _needsApproval,
+              onChanged: (v) => setState(() => _needsApproval = v ?? false),
+              title: const Text('做完要我验收'),
+              subtitle: const Text('员工交回后先发一张验收卡片，你通过才算完成；打回时可以写要改什么。'),
+            ),
           ],
           if (_error != null) ...[
             const SizedBox(height: 8),

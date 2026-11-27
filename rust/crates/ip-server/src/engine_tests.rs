@@ -120,6 +120,7 @@ async fn fixture_with(
         },
         budget_per_day_usd: None,
         coordinator: false,
+        approve_completion: false,
     };
     runtime
         .spawn_agent(AgentSetup {

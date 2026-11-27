@@ -275,6 +275,7 @@ sealed class ApprovalSubject {
     return switch (j['kind']) {
       'route_message' => ApprovalSubjectRouteMessage.fromJson(j),
       'agent_question' => ApprovalSubjectAgentQuestion.fromJson(j),
+      'task_completion' => ApprovalSubjectTaskCompletion.fromJson(j),
       'question' => ApprovalSubjectQuestion.fromJson(j),
       _ => ApprovalSubjectUnknown(j),
     };
@@ -328,6 +329,31 @@ final class ApprovalSubjectAgentQuestion extends ApprovalSubject {
 
   @override
   Map<String, Object?> toJson() => {'kind': 'agent_question', 'agent_id': agentId, 'thread_id': threadId};
+}
+
+final class ApprovalSubjectTaskCompletion extends ApprovalSubject {
+  const ApprovalSubjectTaskCompletion({required this.agentId, required this.taskId, this.threadId});
+
+  factory ApprovalSubjectTaskCompletion.fromJson(Map<String, Object?> j) => ApprovalSubjectTaskCompletion(
+    agentId: j['agent_id'] as String,
+    taskId: j['task_id'] as String,
+    threadId: j['thread_id'] == null ? null : j['thread_id'] as String,
+  );
+
+  final AgentId agentId;
+
+  final TaskId taskId;
+
+  /// 负责人做这件事的对话。
+  final ThreadId? threadId;
+
+  @override
+  Map<String, Object?> toJson() => {
+    'kind': 'task_completion',
+    'agent_id': agentId,
+    'task_id': taskId,
+    'thread_id': ?threadId,
+  };
 }
 
 final class ApprovalSubjectQuestion extends ApprovalSubject {
@@ -1630,6 +1656,7 @@ final class RequestCreateTask extends Request {
     this.assignee,
     this.threadId,
     this.dueMs,
+    this.needsApproval,
     this.author,
   });
 
@@ -1640,6 +1667,7 @@ final class RequestCreateTask extends Request {
     assignee: j['assignee'] == null ? null : j['assignee'] as String,
     threadId: j['thread_id'] == null ? null : j['thread_id'] as String,
     dueMs: j['due_ms'] == null ? null : j['due_ms'] as num,
+    needsApproval: j['needs_approval'] == null ? null : j['needs_approval'] as bool,
     author: j['author'] == null ? null : j['author'] as String,
   );
 
@@ -1655,6 +1683,9 @@ final class RequestCreateTask extends Request {
 
   final num? dueMs;
 
+  /// 做完要人验收（D-41）。负责人的岗位配了 `approve_completion` 时不给也要。
+  final bool? needsApproval;
+
   final String? author;
 
   @override
@@ -1666,6 +1697,7 @@ final class RequestCreateTask extends Request {
     'assignee': ?assignee,
     'thread_id': ?threadId,
     'due_ms': ?dueMs,
+    'needs_approval': ?needsApproval,
     'author': ?author,
   };
 }
@@ -1720,17 +1752,21 @@ final class RequestListApprovals extends Request {
 }
 
 final class RequestResolveApproval extends Request {
-  const RequestResolveApproval({required this.approvalId, required this.choice, this.author});
+  const RequestResolveApproval({required this.approvalId, required this.choice, this.note, this.author});
 
   factory RequestResolveApproval.fromJson(Map<String, Object?> j) => RequestResolveApproval(
     approvalId: j['approval_id'] as String,
     choice: j['choice'] as num,
+    note: j['note'] == null ? null : j['note'] as String,
     author: j['author'] == null ? null : j['author'] as String,
   );
 
   final ApprovalId approvalId;
 
   final num choice;
+
+  /// 选的时候附的话。验收卡片打回时是要改什么，写进负责人的对话（D-41）；别的卡片不用它。
+  final String? note;
 
   final String? author;
 
@@ -1739,6 +1775,7 @@ final class RequestResolveApproval extends Request {
     'type': 'resolve_approval',
     'approval_id': approvalId,
     'choice': choice,
+    'note': ?note,
     'author': ?author,
   };
 }
@@ -2088,6 +2125,7 @@ final class Role {
     required this.model,
     this.budgetPerDayUsd,
     this.coordinator,
+    this.approveCompletion,
   });
 
   factory Role.fromJson(Map<String, Object?> j) => Role(
@@ -2097,6 +2135,7 @@ final class Role {
     model: ModelSlot.fromJson(j['model'] as Map<String, Object?>),
     budgetPerDayUsd: j['budget_per_day_usd'] == null ? null : j['budget_per_day_usd'] as num,
     coordinator: j['coordinator'] == null ? null : j['coordinator'] as bool,
+    approveCompletion: j['approve_completion'] == null ? null : j['approve_completion'] as bool,
   );
 
   final RoleId id;
@@ -2116,6 +2155,9 @@ final class Role {
   /// 只是标记，不改这个岗位的工具和提示词。是 false 时不出现在协议里，旧主机也一样没有。
   final bool? coordinator;
 
+  /// 派给这个岗位员工的任务，做完都要人验收（`docs/ip/m2-spec.md` D-41）。是 false 时不出现在协议里。
+  final bool? approveCompletion;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
@@ -2123,6 +2165,7 @@ final class Role {
     'model': model.toJson(),
     'budget_per_day_usd': budgetPerDayUsd,
     'coordinator': ?coordinator,
+    'approve_completion': ?approveCompletion,
   };
 }
 
@@ -2784,6 +2827,7 @@ final class Task {
     required this.createdAtMs,
     required this.updatedAtMs,
     this.dueMs,
+    this.needsApproval,
   });
 
   factory Task.fromJson(Map<String, Object?> j) => Task(
@@ -2801,6 +2845,7 @@ final class Task {
     createdAtMs: j['created_at_ms'] as num,
     updatedAtMs: j['updated_at_ms'] as num,
     dueMs: j['due_ms'] == null ? null : j['due_ms'] as num,
+    needsApproval: j['needs_approval'] == null ? null : j['needs_approval'] as bool,
   );
 
   final TaskId id;
@@ -2836,6 +2881,10 @@ final class Task {
 
   final num? dueMs;
 
+  /// 做完要人验收：负责人交回 done 时先变成 pending_approval，发一张验收卡片，人通过才结项。
+  /// 建任务时人勾上，或负责人的岗位配了 `approve_completion`。是 false 时协议里不带这一项。
+  final bool? needsApproval;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'title': title,
@@ -2851,6 +2900,7 @@ final class Task {
     'created_at_ms': createdAtMs,
     'updated_at_ms': updatedAtMs,
     'due_ms': dueMs,
+    'needs_approval': ?needsApproval,
   };
 }
 
@@ -2861,6 +2911,7 @@ enum TaskStatus {
   open('open'),
   inProgress('in_progress'),
   blocked('blocked'),
+  pendingApproval('pending_approval'),
   done('done'),
   cancelled('cancelled'),
 

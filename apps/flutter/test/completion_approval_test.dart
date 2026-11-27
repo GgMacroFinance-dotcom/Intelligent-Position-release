@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ip_app/src/protocol/models.dart';
+import 'package:ip_app/src/ui/rework_note.dart';
 import 'package:ip_app/src/ui/shell/agent_panel.dart';
 import 'package:ip_app/src/ui/shell/completion_approval.dart';
 import 'package:ip_app/src/ui/shell/desktop_shell.dart';
@@ -10,6 +11,116 @@ import 'package:ip_app/src/ui/shell/inbox_widget.dart';
 import 'harness.dart';
 
 void main() {
+  testWidgets('主机的验收卡片（D-41）：解析员工、对话、任务，和待验收的任务去重；打回带上要改的', (tester) async {
+    final h = Harness();
+    h.host.handlers['list_approvals'] = (_) => [
+      {
+        'id': 'ap9',
+        'question': '验收 宏观研究员 交回的任务「写 CPI 点评」',
+        'options': [
+          {'label': '通过', 'consequence': '任务结项'},
+          {'label': '打回修改', 'consequence': '任务退回进行中'},
+        ],
+        'recommended': null,
+        'reason': '初稿',
+        'subject': {'kind': 'task_completion', 'agent_id': 'macro-1', 'task_id': 'k5', 'thread_id': 'tw'},
+        'state': {'state': 'pending'},
+        'created_at_ms': 2000,
+      },
+    ];
+    h.host.handlers['list_tasks'] = (_) => [
+      {
+        'id': 'k5',
+        'title': '写 CPI 点评',
+        'description': '',
+        'status': 'pending_approval',
+        'role': 'macro',
+        'assignee': 'macro-1',
+        'thread_id': 'tw',
+        'origin_thread_id': null,
+        'result': '初稿',
+        'depth': 1,
+        'created_by': {'kind': 'human', 'name': '张三'},
+        'created_at_ms': 1,
+        'updated_at_ms': 2000,
+        'due_ms': null,
+        'needs_approval': true,
+      },
+    ];
+    h.host.handlers['resolve_approval'] = (req) => {
+      ...(h.host.handlers['list_approvals']!(req) as List).first as Map<String, dynamic>,
+      'state': {'state': 'resolved', 'choice': req['choice'], 'by': '张三的手机', 'at_ms': 3000},
+    };
+    await h.savePaired();
+    await h.start(tester);
+    final card = h.state.approvals.single;
+    expect(card.isTaskCompletion, isTrue);
+    expect((card.subjectAgentId, card.subjectThreadId, card.subjectTaskId), ('macro-1', 'tw', 'k5'));
+    expect(h.state.tasks.single.isPendingApproval, isTrue);
+    final items = h.state.pendingCompletionApprovals;
+    expect(items.length, 1, reason: '卡片和待验收的任务是同一件事，只算一条');
+    expect(items.single.source, CompletionSource.backendApproval);
+    expect(items.single.summary, '初稿');
+
+    // 待办里点“打回修改”：先问要改什么，取消就不打回。
+    await tester.tap(find.widgetWithText(OutlinedButton, '打回修改'));
+    await tester.pumpAndSettle();
+    expect(find.text('打回「验收 宏观研究员 交回的任务「写 CPI 点评」」'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(h.host.requests.where((r) => r['type'] == 'resolve_approval'), isEmpty);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '打回修改'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('rework-note')), '  加上 PPI  ');
+    await tester.tap(find.byKey(const ValueKey('rework-confirm')));
+    await tester.pumpAndSettle();
+    final req = h.host.requests.lastWhere((r) => r['type'] == 'resolve_approval');
+    expect(req, containsPair('approval_id', 'ap9'));
+    expect(req, containsPair('choice', 1));
+    expect(req, containsPair('note', '加上 PPI'));
+    await h.stop(tester);
+  });
+
+  testWidgets('打回时不写意见：照样打回，不带 note', (tester) async {
+    final item = CompletionApproval(
+      id: 'approval:ap1',
+      agentId: 'macro-1',
+      agentName: '小宏',
+      taskTitle: '写周报',
+      summary: '初稿',
+      createdAtMs: 1,
+      source: CompletionSource.backendApproval,
+    );
+    String? got = 'unset';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) =>
+              TextButton(onPressed: () async => got = await askReworkNote(context, item), child: const Text('打回')),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打回'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('会发给小宏'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('rework-confirm')));
+    await tester.pumpAndSettle();
+    expect(got, '');
+    // 本地演示项不弹框。
+    final demo = CompletionApproval(
+      id: 'demo:1',
+      agentId: 'x',
+      agentName: 'x',
+      taskTitle: 't',
+      summary: '',
+      createdAtMs: 1,
+      source: CompletionSource.localDemo,
+    );
+    final ctx = tester.element(find.text('打回'));
+    expect(await askReworkNote(ctx, demo), '');
+  });
+
   test('5A 语义隔离：仅采集 task_completion 审批与 pending_approval 任务，不吞并 agent_question', () {
     final approvals = [
       const Approval(

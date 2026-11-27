@@ -127,6 +127,7 @@ fn card_thread(approval: &Approval) -> Option<&ThreadId> {
         ApprovalSubject::RouteMessage { thread_id, .. } | ApprovalSubject::AgentQuestion { thread_id, .. } => {
             Some(thread_id)
         }
+        ApprovalSubject::TaskCompletion { thread_id, .. } => thread_id.as_ref(),
         ApprovalSubject::Question => None,
     }
 }
@@ -295,7 +296,7 @@ impl ChannelHub {
             return Err(HubError::Rejected(format!("{who}能选这张卡片")));
         }
         let by = format!("{}（{}:{}）", click.sender.display_name, self.channel, user);
-        crate::work::resolve_approval(&self.app, &click.approval_id, click.choice, by)
+        crate::work::resolve_approval(&self.app, &click.approval_id, click.choice, by, None)
             .await
             .map_err(HubError::Rejected)?;
         Ok(())

@@ -1,8 +1,8 @@
 //! 发消息、任务、审批这些需要跨运行时、存储、路由协作的操作。
 
 use ip_core::{
-    AgentId, Approval, ApprovalId, ApprovalOption, ApprovalState, ApprovalSubject, Author, Notice, RoleId, Task,
-    TaskId, ThreadId, now_ms,
+    AgentId, Approval, ApprovalId, ApprovalOption, ApprovalState, ApprovalSubject, Author, COMPLETION_APPROVE,
+    COMPLETION_REWORK, Notice, RoleId, Task, TaskId, TaskStatus, ThreadId, now_ms,
 };
 use ip_router::{Decision, RouteInput};
 use ip_runtime::NewTask;
@@ -145,16 +145,89 @@ pub async fn create_task(app: &App, new: NewTask, author: String) -> Result<Task
         .map_err(|e| e.to_string())
 }
 
+/// 人改任务。等验收的任务改成 done 或 in_progress，等于在它的验收卡片上选通过或打回（D-41）；
+/// 别的改法交给运行时，运行时会拒绝。
 pub async fn update_task(app: &App, id: &TaskId, update: ip_runtime::TaskUpdate, by: String) -> Result<Task, String> {
-    app.runtime
-        .update_task(id, update, &Author::human(by))
+    let rt = &app.runtime;
+    let task = rt.store().task(id).await.map_err(|e| e.to_string())?;
+    if let Some(task) = task
+        && task.status == TaskStatus::PendingApproval
+        && update.assignee.is_none()
+        && let Some(status @ (TaskStatus::Done | TaskStatus::InProgress)) = update.status
+    {
+        let approved = status == TaskStatus::Done;
+        let card = rt
+            .store()
+            .approvals(true, 500)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|a| matches!(&a.subject, ApprovalSubject::TaskCompletion { task_id, .. } if task_id == id));
+        match card {
+            Some(card) => {
+                let choice = if approved {
+                    COMPLETION_APPROVE
+                } else {
+                    COMPLETION_REWORK
+                };
+                resolve_approval(app, &card.id, choice, by, None).await?;
+            }
+            // 卡片不见了（比如手动清过库）：照样验收。
+            None => {
+                let agent = task.assignee.clone();
+                review(app, id, agent.as_ref(), approved, &by, None).await?;
+            }
+        }
+        return rt
+            .store()
+            .task(id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("找不到任务 {id}"));
+    }
+    rt.update_task(id, update, &Author::human(by))
         .await
         .map_err(|e| e.to_string())
 }
 
+/// 人验收一个等验收的任务：交给运行时结项或打回；通过后解除这位员工在星图上的轨道固定，
+/// 让他回到按紧急度自动排轨（清单第 2 项，D-41）。
+async fn review(
+    app: &App,
+    task_id: &TaskId,
+    agent: Option<&AgentId>,
+    approved: bool,
+    by: &str,
+    note: Option<&str>,
+) -> Result<Task, String> {
+    let task = app
+        .runtime
+        .review_task(task_id, approved, &Author::human(by), note)
+        .await
+        .map_err(|e| e.to_string())?;
+    if approved && let Some(agent) = agent {
+        let change = crate::protocol::OrbitPinChange {
+            agent_id: agent.clone(),
+            orbit_track: None,
+            orbit_pinned_at: None,
+        };
+        if let Err(e) = crate::star_map::set(app, vec![change]).await {
+            tracing::warn!(error = %e, agent = %agent, "验收通过后没能解除轨道固定");
+        }
+    }
+    Ok(task)
+}
+
 /// 选定审批卡片。路由类卡片选定后把那条消息交给所选岗位最空闲的员工；
-/// 员工提的问题选定后把结果写回对话，叫这位员工接着做。
-pub async fn resolve_approval(app: &App, id: &ApprovalId, choice: u32, by: String) -> Result<Approval, String> {
+/// 员工提的问题选定后把结果写回对话，叫这位员工接着做；验收卡片选定后结项或打回（D-41），
+/// `note` 是打回时要改的地方。
+pub async fn resolve_approval(
+    app: &App,
+    id: &ApprovalId,
+    choice: u32,
+    by: String,
+    note: Option<&str>,
+) -> Result<Approval, String> {
     let rt = &app.runtime;
     let approval = rt
         .store()
@@ -188,6 +261,10 @@ pub async fn resolve_approval(app: &App, id: &ApprovalId, choice: u32, by: Strin
             let label = approval.options.get(choice as usize).map_or("", |o| o.label.as_str());
             let note = format!("{by} 回答了「{}」：选「{label}」", approval.question);
             (thread_id, agent_id.clone(), note)
+        }
+        ApprovalSubject::TaskCompletion { agent_id, task_id, .. } => {
+            review(app, task_id, Some(agent_id), choice == COMPLETION_APPROVE, &by, note).await?;
+            return Ok(approval);
         }
         ApprovalSubject::Question => return Ok(approval),
     };

@@ -26,6 +26,7 @@ fn role(model: &str) -> Role {
         },
         budget_per_day_usd: None,
         coordinator: false,
+        approve_completion: false,
     }
 }
 
@@ -2385,6 +2386,7 @@ async fn channel_origin_follows_the_task_chain_and_fails_closed() {
         created_at_ms: now,
         updated_at_ms: now,
         due_ms: None,
+        needs_approval: false,
     };
     let from_channel = |t: &ThreadId| {
         let (store, t) = (store.clone(), t.clone());
@@ -2678,4 +2680,219 @@ async fn turns_are_recorded_and_feed_the_progress_board() {
     assert_eq!(later.attention.len(), 1);
     assert_eq!(later.attention[0].kind, AttentionKind::Stalled);
     assert_eq!(later.attention[0].task_id.as_ref(), Some(&task.id));
+}
+
+/// 要验收的任务（D-41）：员工交回 done 先变成待验收、发验收卡片，派活的协调员先不叫回；
+/// 打回时意见写进负责人的对话并叫他接着改；再交回、通过后才结项，回报派活的对话。
+#[tokio::test]
+async fn completion_waits_for_human_review() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = ip_store::testing::store_at(dir.path().join("ip.db")).await;
+    let create = ToolCall {
+        id: "c1".into(),
+        name: "create_task".into(),
+        arguments: r#"{"title": "写 CPI 点评", "assignee": "w1"}"#.into(),
+    };
+    let coord_model = Arc::new(ScriptedModel::new([
+        ScriptedTurn::ToolCalls(vec![create]),
+        ScriptedTurn::Text("已派给研究员".into()),
+        ScriptedTurn::Text("汇总：CPI 点评写好了".into()),
+    ]));
+    let worker_model = Arc::new(ScriptedModel::new([
+        ScriptedTurn::Text("收到，在写".into()),
+        ScriptedTurn::Text("按意见补上了 PPI".into()),
+    ]));
+    let mut models = ModelRegistry::new();
+    models.insert("coord", coord_model.clone());
+    models.insert("work", worker_model.clone());
+    let runtime = Runtime::new(store, models, RuntimeConfig::default());
+    let mut coordinator = role("coord/m");
+    coordinator.id = "coordinator".into();
+    let mut researcher = role("work/m");
+    researcher.approve_completion = true;
+    for (id, r) in [("c1", coordinator), ("w1", researcher)] {
+        runtime
+            .spawn_agent(AgentSetup {
+                agent: Agent {
+                    id: id.into(),
+                    role: r.id.clone(),
+                    name: format!("员工{id}"),
+                },
+                role: r,
+                toolbox: None,
+                mcp: None,
+                data: None,
+                engine: None,
+            })
+            .unwrap();
+    }
+    let mut rx = runtime.subscribe();
+    let origin = ThreadId::new();
+    runtime
+        .send(&"c1".into(), origin.clone(), human(), "写一份 CPI 点评")
+        .await
+        .unwrap();
+    let mut events = until_agent_turn_end(&mut rx, "c1").await;
+    let task = events
+        .iter()
+        .find_map(|e| match e {
+            RuntimeEvent::TaskChanged { task } => Some(task.clone()),
+            _ => None,
+        })
+        .expect("应建了任务");
+    assert!(task.needs_approval, "研究员岗位配了 approve_completion");
+    if !events
+        .iter()
+        .any(|e| matches!(e, RuntimeEvent::TurnFinished { agent_id, .. } if agent_id.as_str() == "w1"))
+    {
+        events = until_agent_turn_end(&mut rx, "w1").await;
+    }
+    drop(events);
+    let work_thread = task.thread_id.clone().unwrap();
+    let brief = runtime.store().thread_messages(&work_thread, None, 10).await.unwrap();
+    let Body::Text { text } = &brief[0].body else { panic!() };
+    assert!(text.contains("这个任务做完要人验收"), "{text}");
+
+    let w1 = Author::Agent { agent_id: "w1".into() };
+    let submit = |result: &str| crate::TaskUpdate {
+        status: Some(ip_core::TaskStatus::Done),
+        result: Some(result.into()),
+        ..Default::default()
+    };
+    // 员工交回 done：变成待验收，发一张验收卡片。
+    let pending = runtime.update_task(&task.id, submit("初稿"), &w1).await.unwrap();
+    assert_eq!(pending.status, ip_core::TaskStatus::PendingApproval);
+    let card = runtime.store().approvals(true, 10).await.unwrap();
+    assert_eq!(card.len(), 1);
+    assert_eq!(card[0].reason, "初稿");
+    assert_eq!(card[0].options.len(), 2);
+    assert_eq!(
+        card[0].subject,
+        ip_core::ApprovalSubject::TaskCompletion {
+            agent_id: "w1".into(),
+            task_id: task.id.clone(),
+            thread_id: Some(work_thread.clone()),
+        }
+    );
+    // 等验收时谁都不能直接改，也不能直接设成待验收。
+    for (update, by) in [
+        (submit("再交一次"), w1.clone()),
+        (
+            crate::TaskUpdate {
+                status: Some(ip_core::TaskStatus::Cancelled),
+                ..Default::default()
+            },
+            human(),
+        ),
+    ] {
+        let err = runtime.update_task(&task.id, update, &by).await.unwrap_err();
+        assert!(err.to_string().contains("验收"), "{err}");
+    }
+    // 派活的协调员还没被叫回来，派活的对话里也没有回报。
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(coord_model.requests().len(), 2);
+    let back = runtime.store().thread_messages(&origin, None, 20).await.unwrap();
+    assert!(back.iter().all(|m| m.notice != Some(ip_core::Notice::TaskReport)));
+
+    // 打回：退回进行中，意见写进负责人的对话，负责人被叫回来改。
+    let reworked = runtime
+        .review_task(&task.id, false, &human(), Some("加上 PPI"))
+        .await
+        .unwrap();
+    assert_eq!(reworked.status, ip_core::TaskStatus::InProgress);
+    until_agent_turn_end(&mut rx, "w1").await;
+    let work = runtime.store().thread_messages(&work_thread, None, 20).await.unwrap();
+    let rework_note = work
+        .iter()
+        .find_map(|m| match (&m.body, m.notice) {
+            (Body::Text { text }, Some(ip_core::Notice::ApprovalAnswer)) => Some(text.clone()),
+            _ => None,
+        })
+        .expect("打回的意见写进了负责人的对话");
+    assert!(
+        rework_note.contains("张三 验收没通过") && rework_note.contains("要改的：加上 PPI"),
+        "{rework_note}"
+    );
+    assert_eq!(worker_model.requests().len(), 2);
+    // 不在等验收时不能验收。
+    assert!(runtime.review_task(&task.id, true, &human(), None).await.is_err());
+
+    // 改好再交、通过：结项，回报派活的对话，协调员被叫回来汇总。
+    runtime.update_task(&task.id, submit("初稿 + PPI"), &w1).await.unwrap();
+    let done = runtime.review_task(&task.id, true, &human(), None).await.unwrap();
+    assert_eq!(done.status, ip_core::TaskStatus::Done);
+    until_agent_turn_end(&mut rx, "c1").await;
+    let back = runtime.store().thread_messages(&origin, None, 20).await.unwrap();
+    let report = back
+        .iter()
+        .find_map(|m| match (&m.body, m.notice) {
+            (Body::Text { text }, Some(ip_core::Notice::TaskReport)) => Some(text.clone()),
+            _ => None,
+        })
+        .expect("通过后回报派活的对话");
+    assert!(
+        report.contains("已完成") && report.contains("张三 验收通过") && report.contains("结果：初稿 + PPI"),
+        "{report}"
+    );
+    assert_eq!(coord_model.requests().len(), 3);
+}
+
+/// 人直接把要验收的任务设成 done 就是验收了，不发卡片；不要验收的任务员工交回 done 照旧直接结项。
+#[tokio::test]
+async fn humans_close_reviewed_tasks_directly() {
+    let f = fixture(vec![ScriptedTurn::Text("收到".into())], memory_off()).await;
+    f.spawn("a1", false);
+    let new = |needs_approval: bool| crate::NewTask {
+        title: "写周报".into(),
+        role: Some("researcher".into()),
+        needs_approval,
+        ..Default::default()
+    };
+    let done = Some(ip_core::TaskStatus::Done);
+    let reviewed = f.runtime.create_task(new(true), human()).await.unwrap();
+    assert!(reviewed.needs_approval);
+    let closed = f
+        .runtime
+        .update_task(
+            &reviewed.id,
+            crate::TaskUpdate {
+                status: done,
+                ..Default::default()
+            },
+            &human(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(closed.status, ip_core::TaskStatus::Done);
+
+    let plain = f.runtime.create_task(new(false), human()).await.unwrap();
+    assert!(!plain.needs_approval);
+    let closed = f
+        .runtime
+        .update_task(
+            &plain.id,
+            crate::TaskUpdate {
+                status: done,
+                ..Default::default()
+            },
+            &Author::Agent { agent_id: "a1".into() },
+        )
+        .await
+        .unwrap();
+    assert_eq!(closed.status, ip_core::TaskStatus::Done);
+    assert!(f.runtime.store().approvals(true, 10).await.unwrap().is_empty());
+    // 不能直接设成待验收。
+    let err = f
+        .runtime
+        .update_task(
+            &f.runtime.create_task(new(true), human()).await.unwrap().id,
+            crate::TaskUpdate {
+                status: Some(ip_core::TaskStatus::PendingApproval),
+                ..Default::default()
+            },
+            &human(),
+        )
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("pending_approval"), "{err}");
 }

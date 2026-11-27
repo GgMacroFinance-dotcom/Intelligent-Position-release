@@ -83,6 +83,7 @@ fn role(i: usize) -> Role {
         },
         budget_per_day_usd: Some(50.0),
         coordinator: false,
+        approve_completion: false,
     }
 }
 
@@ -109,6 +110,7 @@ fn task(i: usize, agent: &Agent, status: TaskStatus, now: i64) -> Task {
         created_at_ms: now - 600_000,
         updated_at_ms: now - 300_000,
         due_ms: (i % 5 == 0).then_some(now + 1_800_000),
+        needs_approval: false,
     }
 }
 
