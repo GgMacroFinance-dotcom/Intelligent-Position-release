@@ -65,8 +65,8 @@ class _TasksPageState extends State<TasksPage> {
   }
 }
 
-/// 新建任务：手机上从底部弹出，宽屏上是对话框。
-Future<void> showNewTask(BuildContext context) {
+/// 新建任务：手机上从底部弹出，宽屏上是对话框。给了 [initialAssignee] 时默认选中那位员工。
+Future<void> showNewTask(BuildContext context, {String? initialAssignee}) {
   if (MediaQuery.sizeOf(context).width < 720) {
     return showModalBottomSheet<void>(
       context: context,
@@ -74,20 +74,25 @@ Future<void> showNewTask(BuildContext context) {
       showDragHandle: true,
       builder: (context) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-        child: const NewTaskForm(),
+        child: NewTaskForm(initialAssignee: initialAssignee),
       ),
     );
   }
   return showDialog<void>(
     context: context,
     builder: (context) => Dialog(
-      child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 520), child: const NewTaskForm()),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: NewTaskForm(initialAssignee: initialAssignee),
+      ),
     ),
   );
 }
 
 class NewTaskForm extends StatefulWidget {
-  const NewTaskForm({super.key});
+  const NewTaskForm({super.key, this.initialAssignee});
+
+  final String? initialAssignee;
 
   @override
   State<NewTaskForm> createState() => _NewTaskFormState();
@@ -96,7 +101,7 @@ class NewTaskForm extends StatefulWidget {
 class _NewTaskFormState extends State<NewTaskForm> {
   final _title = TextEditingController();
   final _description = TextEditingController();
-  String? _assignee;
+  late String? _assignee = widget.initialAssignee;
   DateTime? _due;
   bool _saving = false;
   String? _error;

@@ -3,7 +3,15 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ip_app/src/ui/chat_page.dart' show ThreadList;
+import 'package:ip_app/src/ui/inbox_page.dart' show InboxPage;
+import 'package:ip_app/src/ui/roles_page.dart' show RolesPage;
+import 'package:ip_app/src/ui/tasks_page.dart' show TasksPage;
+import 'package:ip_app/src/ui/shell/agent_panel.dart';
+import 'package:ip_app/src/ui/shell/agent_sheet.dart';
+import 'package:ip_app/src/ui/shell/celestial_body.dart';
 import 'package:ip_app/src/ui/shell/desktop_shell.dart';
 import 'package:ip_app/src/protocol/client.dart';
 
@@ -138,7 +146,229 @@ void main() {
     await h.stop(tester);
   });
 
-  testWidgets('宽窗口里先只有黑底和左下角“我”、连接状态；点了打开设置', (tester) async {
+  testWidgets('宽窗口里太阳能单独选中：点太阳从底部滑上来员工面板，再点、点空白处、按 Esc 收起', (tester) async {
+    final h = Harness();
+    await h.savePaired();
+    await h.start(tester, size: const Size(1280, 800));
+    final sun = find.byKey(const ValueKey('sun'));
+    expect(sun, findsOneWidget);
+    bool selected() => tester.widget<CelestialBody>(sun).selected;
+    // 选中过渡真正走到哪了（以前太阳被 TickerMode 关掉，过渡停在 0，选中了也不变亮）。
+    double lift() => (tester.state(sun) as dynamic).selection as double;
+    expect(selected(), isFalse);
+    expect(find.byType(AgentSheetContent), findsNothing);
+
+    // 点太阳：选中，面板滑上来，里面是原来星图气泡的内容。
+    await tester.tap(sun);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(lift(), inExclusiveRange(0.0, 1.0));
+    await tester.pumpAndSettle();
+    expect(selected(), isTrue);
+    expect(lift(), 1.0);
+    expect(tester.widget<CelestialBody>(sun).frozen, isTrue);
+    expect(find.byType(AgentSheetContent), findsOneWidget);
+    // 默认的假主机没有协调员：点太阳仍然展示完整的左/中/右三栏骨架。
+    expect(find.text('幕僚长的对话'), findsOneWidget);
+    expect(find.text('还没有配置幕僚长'), findsOneWidget);
+    expect(find.text('幕僚长（空位）'), findsWidgets);
+    expect(find.text('太阳的位置留给幕僚长。'), findsOneWidget);
+    // 浮空窗口四边留白、至少盖住窗口高度的 2/3，太阳升到窗口上沿露出的天空里且不重叠。
+    final sheet = tester.getRect(find.byType(AgentPanel));
+    expect(sheet.bottom, closeTo(800 - FrostedSheet.bottomMargin, 0.5));
+    expect(sheet.top, lessThanOrEqualTo(800 / 3));
+    expect(tester.getRect(sun).bottom, lessThanOrEqualTo(sheet.top));
+    // 三栏顶栏（左红绿灯、中右收起按钮、右 Segmented Control）落在同一条水平中线上。
+    final tlY = tester.getCenter(find.byKey(const ValueKey('window-close'))).dy;
+    final toggleY = tester.getCenter(find.byTooltip('收起员工详情')).dy;
+    final tabY = tester.getCenter(find.byKey(const ValueKey('agent-tab-overview'))).dy;
+    expect(toggleY, closeTo(tlY, 0.5));
+    expect(tabY, closeTo(tlY, 0.5));
+    // 绿灯在标准高度（72%）和大视野高度（86%）之间切换，太阳同步让位不重叠。
+    await tester.tap(find.byKey(const ValueKey('window-expand')));
+    await tester.pumpAndSettle();
+    final tallSheet = tester.getRect(find.byType(AgentPanel));
+    expect(tallSheet.height, greaterThan(sheet.height + 80));
+    expect(tester.getRect(sun).bottom, lessThanOrEqualTo(tallSheet.top));
+    await tester.tap(find.byKey(const ValueKey('window-expand')));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(find.byType(AgentPanel)).height, closeTo(sheet.height, 0.5));
+    // 点太阳是看幕僚长的员工界面（不是待办、任务那些）。
+    expect(find.byType(ShellPanel), findsNothing);
+    // 右栏三页和收起/展开在空位骨架下也能用。
+    await tester.tap(find.byKey(const ValueKey('agent-tab-doing')));
+    await tester.pumpAndSettle();
+    expect(find.text('手上的任务'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('agent-tab-overview')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('收起员工详情'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AgentSheetContent), findsNothing);
+    await tester.tap(find.byTooltip('展开员工详情'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AgentSheetContent), findsOneWidget);
+
+    // 再点太阳：收起，亮度退回去。
+    await tester.tap(sun);
+    await tester.pumpAndSettle();
+    expect(selected(), isFalse);
+    expect(lift(), 0.0);
+    expect(find.byType(AgentSheetContent), findsNothing);
+
+    // 点空白处（左上角的天空）收起。
+    await tester.tap(sun);
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(200, 120));
+    await tester.pumpAndSettle();
+    expect(selected(), isFalse);
+    expect(find.byType(AgentSheetContent), findsNothing);
+
+    // 按 Esc 收起。
+    await tester.tap(sun);
+    await tester.pumpAndSettle();
+    expect(find.byType(AgentSheetContent), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(AgentSheetContent), findsNothing);
+
+    // 太阳的光芒和光晕不挡点击：点方框的角上（球外面）不会选中。
+    final box = tester.getRect(sun);
+    await tester.tapAt(box.topLeft + const Offset(6, 6));
+    await tester.pumpAndSettle();
+    expect(selected(), isFalse);
+    await h.stop(tester);
+  });
+
+  testWidgets('未连接主机时点太阳仍展示三栏骨架，中间提示去连接设置，不再误报没配协调员', (tester) async {
+    final h = Harness();
+    h.host.failNext = Exception('offline');
+    await h.savePaired();
+    await h.start(tester, size: const Size(1280, 800));
+    h.host.failNext = Exception('offline');
+    await tester.tap(find.byKey(const ValueKey('sun')));
+    await tester.pumpAndSettle();
+
+    expect(h.state.status, ConnStatus.closed);
+    expect(find.byType(AgentPanel), findsOneWidget);
+    expect(find.text('幕僚长的对话'), findsOneWidget);
+    expect(find.text('未连接主机'), findsOneWidget);
+    expect(find.text('当前未连接主机。'), findsOneWidget);
+    expect(find.textContaining('主机上没有协调员岗位'), findsNothing);
+    expect(find.byKey(const ValueKey('agent-tab-doing')), findsOneWidget);
+    expect(find.byKey(const ValueKey('agent-tab-advanced')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('agent-open-settings')));
+    await tester.pumpAndSettle();
+    expect(find.text('断开并忘掉这台主机'), findsOneWidget);
+    await h.stop(tester);
+  });
+
+  testWidgets('左上角 Apple 红绿灯待办小组件：平时展示待办，点击展开按红黄绿筛选，可直接拍板并收成绿灯胶囊', (tester) async {
+    final h = Harness();
+    h.host.handlers['resolve_approval'] = (req) => approval('a1', pending: false);
+    await h.savePaired();
+    await h.start(tester, size: const Size(1280, 800));
+
+    // 默认假主机有 1 张路由审批卡（黄灯待定）：左上角直接显示小组件。
+    expect(find.byKey(const ValueKey('inbox-widget-compact')), findsOneWidget);
+    expect(find.text('这条消息该交给谁？'), findsOneWidget);
+    final lights = find.byKey(const ValueKey('inbox-header-lights'));
+    final title = find.byKey(const ValueKey('inbox-header-title'));
+    final compactLightsPos = tester.getTopLeft(lights);
+    final compactTitlePos = tester.getTopLeft(title);
+    final compactTitleSize = tester.widget<Text>(title).style?.fontSize;
+
+    // 点开原地展开，红绿灯和“待办”标题的坐标与字号 0 像素跳动。
+    await tester.tap(find.byKey(const ValueKey('inbox-widget-compact')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('inbox-widget-expanded')), findsOneWidget);
+    expect(tester.getTopLeft(lights), compactLightsPos);
+    expect(tester.getTopLeft(title), compactTitlePos);
+    expect(tester.widget<Text>(title).style?.fontSize, compactTitleSize);
+    expect(find.text('宏观研究员（推荐）'), findsOneWidget);
+
+    // 切到红灯、绿灯分段再切回黄灯。
+    await tester.tap(find.byKey(const ValueKey('inbox-light-tab-red')));
+    await tester.pumpAndSettle();
+    expect(find.text('没有紧急待办。'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('inbox-light-tab-yellow')));
+    await tester.pumpAndSettle();
+
+    // 拍板后待办清空，按 Esc 收起变成绿灯胶囊；红绿灯与“待办”位置、字号依然纹丝不动。
+    await tester.tap(find.text('宏观研究员（推荐）'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('inbox-widget-expanded')), findsNothing);
+    expect(find.byKey(const ValueKey('inbox-widget-pill')), findsOneWidget);
+    expect(find.text('暂无'), findsOneWidget);
+    expect(tester.getTopLeft(lights), compactLightsPos);
+    expect(tester.getTopLeft(title), compactTitlePos);
+    expect(tester.widget<Text>(title).style?.fontSize, compactTitleSize);
+    await h.stop(tester);
+  });
+
+  testWidgets('宽窗口右下角“面板”打开三栏面板：待办、对话、任务、岗位都能进，右栏能收起，通知点进来也打开面板', (tester) async {
+    final h = Harness();
+    await h.savePaired();
+    await h.start(tester, size: const Size(1280, 800));
+    final sun = find.byKey(const ValueKey('sun'));
+    expect(find.byType(ShellPanel), findsNothing);
+
+    // 打开面板：先是待办，右栏默认收起；太阳不算选中（没在看幕僚长）。
+    await tester.tap(find.byKey(const ValueKey('panel-bubble')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellPanel), findsOneWidget);
+    expect(find.byType(InboxPage), findsOneWidget);
+    expect(find.text('这条消息该交给谁？'), findsOneWidget);
+    expect(find.byType(AgentSheetContent), findsNothing);
+    expect(tester.widget<CelestialBody>(sun).selected, isFalse);
+    expect(tester.widget<CelestialBody>(sun).frozen, isTrue);
+
+    // 右栏能展开、收起。
+    await tester.tap(find.byTooltip('展开员工详情'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AgentSheetContent), findsOneWidget);
+    await tester.tap(find.byTooltip('收起员工详情'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AgentSheetContent), findsNothing);
+
+    // 对话：对话列表加对话，右栏默认开着。
+    await tester.tap(find.byKey(const ValueKey('panel-section-chat')));
+    await tester.pumpAndSettle();
+    expect(find.byType(ThreadList), findsOneWidget);
+    expect(find.text('最近 CPI 怎么样'), findsWidgets);
+    expect(find.byType(AgentSheetContent), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('panel-section-tasks')));
+    await tester.pumpAndSettle();
+    expect(find.byType(TasksPage), findsOneWidget);
+    expect(find.byType(AgentSheetContent), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('panel-section-roles')));
+    await tester.pumpAndSettle();
+    expect(find.byType(RolesPage), findsOneWidget);
+
+    // 关掉再从“面板”打开：回到上次那一页。
+    await tester.tap(find.byTooltip('关闭面板（Esc）'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellPanel), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('panel-bubble')));
+    await tester.pumpAndSettle();
+    expect(find.byType(RolesPage), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    // 点了通知（或“管理”里点“看对话”）：打开面板，在对话页打开那个对话。
+    h.state.openThreadFromAnywhere('t1');
+    await tester.pumpAndSettle();
+    expect(find.byType(ShellPanel), findsOneWidget);
+    expect(find.byType(ThreadList), findsOneWidget);
+    expect(h.state.threadId, 't1');
+    await h.stop(tester);
+  });
+
+  testWidgets('宽窗口里是天穹和左下角“我”、连接状态；点了打开设置', (tester) async {
     final h = Harness();
     await h.savePaired();
     await h.start(tester, size: const Size(1280, 800));

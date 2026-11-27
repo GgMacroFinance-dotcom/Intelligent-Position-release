@@ -155,6 +155,41 @@ class Shell extends ThemeExtension<Shell> {
     popoverShadow: [BoxShadow(color: Color(0x66000000), offset: Offset(0, 10), blurRadius: 28, spreadRadius: -12)],
   );
 
+  /// 桌面浮空窗口的 Apple Liquid Glass 清透配色（2026-11-26 维护者定）：
+  /// 中性清透白玻璃 + 深曜石墨字 + 系统蓝点缀，让背后文艺复兴蓝天和金色弧光自然透色。
+  static const glass = Shell(
+    app: Color(0xFFF6F8FC),
+    panel: Color(0x00FFFFFF),
+    raised: Color(0xCCFFFFFF),
+    raisedHover: Color(0x66FFFFFF),
+    card: Color(0xD9F0F3F8),
+    inset: Color(0x1314171F),
+    control: Color(0x1F14171F),
+    edge: Color(0x1214171F),
+    hairline: Color(0x2914171F),
+    ink: Color(0xFF14171F),
+    inkSecondary: Color(0x9414171F),
+    inkTertiary: Color(0x7314171F),
+    accent: Color(0xFF007AFF),
+    accentText: Color(0xFF0066D6),
+    composer: Color(0xF5FFFFFF),
+    composerRing: Color(0x1814171F),
+    menu: Color(0xFAFFFFFF),
+    menuHover: Color(0x0D14171F),
+    bubbleUser: Color(0xFF15181F),
+    bubbleUserInk: Color(0xFFF8FAFC),
+    success: Color(0xFF1A9E38),
+    danger: Color(0xFFE0312B),
+    warning: Color(0xFFD97706),
+    notice: Color(0x0D14171F),
+    scrim: Color(0x2E0A1432),
+    floatShadow: [BoxShadow(color: Color(0x140E183A), offset: Offset(0, 3), blurRadius: 12, spreadRadius: -2)],
+    popoverShadow: [BoxShadow(color: Color(0x260E183A), offset: Offset(0, 12), blurRadius: 32, spreadRadius: -10)],
+  );
+
+  /// 兼容别名：暖象牙旧名已统一升级到清透 Liquid Glass。
+  static const ivory = glass;
+
   @override
   Shell copyWith() => this;
 
@@ -204,8 +239,16 @@ abstract final class Sizes {
 }
 
 /// 浅色、深色两套主题。字体先用系统的（macOS 苹方、Windows 微软雅黑），字重不加粗。
-ThemeData shellTheme(Brightness brightness) {
-  final s = brightness == Brightness.light ? Shell.light : Shell.dark;
+ThemeData shellTheme(Brightness brightness) =>
+    _themeFor(brightness == Brightness.light ? Shell.light : Shell.dark, brightness);
+
+/// 桌面浮空窗口与左上角小组件共用的 Liquid Glass 主题（深色模式下也保持清透玻璃质感）。
+ThemeData glassTheme() => _themeFor(Shell.glass, Brightness.light);
+
+/// 兼容旧名：统一指向 Liquid Glass 主题。
+ThemeData ivoryTheme() => glassTheme();
+
+ThemeData _themeFor(Shell s, Brightness brightness) {
   final base = ThemeData(
     brightness: brightness,
     useMaterial3: true,
@@ -291,7 +334,12 @@ ThemeData shellTheme(Brightness brightness) {
       trackColor: WidgetStateProperty.resolveWith((st) => st.contains(WidgetState.selected) ? s.accent : s.control),
       trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
     ),
-    listTileTheme: ListTileThemeData(iconColor: s.inkSecondary, textColor: s.ink),
+    listTileTheme: ListTileThemeData(
+      iconColor: s.inkSecondary,
+      textColor: s.ink,
+      selectedColor: s.ink,
+      selectedTileColor: s.raised,
+    ),
     iconTheme: IconThemeData(color: s.inkSecondary, size: 18),
     scrollbarTheme: ScrollbarThemeData(
       thickness: WidgetStateProperty.all(6),

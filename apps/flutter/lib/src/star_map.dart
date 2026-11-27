@@ -204,6 +204,15 @@ int _stableHash(String s) {
 }
 
 /// 从主机的数据算出星图。`now` 是 Unix 毫秒。
+///
+/// [reworkAgents]：最近刚被“打回修改”的员工集合（当前用于本地演示态；真实后端补齐
+/// `pending_approval -> in_progress` 协议后会由任务状态自动驱动回活跃轨）。
+/// [celestialOverrides]：用户手动指定的星球形态映射（`agentId -> Celestial`，严格排除太阳；
+/// 当前由前端本地新建 Bot 维护，后续后端 `Agent` 补齐 `celestial_style` 字段后直接从此注入）。
+/// [importanceOverrides]：用户通过滚轮或员工大窗手动调节的重要度权重（`agentId -> 0.0..1.0`，
+/// 严格不作用于中心太阳；未手动覆盖时仍按任务负荷与岗位预算自动计算）。
+/// 说明（5A）：`agent_question`（员工中途提问）仍按紧急度 1.0 留在内环；
+/// 独立的「任务完成待审批」状态由 `completion_approval.dart` 提取并在宽窗口外壳中离轨停泊到左中下底栏。
 StarMap buildStarMap({
   required List<Agent> agents,
   required List<Role> roles,
@@ -212,10 +221,15 @@ StarMap buildStarMap({
   required Set<String> working,
   required Map<String, String> failures,
   required int now,
+  Set<String> reworkAgents = const {},
+  Map<String, Celestial> celestialOverrides = const {},
+  Map<String, double> importanceOverrides = const {},
 }) {
   final roleById = {for (final r in roles) r.id: r};
   Agent? chiefAgent;
   for (final a in agents) {
+    // 明确手选了非太阳行星形态的员工不抢占中心太阳（幕僚长）席位。
+    if (celestialOverrides.containsKey(a.id)) continue;
     if (isChiefOfStaff(a, roleById[a.role])) {
       chiefAgent = a;
       break;
@@ -250,6 +264,7 @@ StarMap buildStarMap({
     if (failure != null) reasons.add(Reason('上一轮失败了：${_short(failure)}', 0.85));
     final isWorking = working.contains(a.id);
     if (isWorking) reasons.add(const Reason('正在处理', 0.45));
+    if (reworkAgents.contains(a.id)) reasons.add(const Reason('审批打回 · 修改中', 0.52));
     final ongoing = mine.where((t) => t.status == 'open' || t.status == 'in_progress').toList();
     if (ongoing.isNotEmpty) {
       reasons.add(Reason('有 ${ongoing.length} 件任务在做', 0.3, threadId: ongoing.first.threadId));
@@ -269,8 +284,11 @@ StarMap buildStarMap({
     final work = 1 - math.exp(-load / 2);
     final budget = roleById[a.role]?.budgetPerDayUsd;
     final roleWeight = maxBudget > 0 && budget != null ? budget / maxBudget : 0.5;
-    final importance = (0.65 * work + 0.35 * roleWeight).clamp(0.0, 1.0);
+    final autoImportance = (0.65 * work + 0.35 * roleWeight).clamp(0.0, 1.0);
+    final manualImp = c.kind == CelestialKind.sun ? null : importanceOverrides[a.id];
+    final importance = (manualImp ?? autoImportance).clamp(0.0, 1.0);
     final notes = [
+      if (manualImp != null) '已手动调节重要度：${(importance * 100).round()}%（自动参考 ${(autoImportance * 100).round()}%）',
       if (load > 0)
         '手上的事：${_count(mine.length, '件任务')}${questions.isEmpty ? '' : '、${questions.length} 个提问'}（人派的任务权重更高）',
       if (load == 0) '手上没有任务',
@@ -292,7 +310,13 @@ StarMap buildStarMap({
     );
   }
 
-  final bodies = [for (final a in others) body(a, icons[a.id]!)]
+  Celestial resolveCelestial(String id) {
+    final override = celestialOverrides[id];
+    if (override != null && override.kind != CelestialKind.sun) return override;
+    return icons[id]!;
+  }
+
+  final bodies = [for (final a in others) body(a, resolveCelestial(a.id))]
     ..sort(
       (x, y) => y.urgency.compareTo(x.urgency) != 0 ? y.urgency.compareTo(x.urgency) : x.agent.id.compareTo(y.agent.id),
     );

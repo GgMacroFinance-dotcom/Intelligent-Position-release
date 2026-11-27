@@ -292,13 +292,16 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final map = buildStarMap(
-      agents: state.agents,
-      roles: state.roles,
+      agents: state.allAgents,
+      roles: state.allRoles,
       tasks: state.tasks,
       approvals: state.approvals,
       working: state.agentsWorking,
       failures: state.agentFailures,
       now: DateTime.now().millisecondsSinceEpoch,
+      reworkAgents: state.completionReworkAgents,
+      celestialOverrides: state.celestialOverrides,
+      importanceOverrides: state.importanceOverrideValues,
     );
     if (_selected != null && map.byId(_selected!) == null && _selected != _vacantSun) _selected = null;
     return Theme(
@@ -1102,7 +1105,12 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
                 style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.7), height: 1.4),
               ),
             ),
-          for (final a in state.pendingApprovals.where((a) => a.isAgentQuestion && a.subjectAgentId == b.agent.id))
+          for (final a in state.pendingApprovals.where(
+            (a) =>
+                a.isAgentQuestion &&
+                a.subjectAgentId == b.agent.id &&
+                (state.threadId == null || a.subjectThreadId != state.threadId),
+          ))
             Padding(
               padding: const EdgeInsets.only(top: 10),
               child: ApprovalCard(approval: a, onOpenThread: (thread) => AppScope.read(context).openThread(thread)),

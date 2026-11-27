@@ -1,474 +1,330 @@
-// 宽窗口的背景：用字符画出来的文艺复兴天穹（设计重构，2026-11-24 维护者定：A 的颜色 + B 的结构）。
-//   颜色照斯克罗维尼礼拜堂（Giotto）的天顶：青金石群青的底，金箔的星，边上一圈熟褐的暗角。
-//   结构照文艺复兴的天球图（哥白尼《天体运行论》里的同心圆）：中心是太阳，外面六层行星天球，
-//   每层顶上写着拉丁名，最外一圈是黄道带（I 到 XII，每 30 度一格、每 5 度一个刻度）。
-// 将来这就是星图：太阳的位置留给幕僚长，天球留给员工。
-// 会流动的有四样：天球上一串串金色的光点沿着轨道走（里圈快、外圈慢，相邻两圈方向相反）；
-//   底下一层淡蓝的字符像以太一样绕着太阳慢慢旋转、变形；恒星明暗闪烁；太阳的光芒慢慢转、长短起伏。
-//   黄道带十几分钟转一圈。系统设了“减少动态效果”时停在一帧。
-// 画法参考了 ascii-engine 的思路（亮度选字、线条顺着方向用 - | / \、标点沿着河道流动），代码是自己写的。
-// 一帧里所有字符用一次 drawRawAtlas 画：先把用到的字画成一张白色的字表，每个格子按颜色染色。
+// 宽窗口的背景层（设计重构，2026-11-25 维护者定）：文艺复兴的人仰望的天空，明亮、温暖、有秩序。
+// 全部用程序画（shaders/sky.frag），不用任何图片：天空铺满窗口（不要灰泥和金边），云是字符画，星是金点。
+// 没有轨道、黄道带、拉丁名；太阳以后是单独一层、能单独选中。
+// 这里只做几件事：开机时画一张小字表，按窗口大小算天空椭圆的位置，定时刷新。
+//
+// 省电（维护者定：低耗电优先）：
+//   - 不跟着屏幕刷新：用定时器，窗口在前台时每秒 10 帧，窗口没焦点时每秒 4 帧（画面动得很慢，看不出差别；
+//     2026-11-25 从 20 帧降到 10 帧试）；
+//   - 窗口藏起来、最小化、这一页看不见（TickerMode 关了）、系统设了“减少动态效果”时停住，只留最后一帧；
+//   - 每帧 CPU 只传十几个数，所有像素在 GPU 上算；
+//   - 云的厚薄每秒只算 5 次（cloud.frag 画进一张小图，一格字一个像素），主着色器每帧只查表，
+//     不再每格算 5 次噪声（云飘得很慢，看不出是一跳一跳的）；
+//   - 2026-11-26 实测优化：宽窗口里天空和天体共用同一个时钟（[clock]），同一下刷新，
+//     不再两个定时器错开多刷一倍的帧（实测后台从约 7 帧降回约 3 帧，GPU 降约一半）。
+// 着色器读不出来（比如测试环境）时退回一张渐变，不报错。
 
-import 'dart:math' as math;
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
-/// 颜料。
+/// 颜料：壁画的天空和灰泥（和 sky.frag 里的一致）。
 abstract final class Pigment {
-  /// 青金石群青：天穹的底，中间亮、四周深。
-  static const lapisDeep = Color(0xFF0A1133);
-  static const lapis = Color(0xFF16205A);
-  static const lapisLight = Color(0xFF243378);
+  static const ultra = Color(0xFF2E4A9E);
+  static const azure = Color(0xFF6B94CC);
+  static const azureLight = Color(0xFFB3C9E0);
 
-  /// 流动的以太：比底色亮一点的群青。
-  static const aether = Color(0xFF6A80D6);
-
-  /// 金箔。
-  static const gold = Color(0xFFC9A24A);
-  static const goldBright = Color(0xFFF3D98E);
-
-  /// 朱砂：太阳的外缘（以后用在“要你处理”）。
-  static const cinnabar = Color(0xFFB5482F);
-
-  /// 熟褐：四周的暗角，像老壁画的边。
-  static const umber = Color(0xFF2E1E10);
-
-  /// 羊皮纸白：天球上的拉丁名。
-  static const parchment = Color(0xFFEFE6D2);
+  /// 窗口的底色：着色器还没读出来时先显示它。
+  static const ground = azure;
 }
 
 class CosmosBackdrop extends StatefulWidget {
-  const CosmosBackdrop({super.key});
+  const CosmosBackdrop({super.key, this.clock});
 
-  /// 测试里关掉动画：一直有新帧时 pumpAndSettle 等不完。
+  /// 可选的共享时钟（宽窗口传天体用的那个）：传了就不自己开定时器，跟天体同一下刷新。
+  /// 这一层被 TickerMode 关掉（面板、图鉴打开）时不跟着时钟走，停在最后一帧。
+  final ValueListenable<double>? clock;
+
+  /// 测试里关掉：不开定时器，也不读着色器。
   static bool animate = true;
 
   @override
   State<CosmosBackdrop> createState() => _CosmosBackdropState();
 }
 
-class _CosmosBackdropState extends State<CosmosBackdrop> with SingleTickerProviderStateMixin {
-  /// 不动的时候停在这一刻：各层都已经摆开了。
+/// 字表（顺序和 sky.frag、body.frag 里的下标一致）：0 到 9 由疏到密，10 到 13 是线，14 到 17 是星，
+/// 18 到 27 是行星环“插缝层”的另一套由疏到密（横笔画），28 到 37 是行星球面插缝层的竖笔画由疏到密（和主层交叉成排线）。
+/// 由疏到密的都是居中的字形（不用 . _ 这种贴着上下边的），一行行排起来不会成横纹。
+const _glyphs = [
+  '·', '∙', ':', '•', '+', '*', 'o', '%', '#', '@', '|', '~', '/', r'\', '·', '•', '✦', '∙', //
+  '·', '-', '~', '+', '=', 'x', '≈', '*', '&', '#', //
+  '·', ':', '¦', 'ı', 'i', '|', '!', 'l', '‡', '‖',
+];
+const _atlasCols = 8, _atlasRows = 5;
+
+/// 一格字的大小（逻辑像素）：4 像素的 Menlo。天体（celestial_body.dart）也用这个大小，和背景对得上。
+const _fine = 4.0;
+const _cell = Size(_fine * 0.6016, _fine * 1.257);
+const glyphCell = _cell;
+
+/// 白字透明底的小字表，背景和各个天体共用一张（只画一次）。
+ui.Image? _sharedAtlas;
+ui.Image glyphAtlas() => _sharedAtlas ??= _buildAtlas();
+
+/// 天空明暗和云的布局按这个椭圆排（铺满窗口，不裁切）：半轴是窗口宽高的一半。
+const _domeX = 0.5, _domeY = 0.5;
+
+class _CosmosBackdropState extends State<CosmosBackdrop> with WidgetsBindingObserver {
+  /// 不动的时候停在这一刻。
   static const _still = 40.0;
 
-  late final Ticker _ticker = createTicker(_tick);
   final _time = ValueNotifier<double>(_still);
+  final _clock = Stopwatch();
   double _base = _still;
-  Duration _last = Duration.zero;
-  _GlyphSheet? _sheet;
+  Timer? _timer;
+  int _fps = 0;
+  AppLifecycleState _life = AppLifecycleState.resumed;
+  bool _loading = false;
 
-  void _tick(Duration elapsed) {
-    // 流动很慢，每秒 30 帧就够，省电。
-    if (elapsed - _last < const Duration(milliseconds: 33)) return;
-    _last = elapsed;
-    _time.value = _base + elapsed.inMicroseconds / 1e6;
+  ui.FragmentShader? _shader;
+  ui.FragmentShader? _cloudShader;
+  ui.Image? _atlas;
+  final _clouds = _CloudMap();
+
+  ValueListenable<double>? _ext;
+  bool _extActive = false;
+
+  void _attach() {
+    final c = widget.clock;
+    if (identical(c, _ext)) return;
+    _ext?.removeListener(_onExt);
+    _ext = c;
+    c?.addListener(_onExt);
+  }
+
+  void _onExt() {
+    final c = _ext;
+    if (_extActive && c != null) _time.value = c.value;
+  }
+
+  @override
+  void didUpdateWidget(CosmosBackdrop old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.clock, widget.clock)) {
+      _attach();
+      _fps = -1;
+      _schedule();
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _life = WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed;
+  }
+
+  Future<void> _load() async {
+    try {
+      final program = await ui.FragmentProgram.fromAsset('shaders/sky.frag');
+      final cloud = await ui.FragmentProgram.fromAsset('shaders/cloud.frag');
+      final atlas = glyphAtlas();
+      if (!mounted) return;
+      setState(() {
+        _shader = program.fragmentShader();
+        _cloudShader = cloud.fragmentShader();
+        _atlas = atlas;
+      });
+    } catch (e) {
+      debugPrint('天穹的着色器读不出来，用渐变代替：$e');
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _life = state;
+    _schedule();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final still = !CosmosBackdrop.animate || MediaQuery.disableAnimationsOf(context);
-    if (still && _ticker.isActive) _ticker.stop();
-    if (!still && !_ticker.isActive) {
-      _base = _time.value;
-      _last = Duration.zero;
-      _ticker.start();
+    if (CosmosBackdrop.animate && !_loading) {
+      _loading = true;
+      _load();
     }
+    _schedule();
+  }
+
+  /// 按现在的情况定刷新的快慢：前台 10 帧，没焦点 4 帧，看不见时停。
+  void _schedule() {
+    final visible = TickerMode.valuesOf(context).enabled;
+    final still = !CosmosBackdrop.animate || MediaQuery.disableAnimationsOf(context);
+    _attach();
+    if (widget.clock != null) {
+      // 跟共享时钟走：自己不开定时器。
+      _timer?.cancel();
+      _timer = null;
+      _fps = 0;
+      _extActive = visible && !still;
+      if (_extActive) _onExt();
+      return;
+    }
+    final fps = still || !visible
+        ? 0
+        : switch (_life) {
+            AppLifecycleState.resumed => 10,
+            AppLifecycleState.inactive => 4,
+            _ => 0,
+          };
+    if (fps == _fps) return;
+    _fps = fps;
+    _timer?.cancel();
+    _timer = null;
+    if (fps == 0) {
+      _base = _time.value;
+      _clock
+        ..stop()
+        ..reset();
+      return;
+    }
+    _clock.start();
+    _timer = Timer.periodic(Duration(microseconds: 1000000 ~/ fps), (_) {
+      _time.value = _base + _clock.elapsedMicroseconds / 1e6;
+    });
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    _ext?.removeListener(_onExt);
     _time.dispose();
-    _sheet?.dispose();
+    _shader?.dispose();
+    _cloudShader?.dispose();
+    // 字表是共用的，不在这里释放。
+    _clouds.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final dpr = MediaQuery.devicePixelRatioOf(context);
-    if (_sheet?.dpr != dpr) {
-      _sheet?.dispose();
-      _sheet = _GlyphSheet(dpr);
-    }
     return RepaintBoundary(
-      child: CustomPaint(painter: _CosmosPainter(_time, _sheet!), size: Size.infinite),
+      child: CustomPaint(
+        painter: _SkyPainter(_time, _shader, _cloudShader, _atlas, _clouds, MediaQuery.devicePixelRatioOf(context)),
+        size: Size.infinite,
+      ),
     );
   }
 }
 
-class _CosmosPainter extends CustomPainter {
-  _CosmosPainter(this.time, this.sheet) : super(repaint: time);
+/// 云厚的小图：一格字一个像素（R 云厚，G 天空颜料的深浅，B 星成簇的地方）。
+/// 窗口大小变了、或者离上次算过了 [interval] 秒，就重新算一次。
+/// 白字透明底的小字表：一格一个字，画得比实际大，缩小后边缘干净。
+ui.Image _buildAtlas() {
+  const size = 32.0;
+  const cw = 22.0, ch = 40.0;
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  for (final (i, g) in _glyphs.indexed) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: g,
+        style: const TextStyle(
+          fontFamily: 'Menlo',
+          fontFamilyFallback: ['SF Mono', 'DejaVu Sans Mono', 'Noto Sans Mono', 'monospace'],
+          fontSize: size,
+          height: 1,
+          color: Colors.white,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final ox = (i % _atlasCols) * cw, oy = (i ~/ _atlasCols) * ch;
+    tp.paint(canvas, Offset(ox + (cw - tp.width) / 2, oy + (ch - tp.height) / 2));
+    tp.dispose();
+  }
+  final picture = recorder.endRecording();
+  final image = picture.toImageSync((cw * _atlasCols).toInt(), (ch * _atlasRows).toInt());
+  picture.dispose();
+  return image;
+}
 
-  final ValueListenable<double> time;
-  final _GlyphSheet sheet;
+class _CloudMap {
+  static const interval = 0.2;
+
+  ui.Image? image;
+  Size _size = Size.zero;
+  double _at = double.negativeInfinity;
+  int cols = 0, rows = 0;
+
+  /// 需要时用云的着色器重新画一张，返回现在的图。
+  ui.Image refresh(ui.FragmentShader shader, Size size, double t, double cx, double cy, double ax, double by) {
+    final img = image;
+    if (img != null && size == _size && (t - _at).abs() < interval) return img;
+    cols = (size.width / _cell.width).ceil() + 1;
+    rows = (size.height / _cell.height).ceil() + 1;
+    var i = 0;
+    for (final v in [cols, rows, _cell.width, _cell.height, t, cx, cy, ax, by]) {
+      shader.setFloat(i++, v.toDouble());
+    }
+    final recorder = ui.PictureRecorder();
+    Canvas(recorder).drawRect(Rect.fromLTWH(0, 0, cols.toDouble(), rows.toDouble()), Paint()..shader = shader);
+    final picture = recorder.endRecording();
+    final next = picture.toImageSync(cols, rows);
+    picture.dispose();
+    img?.dispose();
+    image = next;
+    _size = size;
+    _at = t;
+    return next;
+  }
+
+  void dispose() {
+    image?.dispose();
+    image = null;
+  }
+}
+
+class _SkyPainter extends CustomPainter {
+  _SkyPainter(this.time, this.shader, this.cloudShader, this.atlas, this.clouds, this.dpr) : super(repaint: time);
+
+  final ValueNotifier<double> time;
+  final ui.FragmentShader? shader;
+  final ui.FragmentShader? cloudShader;
+  final ui.Image? atlas;
+  final _CloudMap clouds;
+  final double dpr;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
     final rect = Offset.zero & size;
-    // 1. 群青的底：中间亮一点，往外变深。
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = ui.Gradient.radial(
-          rect.center,
-          size.longestSide * 0.7,
-          const [Pigment.lapisLight, Pigment.lapis, Pigment.lapisDeep],
-          const [0, 0.5, 1],
-        ),
-    );
-    // 2. 字符。
-    final n = sheet.frame(size, time.value);
-    if (n > 0) {
-      canvas.drawRawAtlas(
-        sheet.image,
-        Float32List.sublistView(sheet.transforms, 0, n * 4),
-        Float32List.sublistView(sheet.rects, 0, n * 4),
-        Int32List.sublistView(sheet.colors, 0, n),
-        BlendMode.modulate,
-        null,
-        Paint()..filterQuality = FilterQuality.low,
+    final s = shader, cs = cloudShader, a = atlas;
+    if (s == null || cs == null || a == null) {
+      canvas.drawRect(
+        rect,
+        Paint()
+          ..shader = ui.Gradient.linear(
+            rect.topCenter,
+            rect.bottomCenter,
+            const [Pigment.ultra, Pigment.azure, Pigment.azureLight],
+            const [0, 0.5, 1],
+          ),
       );
+      return;
     }
-    // 3. 熟褐的暗角。
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = ui.Gradient.radial(
-          rect.center,
-          size.longestSide * 0.72,
-          [Pigment.umber.withValues(alpha: 0), Pigment.umber.withValues(alpha: 0.35), Pigment.umber.withValues(alpha: 0.8)],
-          const [0.5, 0.8, 1],
-        ),
-    );
+    final w = size.width, h = size.height;
+    final ax = w * _domeX, by = h * _domeY;
+    final cx = w / 2, cy = h * 0.48;
+    final t = time.value;
+    final map = clouds.refresh(cs, size, t, cx, cy, ax, by);
+    var i = 0;
+    for (final v in [w, h, t, dpr, _cell.width, _cell.height, cx, cy, ax, by, clouds.cols, clouds.rows]) {
+      s.setFloat(i++, v.toDouble());
+    }
+    s.setImageSampler(0, a, filterQuality: FilterQuality.medium);
+    s.setImageSampler(1, map, filterQuality: FilterQuality.none);
+    canvas.drawRect(rect, Paint()..shader = s);
   }
 
   @override
-  bool shouldRepaint(_CosmosPainter old) => old.sheet != sheet || old.time != time;
-}
-
-// ---------- 小工具 ----------
-
-double _smooth(double e0, double e1, double x) {
-  final t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
-  return t * t * (3 - 2 * t);
-}
-
-/// 整数格点上的伪随机数，0 到 1。跨平台、跨启动都一样。
-double _hash(int x, int y) {
-  var h = (x * 374761393 + y * 668265263) & 0xFFFFFFFF;
-  h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF;
-  return ((h ^ (h >> 16)) & 0xFFFFFF) / 0xFFFFFF;
-}
-
-/// 平滑的值噪声，0 到 1。
-double _noise(double x, double y) {
-  final xi = x.floor(), yi = y.floor();
-  final xf = x - xi, yf = y - yi;
-  final u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
-  final a = _hash(xi, yi), b = _hash(xi + 1, yi), c = _hash(xi, yi + 1), d = _hash(xi + 1, yi + 1);
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-}
-
-int _rgb(Color c) => c.toARGB32() & 0xFFFFFF;
-
-/// 从 a 到 b 的 17 级颜色。
-List<int> _ramp(Color a, Color b) => [for (var i = 0; i <= 16; i++) _rgb(Color.lerp(a, b, i / 16)!)];
-
-int _argb(double alpha, int rgb) => ((alpha.clamp(0.0, 1.0) * 255).round() << 24) | rgb;
-
-/// 一张白色的字表，加上每一帧的格子。
-class _GlyphSheet {
-  _GlyphSheet(this.dpr) {
-    final m = TextPainter(text: const TextSpan(text: 'M', style: _style), textDirection: TextDirection.ltr)..layout();
-    cw = m.width;
-    ch = m.height * 1.08;
-    m.dispose();
-    for (final (i, g) in _chars.indexed) {
-      _index[g] = i;
-    }
-    _sw = (cw * dpr).ceil();
-    _sh = (ch * dpr).ceil();
-    final rows = (_chars.length / _sheetCols).ceil();
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    final big = _style.copyWith(fontSize: _fontSize * dpr);
-    _glyphRects = Float32List(_chars.length * 4);
-    for (final (i, g) in _chars.indexed) {
-      final ox = (i % _sheetCols) * _sw.toDouble(), oy = (i ~/ _sheetCols) * _sh.toDouble();
-      final tp = TextPainter(text: TextSpan(text: g, style: big), textDirection: TextDirection.ltr)..layout();
-      tp.paint(canvas, Offset(ox + (_sw - tp.width) / 2, oy + (_sh - tp.height) / 2));
-      tp.dispose();
-      _glyphRects
-        ..[i * 4] = ox
-        ..[i * 4 + 1] = oy
-        ..[i * 4 + 2] = ox + _sw
-        ..[i * 4 + 3] = oy + _sh;
-    }
-    final picture = recorder.endRecording();
-    image = picture.toImageSync(_sheetCols * _sw, rows * _sh);
-    picture.dispose();
-
-    _gDash = _g('-');
-    _gPipe = _g('|');
-    _gSlash = _g('/');
-    _gBack = _g(r'\');
-    _gDot = _g('·');
-    _gBullet = _g('•');
-    _gStar = _g('✦');
-    _gPlus = _g('+');
-    _gAst = _g('*');
-    _sunRamp = [for (final c in '.:-=+*#%@'.split('')) _g(c)];
-    _aetherRamp = [for (final c in ['.', '·', ':', '~']) _g(c)];
-  }
-
-  final double dpr;
-
-  static const _fontSize = 12.0;
-  static const _style = TextStyle(
-    fontFamily: 'Menlo',
-    fontFamilyFallback: ['SF Mono', 'DejaVu Sans Mono', 'Noto Sans Mono', 'Courier New', 'monospace'],
-    fontSize: _fontSize,
-    height: 1.0,
-    color: Colors.white,
-  );
-  static const _sheetCols = 16;
-  static final _chars = [for (var c = 33; c < 127; c++) String.fromCharCode(c), '·', '•', '∙', '✦', '°'];
-
-  static const _spheres = ['MERCVRIVS', 'VENVS', 'TELLVS', 'MARS', 'IVPITER', 'SATVRNVS'];
-  static const _roman = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
-
-  static final _goldRgb = _rgb(Pigment.gold);
-  static final _aetherRgb = _rgb(Pigment.aether);
-  static final _goldToBright = _ramp(Pigment.gold, Pigment.goldBright);
-  static final _cinnToGold = _ramp(Pigment.cinnabar, Pigment.gold);
-  static final _labelColor = _argb(0.8, _rgb(Pigment.parchment));
-  static final _numeralColor = _argb(0.92, _rgb(Pigment.goldBright));
-
-  /// 一个字符格子的宽和高（逻辑像素）。
-  late final double cw, ch;
-  late final int _sw, _sh;
-  late final ui.Image image;
-  late final Float32List _glyphRects;
-  final _index = <String, int>{};
-
-  late final int _gDash, _gPipe, _gSlash, _gBack, _gDot, _gBullet, _gStar, _gPlus, _gAst;
-  late final List<int> _sunRamp, _aetherRamp;
-
-  Float32List transforms = Float32List(0);
-  Float32List rects = Float32List(0);
-  Int32List colors = Int32List(0);
-  Int32List _overG = Int32List(0);
-  Int32List _overC = Int32List(0);
-
-  // 这一帧的布局（每帧开头算一次）。
-  double _cx = 0, _cy = 0, _halfDiag = 1, _rSun = 1, _rRay = 1, _rZoIn = 1, _rZoOut = 1, _r0 = 1, _step = 1, _rot = 0;
-
-  // _cell 算出的这一格：字和颜色；-1 是空着。
-  int _cg = -1, _cc = 0;
-
-  int _g(String c) => _index[c] ?? _index['?']!;
-
-  void dispose() => image.dispose();
-
-  void _ensure(int n) {
-    if (colors.length >= n) return;
-    transforms = Float32List(n * 4);
-    rects = Float32List(n * 4);
-    colors = Int32List(n);
-    _overG = Int32List(n);
-    _overC = Int32List(n);
-  }
-
-  /// 方向 (vx, vy) 上的一笔用哪个字（屏幕坐标，y 朝下）。
-  int _dir(double vx, double vy) {
-    final ax = vx.abs(), ay = vy.abs();
-    if (ay < ax * 0.414) return _gDash;
-    if (ax < ay * 0.414) return _gPipe;
-    return vx * vy > 0 ? _gBack : _gSlash;
-  }
-
-  /// 算一帧：填好 transforms、rects、colors，返回字符个数。
-  int frame(Size size, double t) {
-    final cols = (size.width / cw).ceil(), rows = (size.height / ch).ceil();
-    final n = cols * rows;
-    _ensure(n);
-    _overG.fillRange(0, n, -1);
-
-    _cx = size.width / 2;
-    _cy = size.height / 2;
-    final minDim = math.min(size.width, size.height);
-    _halfDiag = math.sqrt(_cx * _cx + _cy * _cy);
-    _rZoOut = minDim * 0.47;
-    _rZoIn = _rZoOut - ch * 2.7;
-    _rSun = math.max(minDim * 0.05, ch * 1.8);
-    _rRay = _rSun * 2.4;
-    _r0 = _rRay + ch * 1.5;
-    _step = (_rZoIn - ch * 1.8 - _r0) / (_spheres.length - 1);
-    _rot = t * 0.006;
-
-    // 盖在上面的字：天球的拉丁名、黄道带的罗马数字。空格表示这一格留空。
-    void put(String text, double x, double y, int argb) {
-      final row = (y / ch).floor();
-      if (row < 0 || row >= rows) return;
-      final start = (x / cw - text.length / 2).round();
-      for (var i = 0; i < text.length; i++) {
-        final col = start + i;
-        if (col < 0 || col >= cols) continue;
-        final idx = row * cols + col;
-        final c = text[i];
-        _overG[idx] = c == ' ' ? -2 : _g(c);
-        _overC[idx] = argb;
-      }
-    }
-
-    for (final (i, name) in _spheres.indexed) {
-      put(' $name ', _cx, _cy - (_r0 + _step * i), _labelColor);
-    }
-    final rm = (_rZoIn + _rZoOut) / 2;
-    for (final (k, numeral) in _roman.indexed) {
-      final a = _rot + (k + 0.5) * math.pi / 6 - math.pi / 2;
-      put(numeral, _cx + math.cos(a) * rm, _cy + math.sin(a) * rm, _numeralColor);
-    }
-
-    final scale = 1 / dpr;
-    var k = 0;
-    for (var row = 0; row < rows; row++) {
-      final dy = (row + 0.5) * ch - _cy;
-      for (var col = 0; col < cols; col++) {
-        final idx = row * cols + col;
-        final o = _overG[idx];
-        if (o != -1) {
-          if (o < 0) continue;
-          _cg = o;
-          _cc = _overC[idx];
-        } else {
-          final dx = (col + 0.5) * cw - _cx;
-          _cell(col, row, dx, dy, math.sqrt(dx * dx + dy * dy), t);
-          if (_cg < 0) continue;
-        }
-        final j = k * 4, gj = _cg * 4;
-        transforms
-          ..[j] = scale
-          ..[j + 1] = 0
-          ..[j + 2] = col * cw
-          ..[j + 3] = row * ch;
-        rects
-          ..[j] = _glyphRects[gj]
-          ..[j + 1] = _glyphRects[gj + 1]
-          ..[j + 2] = _glyphRects[gj + 2]
-          ..[j + 3] = _glyphRects[gj + 3];
-        colors[k] = _cc;
-        k++;
-      }
-    }
-    return k;
-  }
-
-  /// 一个格子画什么。(dx, dy) 是格子中心离太阳的位移，r 是距离。结果放在 _cg、_cc。
-  void _cell(int col, int row, double dx, double dy, double r, double t) {
-    _cg = -1;
-    // 角落里淡出，和熟褐的暗角接上。
-    final fade = 1 - _smooth(0.82, 1.08, r / _halfDiag);
-    if (fade <= 0.01) return;
-
-    // 太阳：越往中心越密越亮，外缘带一点朱砂，火苗跟着噪声跳。
-    if (r < _rSun) {
-      final v = 1 - r / _rSun;
-      final f = _noise(dx * 0.09 + t * 0.9, dy * 0.09 - t * 0.7) - 0.5;
-      final q = (v * 0.9 + 0.1 + f * 0.45).clamp(0.0, 1.0);
-      _cg = _sunRamp[(q * (_sunRamp.length - 1)).round()];
-      _cc = _argb(1, q > 0.5 ? _goldToBright[((q - 0.5) * 32).round()] : _cinnToGold[(q * 32).round()]);
-      return;
-    }
-
-    final th = math.atan2(dy, dx);
-    // 一条圆线在这一格算不算“压在线上”：左右两侧（线是竖的）每行只取一格，上下两侧（线是横的）每列只取一格，
-    // 线就只有一个字宽，斜的地方也不会叠成两三道。
-    final thick = math.max(0.5 * cw * (dx / r).abs(), 0.5 * ch * (dy / r).abs());
-
-    if (r < _rRay) {
-      // 太阳的光芒：十二道长的，中间夹十二道短的点线；慢慢转，长短起伏。
-      const seg = math.pi / 6;
-      final base = t * 0.012;
-      final reach = (r - _rSun) / (_rRay - _rSun);
-      final m = (th - base) % seg;
-      final len = 0.62 + 0.38 * math.sin(t * 0.6 + ((th - base) / seg).round() * 1.7);
-      if (math.min(m, seg - m) * r < cw * 0.55 && reach < len) {
-        final s = 1 - reach / len;
-        _cg = _dir(dx, dy);
-        _cc = _argb((0.35 + 0.65 * s) * fade, _goldToBright[(s * 16).round()]);
-        return;
-      }
-      final m2 = (th - base + seg / 2) % seg;
-      if (math.min(m2, seg - m2) * r < cw * 0.45 && reach < len * 0.55) {
-        _cg = _gDot;
-        _cc = _argb((1 - reach / (len * 0.55)) * 0.75 * fade, _goldRgb);
-        return;
-      }
-    } else if (r > _rZoIn - ch && r < _rZoOut + ch) {
-      // 黄道带：内外两圈，每 30 度一道界线，靠外一圈每 5 度一个刻度。
-      if ((r - _rZoOut).abs() < thick || (r - _rZoIn).abs() < thick) {
-        _cg = _dir(-dy, dx);
-        _cc = _argb(0.85 * fade, _goldRgb);
-        return;
-      }
-      if (r > _rZoIn && r < _rZoOut) {
-        final a = th - _rot + math.pi / 2;
-        const seg = math.pi / 6;
-        final m = a % seg;
-        if (math.min(m, seg - m) * r < cw * 0.55) {
-          _cg = _dir(dx, dy);
-          _cc = _argb(0.75 * fade, _goldRgb);
-          return;
-        }
-        if (r > _rZoOut - ch * 1.1) {
-          const s5 = math.pi / 36;
-          final m5 = a % s5;
-          if (math.min(m5, s5 - m5) * r < cw * 0.4) {
-            _cg = _dir(dx, dy);
-            _cc = _argb(0.5 * fade, _goldRgb);
-            return;
-          }
-        }
-        return;
-      }
-    } else if (r > _r0 - ch && r < _r0 + _step * (_spheres.length - 1) + ch) {
-      // 行星天球：金线，一串串光点沿着轨道走（里圈快、外圈慢，相邻两圈方向相反）。
-      final i = ((r - _r0) / _step).round().clamp(0, _spheres.length - 1);
-      if ((r - (_r0 + _step * i)).abs() < thick) {
-        final dir = i.isEven ? 1.0 : -1.0;
-        final s = math.sin(th * (4 + i) - t * dir * 0.8 / (1 + i * 0.45));
-        final bead = s > 0 ? math.pow(s, 14).toDouble() : 0.0;
-        _cg = bead > 0.88 ? _gBullet : _dir(-dy, dx);
-        _cc = _argb((0.32 + 0.68 * bead) * fade, _goldToBright[(bead * 16).round()]);
-        return;
-      }
-    }
-
-    // 恒星：金色的，明暗慢慢闪；大一点的是八角星。
-    final h = _hash(col * 7 + 3, row * 13 + 1);
-    if (h < 0.0065) {
-      final h2 = _hash(col * 11 + 5, row * 3 + 9);
-      final tw = 0.5 + 0.5 * math.sin(t * (0.6 + h2 * 0.9) + h * 900);
-      final big = h2 < 0.3;
-      _cg = big ? (tw > 0.55 ? _gStar : _gPlus) : (tw > 0.75 ? _gAst : _gDot);
-      _cc = _argb((0.3 + 0.7 * tw * tw) * fade, big ? _goldToBright[(tw * 16).round()] : _goldRgb);
-      return;
-    }
-
-    // 流动的以太：噪声场绕着太阳旋转，里圈转得快，被拉成一缕一缕的。
-    final ph = th + t * 0.03 * (300 / (r + 300));
-    final px = math.cos(ph) * r * 0.012, py = math.sin(ph) * r * 0.012;
-    final v = _noise(px + 11.3, py - 4.7 + t * 0.015) * 0.65 + _noise(px * 2.1 - 3.1, py * 2.1 + 8.2 - t * 0.02) * 0.35;
-    if (v > 0.57) {
-      final q = ((v - 0.57) / 0.3).clamp(0.0, 1.0);
-      _cg = _aetherRamp[(q * (_aetherRamp.length - 1)).round()];
-      _cc = _argb((0.1 + 0.36 * q) * fade, _aetherRgb);
-    }
-  }
+  bool shouldRepaint(_SkyPainter old) =>
+      old.shader != shader ||
+      old.cloudShader != cloudShader ||
+      old.atlas != atlas ||
+      old.dpr != dpr ||
+      old.time != time;
 }

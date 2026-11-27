@@ -64,15 +64,12 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final admin = state.isAdmin;
     var tab = _tab;
     // 权限降成“日常”后，管理的几页不再显示。
-    if (!admin && const {SettingsTab.devices, SettingsTab.schedules, SettingsTab.memory, SettingsTab.rules}.contains(tab)) {
+    if (!admin &&
+        const {SettingsTab.devices, SettingsTab.schedules, SettingsTab.memory, SettingsTab.rules}.contains(tab)) {
       tab = SettingsTab.general;
     }
-    Widget item(SettingsTab t, IconData icon, String label) => _NavItem(
-      icon: icon,
-      label: label,
-      selected: tab == t,
-      onTap: () => setState(() => _tab = t),
-    );
+    Widget item(SettingsTab t, IconData icon, String label) =>
+        _NavItem(icon: icon, label: label, selected: tab == t, onTap: () => setState(() => _tab = t));
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -163,7 +160,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Widget _body(SettingsTab t) => switch (t) {
     SettingsTab.general => const _GeneralPane(),
-    SettingsTab.notify => ListView(padding: const EdgeInsets.symmetric(horizontal: 12), children: const [NotifySection()]),
+    SettingsTab.notify => ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      children: const [NotifySection()],
+    ),
     SettingsTab.appearance => const _AppearancePane(),
     SettingsTab.devices => const DevicesPage(),
     SettingsTab.schedules => const SchedulesPage(),

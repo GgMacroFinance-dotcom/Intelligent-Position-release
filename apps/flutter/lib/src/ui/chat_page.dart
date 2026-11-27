@@ -10,6 +10,7 @@ import '../app_state.dart';
 import '../protocol/client.dart';
 import '../protocol/models.dart';
 import 'common.dart';
+import 'inbox_page.dart' show ApprovalCard;
 import 'shell/tokens.dart';
 
 /// 列表和对话并排的最小宽度。
@@ -145,7 +146,13 @@ class ThreadScreen extends StatelessWidget {
 }
 
 class ThreadView extends StatefulWidget {
-  const ThreadView({super.key});
+  const ThreadView({super.key, this.fixedAgentId, this.onOpenThread});
+
+  /// 固定发给某一位员工时传入（比如点星球打开的单员工面板）：隐藏输入框里多余的“发给谁”下拉。
+  final String? fixedAgentId;
+
+  /// 对话里嵌着的审批卡片若需要跳去别的对话时调；不传时只在当前对话里直接点选。
+  final void Function(String threadId)? onOpenThread;
 
   @override
   State<ThreadView> createState() => _ThreadViewState();
@@ -180,6 +187,10 @@ class _ThreadViewState extends State<ThreadView> {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final id = state.threadId;
+    final fixed = widget.fixedAgentId;
+    final threadApprovals = id == null
+        ? const <Approval>[]
+        : state.pendingApprovals.where((a) => a.subjectThreadId == id).toList();
     final items = <Widget>[
       for (final m in state.messages) _message(state, m),
       for (final MapEntry(key: agentId, value: text) in state.drafts.entries)
@@ -189,18 +200,35 @@ class _ThreadViewState extends State<ThreadView> {
             note: '正在输入…',
             child: MessageMarkdown(text, reportHint: agentId),
           ),
+      for (final a in threadApprovals)
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: Sizes.cardMax),
+            child: ApprovalCard(
+              key: ValueKey('thread-approval-${a.id}'),
+              approval: a,
+              hideThreadLink: true,
+              onOpenThread: widget.onOpenThread ?? state.openThread,
+            ),
+          ),
+        ),
       if (id != null && state.turnNote[id] != null)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(state.turnNote[id]!, style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13)),
         ),
     ];
+    final emptyHint = id != null
+        ? ''
+        : fixed != null
+        ? '写点什么给 ${state.agentName(fixed)}，开始新对话。'
+        : (state.agents.isEmpty ? '主机上没有数字员工。' : '选一位员工，或者交给自动分派，开始新对话。');
     return Column(
       children: [
         if (id != null && state.memoryOff != null) ThreadMemoryBar(threadId: id, off: state.memoryOff!.contains(id)),
         Expanded(
           child: items.isEmpty
-              ? EmptyHint(id == null ? (state.agents.isEmpty ? '主机上没有数字员工。' : '选一位员工，或者交给自动分派，开始新对话。') : '')
+              ? EmptyHint(emptyHint)
               // 倒过来排：最新的在底部，来了新内容自动停在底部，往上翻时不会被拽下来。
               : ListView.builder(
                   controller: _scroll,
@@ -210,7 +238,7 @@ class _ThreadViewState extends State<ThreadView> {
                   itemBuilder: (context, i) => items[items.length - 1 - i],
                 ),
         ),
-        const Composer(),
+        Composer(fixedAgentId: fixed),
       ],
     );
   }
@@ -354,7 +382,10 @@ class _Bubble extends StatelessWidget {
                         text: who,
                         style: TextStyle(color: s.inkSecondary, fontWeight: FontWeight.w500),
                       ),
-                      TextSpan(text: '  $note', style: TextStyle(color: s.inkTertiary)),
+                      TextSpan(
+                        text: '  $note',
+                        style: TextStyle(color: s.inkTertiary),
+                      ),
                     ],
                   ),
                   style: const TextStyle(fontSize: 12),
@@ -368,7 +399,10 @@ class _Bubble extends StatelessWidget {
                 ),
                 child: DefaultTextStyle.merge(
                   style: TextStyle(color: ink, fontSize: 15, height: 1.45),
-                  child: IconTheme.merge(data: IconThemeData(color: ink), child: child),
+                  child: IconTheme.merge(
+                    data: IconThemeData(color: ink),
+                    child: child,
+                  ),
                 ),
               ),
             ],
@@ -416,7 +450,10 @@ class _Folded extends StatelessWidget {
 
 /// 输入框和“发给谁”。输入框在重建时保留内容，事件推送不会冲掉正在打的字。
 class Composer extends StatefulWidget {
-  const Composer({super.key});
+  const Composer({super.key, this.fixedAgentId});
+
+  /// 固定发给某一位员工时（点星球打开的单员工面板），不显示“发给谁”下拉框。
+  final String? fixedAgentId;
 
   @override
   State<Composer> createState() => _ComposerState();
@@ -468,9 +505,11 @@ class _ComposerState extends State<Composer> {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final s = Shell.of(context);
-    final current = state.currentAgent;
+    final fixed = widget.fixedAgentId;
+    final current = fixed ?? state.currentAgent;
     // 当前选的员工不在名单里（名单还没加载）时先显示自动分派。
     final value = state.agents.any((a) => a.id == current) ? current : null;
+    final canSend = state.connected && !_sending;
     // 照 dusk bot：白底圆角的输入框浮在对话底部，左边 +，右边一个实心的发送按钮。
     // “发给谁”放在输入框里左下角，像一个小胶囊。
     return Padding(
@@ -481,13 +520,15 @@ class _ComposerState extends State<Composer> {
           child: AnimatedContainer(
             duration: Motion.fast,
             curve: Motion.curve,
-            decoration: BoxDecoration(
+            decoration: ShapeDecoration(
               color: s.composer,
-              borderRadius: BorderRadius.circular(Radii.card),
-              border: Border.all(color: _focus.hasFocus ? s.hairline : s.composerRing, width: 0.8),
-              boxShadow: s.floatShadow,
+              shape: RoundedSuperellipseBorder(
+                borderRadius: BorderRadius.circular(Radii.x4),
+                side: BorderSide(color: _focus.hasFocus ? s.hairline : s.composerRing, width: 0.8),
+              ),
+              shadows: s.floatShadow,
             ),
-            padding: const EdgeInsets.fromLTRB(6, 4, 6, 6),
+            padding: const EdgeInsets.fromLTRB(6, 3, 6, 5),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -523,45 +564,46 @@ class _ComposerState extends State<Composer> {
                         visualDensity: VisualDensity.compact,
                       ),
                     ),
-                    Flexible(
-                      child: Container(
-                        height: 30,
-                        constraints: const BoxConstraints(maxWidth: 260),
-                        padding: const EdgeInsets.only(left: 10, right: 4),
-                        decoration: BoxDecoration(color: s.card, borderRadius: BorderRadius.circular(999)),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String?>(
-                            isDense: true,
-                            isExpanded: true,
-                            value: value,
-                            borderRadius: BorderRadius.circular(Radii.menu),
-                            dropdownColor: s.menu,
-                            icon: Icon(Icons.expand_more, size: 16, color: s.inkSecondary),
-                            style: TextStyle(color: s.ink, fontSize: 13),
-                            hint: Text('自动分派（按路由规则）', style: TextStyle(color: s.ink, fontSize: 13)),
-                            items: [
-                              const DropdownMenuItem<String?>(value: null, child: Text('自动分派（按路由规则）')),
-                              for (final a in state.agents)
-                                DropdownMenuItem<String?>(value: a.id, child: Text('${a.name}（${a.role}）')),
-                            ],
-                            onChanged: state.connected ? state.chooseAgent : null,
+                    if (fixed == null)
+                      Flexible(
+                        child: Container(
+                          height: 30,
+                          constraints: const BoxConstraints(maxWidth: 260),
+                          padding: const EdgeInsets.only(left: 10, right: 4),
+                          decoration: BoxDecoration(color: s.card, borderRadius: BorderRadius.circular(999)),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String?>(
+                              isDense: true,
+                              isExpanded: true,
+                              value: value,
+                              borderRadius: BorderRadius.circular(Radii.menu),
+                              dropdownColor: s.menu,
+                              icon: Icon(Icons.expand_more, size: 16, color: s.inkSecondary),
+                              style: TextStyle(color: s.ink, fontSize: 13),
+                              hint: Text('自动分派（按路由规则）', style: TextStyle(color: s.ink, fontSize: 13)),
+                              items: [
+                                const DropdownMenuItem<String?>(value: null, child: Text('自动分派（按路由规则）')),
+                                for (final a in state.agents)
+                                  DropdownMenuItem<String?>(value: a.id, child: Text('${a.name}（${a.role}）')),
+                              ],
+                              onChanged: state.connected ? state.chooseAgent : null,
+                            ),
                           ),
                         ),
                       ),
-                    ),
                     const SizedBox(width: 8),
                     const Spacer(),
                     Tooltip(
                       message: '发送',
                       child: Material(
-                        color: state.connected && !_sending ? s.ink : s.control,
+                        color: canSend ? s.ink : s.control,
                         shape: const CircleBorder(),
                         child: InkWell(
                           customBorder: const CircleBorder(),
-                          onTap: state.connected && !_sending ? _send : null,
+                          onTap: canSend ? _send : null,
                           child: SizedBox.square(
                             dimension: 32,
-                            child: Icon(Icons.arrow_upward, size: 18, color: s.app),
+                            child: Icon(Icons.arrow_upward, size: 18, color: canSend ? s.app : s.inkTertiary),
                           ),
                         ),
                       ),
