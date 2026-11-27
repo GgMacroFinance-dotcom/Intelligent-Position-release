@@ -91,6 +91,42 @@ void main() {
     expect(map.bodies.single.agent.id, 'macro-1');
   });
 
+  test('主机标了协调岗位（coordinator: true）就以它为准，不再按名字猜', () {
+    StarMap mapOf(List<Role> roles, List<Agent> agents) => buildStarMap(
+      agents: agents,
+      roles: roles,
+      tasks: const [],
+      approvals: const [],
+      working: const {},
+      failures: const {},
+      now: now,
+    );
+    const coordinator = Role(id: 'coordinator', name: '协调员', description: '');
+    const macro = Role(id: 'macro', name: '宏观研究员', description: '');
+    final staff = [
+      agent('coord-1', 'coordinator', '小协'),
+      agent('lead-1', 'lead', '老王'),
+      agent('macro-1', 'macro', '小宏'),
+    ];
+    // 名字像协调员的岗位没标，标了的岗位名字不像：按标记来。
+    final marked = mapOf([
+      coordinator,
+      const Role(id: 'lead', name: '牵头人', description: '', coordinator: true),
+      macro,
+    ], staff);
+    expect(marked.chief?.agent.id, 'lead-1');
+    expect(marked.bodies.map((b) => b.agent.id), containsAll(['coord-1', 'macro-1']));
+    // 标了的岗位没有员工：太阳空着，不退回按名字猜。
+    final empty = mapOf([
+      coordinator,
+      const Role(id: 'nobody', name: '第一组', description: '', coordinator: true),
+    ], staff);
+    expect(empty.chief, isNull);
+    // 旧主机一个都没标：退回按名字猜。
+    final old = mapOf([coordinator, const Role(id: 'lead', name: '牵头人', description: ''), macro], staff);
+    expect(old.chief?.agent.id, 'coord-1');
+  });
+
   test('越紧急离太阳越近：在问你 > 过期 > 受阻 > 正在处理 > 有任务 > 空闲', () {
     final map = build(
       approvals: [question('q1', 'macro-1')],

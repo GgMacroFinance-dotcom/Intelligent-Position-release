@@ -128,8 +128,12 @@ class AppState extends ChangeNotifier {
 
   /// 用户手动拖拽固定到指定轨道的映射表（`agentId -> OrbitPin`）。
   /// 挂在全局 [AppState] 上，窗口跨 980px 宽/窄屏切换后仍完整保留用户拖好的轨道位置。
-  /// TODO(backend-orbit-sync)：后续后端下发 `agent.orbit_track` / `agent.orbit_pinned_at` 时在此合并同步。
+  /// 主机上的员工以主机的表为准（m2-spec D-40：`list_orbit_pins`、`orbit_pins_changed`）；
+  /// 本地新建的 Bot、演示星球不在主机上，只留在这里。
   final manualOrbitPins = <String, OrbitPin>{};
+
+  /// 主机有没有星图轨道表；旧主机没有时为 false，拖好的轨道只留在本机。
+  bool orbitPinsOnHost = false;
 
   // ---------- 星球重要度手动调节与预留传导/冲突接口（方案 A，后端暂不执行，详见 planet_importance.dart） ----------
 
@@ -674,7 +678,7 @@ class AppState extends ChangeNotifier {
       if (_client != c) return;
       roles = r[0] as List<Role>;
       agents = r[1] as List<Agent>;
-      threads = r[2] as List<ThreadSummary>;
+      _setThreads(r[2] as List<ThreadSummary>);
       hasRules = r[3] as bool;
       approvals = r[4] as List<Approval>;
       tasks = r[5] as List<Task>;
@@ -691,6 +695,15 @@ class AppState extends ChangeNotifier {
       } on RequestError {
         // 主机太旧，没有通知设置。
         notify = null;
+      }
+      try {
+        final pins = await c.listOrbitPins();
+        if (_client != c) return;
+        orbitPinsOnHost = true;
+        _applyHostOrbitPins(pins);
+      } on RequestError {
+        // 主机太旧，没有星图轨道表：拖好的轨道只留在本机。
+        orbitPinsOnHost = false;
       }
       if (_client != c) return;
       if (!_agentForNewChosen) agentForNew = hasRules || agents.isEmpty ? null : agents.first.id;
@@ -870,7 +883,54 @@ class AppState extends ChangeNotifier {
     });
   }
 
+  /// 换上主机的星图轨道表：只换主机上的员工，本地新建的 Bot 和演示星球照旧。
+  void _applyHostOrbitPins(List<PinnedOrbit> pins) {
+    final onHost = {for (final a in agents) a.id};
+    manualOrbitPins.removeWhere((id, _) => onHost.contains(id));
+    for (final p in pins) {
+      manualOrbitPins[p.agentId] = OrbitPin(trackId: p.track, pinnedAtMs: p.pinnedAtMs);
+    }
+  }
+
+  /// 一次拖放落位后，把主机上员工的轨道改动（拖进去的和被挤出去的）一起交给主机，别的设备随后收到 `orbit_pins_changed`。
+  /// 本地已经先改好了；主机拒了就重新拉一遍主机的表盖回去。旧主机、没连上时只留在本机。
+  Future<void> syncOrbitPins(List<OrbitPinChange> changes) async {
+    final c = _client;
+    if (c == null || !connected || !orbitPinsOnHost) return;
+    final onHost = {for (final a in agents) a.id};
+    final real = [
+      for (final ch in changes)
+        if (onHost.contains(ch.agentId)) (agentId: ch.agentId, track: ch.pin.trackId, pinnedAtMs: ch.pin.pinnedAtMs),
+    ];
+    if (real.isEmpty) return;
+    try {
+      final pins = await c.setOrbitPins(real);
+      if (_client != c) return;
+      _applyHostOrbitPins(pins);
+    } on RequestError {
+      try {
+        final pins = await c.listOrbitPins();
+        if (_client != c) return;
+        _applyHostOrbitPins(pins);
+      } on RequestError {
+        // 断线了：重连后会整个重新拉。
+        return;
+      }
+    }
+    notifyListeners();
+  }
+
   Timer? _threadsTimer;
+
+  /// 换上主机给的对话列表，顺带按主机记的“最后回复的员工”补上还不知道归属的对话（App 重启后左栏也有历史闲聊）。
+  /// 已经知道的不覆盖：刚发给另一位员工、他还没回时，本地记的是新的那位。
+  void _setThreads(List<ThreadSummary> list) {
+    threads = list;
+    for (final t in list) {
+      final agent = t.lastAgentId;
+      if (agent != null) threadAgent.putIfAbsent(t.threadId, () => agent);
+    }
+  }
 
   /// 有新消息时刷新对话列表，合并短时间内的多次。
   void _refreshThreadsSoon() {
@@ -879,7 +939,7 @@ class AppState extends ChangeNotifier {
       final c = _client;
       if (c == null || !connected) return;
       try {
-        threads = await c.listThreads();
+        _setThreads(await c.listThreads());
         notifyListeners();
       } on RequestError {
         // 断线重连后会整个重新拉。
@@ -923,6 +983,8 @@ class AppState extends ChangeNotifier {
         tasks = [task, ...tasks.where((t) => t.id != task.id)]..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
       case ApprovalChanged(:final approval):
         _upsertApproval(approval);
+      case OrbitPinsChanged(:final pins):
+        _applyHostOrbitPins(pins);
       case UnknownEvent():
         return;
     }

@@ -12,6 +12,7 @@ fn org() -> (OrgSpec, Vec<Agent>) {
             escalate: escalate.map(String::from),
         },
         budget_per_day_usd: None,
+        coordinator: false,
     };
     let agent = |id: &str, role: &str| Agent {
         id: id.into(),

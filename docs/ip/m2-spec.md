@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.25（2026-11-24）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-38（回复里提到的报告作为文件发进线程，backlog E-13，v0.24）是提议，代码和这次修改放在同一个 PR 里，等工程师审查。D-39（浏览器走 Playwright MCP、`mcp_servers` 的 `tools` 白名单，backlog E-5，v0.25）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.26（2026-11-27）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-38（回复里提到的报告作为文件发进线程，backlog E-13，v0.24）是提议，代码和这次修改放在同一个 PR 里，等工程师审查。D-39（浏览器走 Playwright MCP、`mcp_servers` 的 `tools` 白名单，backlog E-5，v0.25）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-40（App 桌面外壳的协议补充：对话的最后回复员工、协调岗位标记、星图轨道表，backlog F-23，v0.26）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -939,7 +939,7 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 
 - 每台设备一档权限：`daily`（日常）或 `admin`（管理）。新配对的设备是 `daily`；D-30 之前存下、没有这一项的设备也按 `daily` 算。共用令牌（以及本机不设令牌时）等同 `admin`。
 - `/ws` 每个请求先看权限：`admin` 什么都能做；`daily` 只能用 `ws.rs` 里 `daily_allows` 列出的请求类型，其余回错误“这台设备是‘日常’权限…”。没列出的都算 `admin`，以后新加的请求类型也一样，要给日常设备用得明确加进去（默认拒绝）。
-- `daily` 能用的：`list_roles`、`list_agents`、`spend_today`、`list_threads`、`history`、`search`、`route`、`send`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`、`list_reports`、`read_report`、`who_am_i`，外加两个只读的：`list_rules`（新对话默认要不要自动分派，看有没有路由规则）、`list_memory_off_threads`（对话页顶上显示这个对话进不进岗位记忆）。改路由规则、规则草案、定时任务（看和立即运行）、记忆（看、改、抹掉、清空、开关对话记忆）、设备管理都只给 `admin`。
+- `daily` 能用的：`list_roles`、`list_agents`、`spend_today`、`list_threads`、`history`、`search`、`route`、`send`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`、`list_reports`、`read_report`、`who_am_i`，外加两个只读的：`list_rules`（新对话默认要不要自动分派，看有没有路由规则）、`list_memory_off_threads`（对话页顶上显示这个对话进不进岗位记忆），以及星图上拖员工换轨道的 `list_orbit_pins`、`set_orbit_pins`（D-40）。改路由规则、规则草案、定时任务（看和立即运行）、记忆（看、改、抹掉、清空、开关对话记忆）、设备管理都只给 `admin`。
 - 新请求 `set_device_scope {device_id, scope}`，要 `admin`，回改完后的 `DeviceInfo[]`。`DeviceInfo` 和 `who_am_i` 的回复多了 `scope`；`who_am_i` 原来的 `can_manage_devices` 去掉。
 - 每个请求按设备现在的名字和权限算：改名、改权限后，连着的连接下一个请求就生效，不用重连；吊销到断开之间的请求一律拒绝。
 - 管理设备可以改所有设备的权限，包括自己；共用令牌一直是 `admin`，不会把自己锁在外面。
@@ -1025,6 +1025,23 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 - **Android 的依赖**：收 FCM 要谷歌 Play 服务（闭源）。官方 App 接受这一点；以后可以加 UnifiedPush 给没有 Play 服务的手机，主机这边不用再改。
 - 测试：主机加白名单的单元测试（`push.hosts` 里的认、相近的写法不认）和配置检查；`/ws` 集成测试用假中转走一遍 App 式的订阅。中转用假的 APNs、FCM 测登记、封条解不开、转发的字段、令牌失效回 410、限流。App 用假的推送通道测登记、换令牌、关掉、收到后解密弹通知和撤销。没有在真的 APNs、FCM 和真手机上跑过之前，不写“可用”。
 
+### D-40 App 桌面外壳的协议补充 · 提议（backlog F-23）
+
+背景：Flutter App 的宽窗口外壳（2026-11-27 合并）列了一份后端适配清单（`docs/ip/flutter-desktop-backend-adaptation.md`）。这一条是其中第一批：协议小改动、能立即用上的三项（清单第 5、9、1 项）。
+
+- **对话的最后回复员工**（清单第 5 项）：`ThreadSummary` 加 `last_agent_id`（`AgentId | null`）。员工发的消息写入时更新，人和系统的消息不动它；员工还没说过话时为空。`threads` 表加 `last_agent_id` 列（迁移 0002），已有的对话按 `messages` 的写入顺序补一次，从 SQLite 旧库导入后也补。App 用它把对话归到员工名下，重启后员工左栏也能看到没挂在任务、审批上的历史对话；App 本地知道的（刚发给另一位员工、他还没回）不被覆盖。
+- **协调岗位标记**（清单第 9 项）：`Role` 加 `coordinator`，`ip.yaml` 里写 `coordinator: true`，最多一个岗位标，标了两个启动时报错。只是标记，不改这个岗位的工具、提示词和路由。是 false 时协议里不带这一项（TS 里是 `coordinator?: boolean`），旧主机也一样没有，客户端按 false 读。App 的星图：有岗位标了就让它的员工坐中心的太阳，标了的岗位没有员工时太阳空着；一个都没标（旧主机、ip.yaml 没写）才退回按 id、名字猜。示例配置给协调员标上。
+- **星图轨道表**（清单第 1 项）：App 宽窗口的天穹有三条固定轨道（0 内环、1 中环、2 外环），人能把员工拖到某条轨道上固定住，满环时 App 按确定的规则把别人挤到外侧（规则在 `apps/flutter/lib/src/ui/shell/orbit.dart`）。主机只存结果、校验、广播，不重算挤人。
+  - 新类型 `OrbitPin { agent_id, orbit_track: 0..2, orbit_pinned_at: Unix 毫秒 }`（`ip-core`）；没固定的员工不在表里，按紧急度自动排轨。
+  - `list_orbit_pins`：回复 `OrbitPin[]`，按员工 id 排；已经不在组织里的员工不列（记录留在库里，同一个 id 加回来时还在原来的轨道上）。
+  - `set_orbit_pins { changes: [{ agent_id, orbit_track?, orbit_pinned_at? }] }`：一次拖放改动的几位员工（拖进去的和被挤出去的）一起提交。`orbit_track` 为空是取消固定；`orbit_pinned_at` 省略时用主机收到的时间。同一位员工出现几次以最后一次为准。员工不存在、轨道不是 0 到 2、时间是负数时整批不改，回错误；一次最多 256 项。回复改完后的整张 `OrbitPin[]`。
+  - 表真的变了才推事件 `orbit_pins_changed { pins: OrbitPin[] }`（整张表），各端直接换上；它照常编号、断线补发（D-29）。不发通知。
+  - 存在设置表的 `star_map.orbit_pins` 键里，整份读写，读改写由一把锁串行化。
+  - 权限：两个请求都给 `daily`（日常使用，各设备共用一张表）。
+  - App：连上时拉一次表，主机上的员工以主机为准，本地新建的 Bot（主机上还没有）和演示星球照旧只留在本机；拖放落位后把主机上员工的改动交上去，主机拒了就重新拉表盖回去；旧主机没有这个请求时只留在本机。审批通过后解除固定（清单第 2 项）还在本机做，等第 2 项落到主机。
+- 不加 `ip bench`：三项都不在热路径上（拖放由人触发，对话列表多读一列）。
+- 测试：存储（写入更新、人的消息不改归属、迁移补旧对话、旧库导入后补）；组织（标两个报错、false 不出现在 JSON、旧 JSON 按 false 读、示例配置只标了协调员）；`/ws`（日常设备能改、整批校验、同一员工以最后一次为准、别的连接收到事件、重启后还在、删掉的员工不列、取消固定）；App（对话归属并进左栏、按标记找太阳并退回猜名字、轨道表随主机和事件换、只交主机上的员工、被拒后重拉、旧主机不发请求），都在假模型、假主机上。
+
 ---
 
 ## 10. 浏览器
@@ -1069,3 +1086,4 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 | 2026-11-22 | v0.23 | D-35 加 iPhone 的实现（F-21 之五，提议，等工程师审查）：通知扩展解密、改写 APNs 送来的通知，“已在别处处理”撤掉旧的、换成不响铃不亮屏的；私钥放 App 和扩展共用的钥匙串分组。`/ws` 协议和中转都不变。没在真 iPhone、真 APNs 上收过 |
 | 2026-11-24 | v0.24 | 新增 D-38（提议，backlog E-13）：员工回复里提到的 `reports/<文件名>.md` 由投递器读出、作为 `Outbound::Report` 发进同一会话，Slack 用三步上传发成文件，没有 `files:write` 时把正文贴成文字；链接改写成“附件 x.md”；同一会话同一版本 7 天内只发一次；D-15 加 `files:write`，`ip check` 提醒缺这项权限。现有清理仅涉及入站记录，此次补清理过期报告条目，保留其他投递记录 |
 | 2026-11-24 | v0.25 | 新增第 10 节和 D-39（提议，backlog E-5）：浏览器走 Playwright MCP，删掉空壳 `ip-browser`；`mcp_servers` 每项加可选的 `tools` 白名单，只把单子里的工具交给员工。第 1 节“本阶段不做”里那一条指向 D-39。只用真的 Playwright MCP 在 macOS 上跑过集成测试，没让模型用过 |
+| 2026-11-27 | v0.26 | 新增 D-40（提议，backlog F-23）：App 桌面外壳的第一批协议补充：`ThreadSummary.last_agent_id`（`threads` 表加列，迁移 0002）、`Role.coordinator`（最多一个）、星图轨道表 `list_orbit_pins`、`set_orbit_pins` 和事件 `orbit_pins_changed`；D-31 的日常权限加这两个请求。只在假模型、假主机上测过 |

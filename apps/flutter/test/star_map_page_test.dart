@@ -6,10 +6,12 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ip_app/src/star_map.dart' show buildStarMap;
 import 'package:ip_app/src/ui/chat_page.dart' show Composer, ThreadView;
 import 'package:ip_app/src/ui/shell/agent_panel.dart';
 import 'package:ip_app/src/ui/shell/agent_sheet.dart';
 import 'package:ip_app/src/ui/shell/celestial_body.dart';
+import 'package:ip_app/src/ui/shell/orbit.dart' show OrbitPin, OrbitPinChange;
 import 'package:ip_app/src/ui/shell/tokens.dart';
 import 'package:ip_app/src/ui/inbox_page.dart';
 
@@ -158,6 +160,126 @@ void main() {
     await tester.tapAt(tester.getCenter(find.byKey(const ValueKey('star-ops-1'))));
     await settle(tester);
     expect(find.text('为什么在这条轨道上'), findsOneWidget);
+    await h.stop(tester);
+  });
+
+  testWidgets('主机记了最后回复的员工：没挂任务、审批的历史闲聊重启后也归到这位员工左栏', (tester) async {
+    final h = staffed();
+    h.host.handlers['list_threads'] = (_) => [
+      {'thread_id': 'tchat', 'last_at_ms': 3000, 'message_count': 4, 'preview': '上周的闲聊', 'last_agent_id': 'macro-1'},
+      // 刚发出、员工还没回：没有归属。旧主机不给这一项时也一样。
+      {'thread_id': 'tnew', 'last_at_ms': 2000, 'message_count': 1, 'preview': '刚发的'},
+    ];
+    await h.savePaired();
+    await h.start(tester, size: const Size(390, 844));
+    expect(h.state.threadAgent['tchat'], 'macro-1');
+    expect(h.state.threadAgent.containsKey('tnew'), isFalse);
+    final map = buildStarMap(
+      agents: h.state.agents,
+      roles: h.state.roles,
+      tasks: h.state.tasks,
+      approvals: h.state.approvals,
+      working: const {},
+      failures: const {},
+      now: 0,
+    );
+    final mine = agentThreads(h.state, map, 'macro-1');
+    expect(mine.map((t) => t.threadId), contains('tchat'));
+    expect(mine.firstWhere((t) => t.threadId == 'tchat').title, '上周的闲聊');
+    expect(agentThreads(h.state, map, 'ops-1').map((t) => t.threadId), isNot(contains('tchat')));
+    await h.stop(tester);
+  });
+
+  testWidgets('星图轨道（D-40）：用主机的表，别的设备改了跟着换，拖放后只把主机上的员工交上去', (tester) async {
+    final h = staffed();
+    h.host.handlers['list_orbit_pins'] = (_) => [
+      {'agent_id': 'macro-1', 'orbit_track': 0, 'orbit_pinned_at': 5},
+    ];
+    h.host.handlers['set_orbit_pins'] = (req) => [
+      for (final c in (req['changes'] as List).cast<Map<String, dynamic>>())
+        if (c['orbit_track'] != null)
+          {'agent_id': c['agent_id'], 'orbit_track': c['orbit_track'], 'orbit_pinned_at': c['orbit_pinned_at']},
+    ];
+    await h.savePaired();
+    await h.start(tester, size: const Size(390, 844));
+    expect(h.state.orbitPinsOnHost, isTrue);
+    expect(h.state.manualOrbitPins['macro-1'], const OrbitPin(trackId: 0, pinnedAtMs: 5));
+
+    // 本地新建的 Bot 不在主机上：主机的表换上来时它的轨道照旧。
+    h.state.manualOrbitPins['local-bot'] = const OrbitPin(trackId: 1, pinnedAtMs: 6);
+    h.host.event({
+      'type': 'orbit_pins_changed',
+      'pins': [
+        {'agent_id': 'ops-1', 'orbit_track': 2, 'orbit_pinned_at': 9},
+      ],
+    });
+    await tester.pump();
+    expect(h.state.manualOrbitPins.containsKey('macro-1'), isFalse, reason: '别的设备取消了小宏的固定');
+    expect(h.state.manualOrbitPins['ops-1'], const OrbitPin(trackId: 2, pinnedAtMs: 9));
+    expect(h.state.manualOrbitPins['local-bot'], const OrbitPin(trackId: 1, pinnedAtMs: 6));
+
+    // 一次拖放：小宏拖进内环、小维被挤到中环，外加一颗本地 Bot。只交主机上的两位。
+    await h.state.syncOrbitPins(const [
+      OrbitPinChange(
+        agentId: 'macro-1',
+        fromTrackId: 1,
+        toTrackId: 0,
+        evicted: false,
+        pin: OrbitPin(trackId: 0, pinnedAtMs: 20),
+      ),
+      OrbitPinChange(
+        agentId: 'ops-1',
+        fromTrackId: 0,
+        toTrackId: 1,
+        evicted: true,
+        pin: OrbitPin(trackId: 1, pinnedAtMs: 20),
+      ),
+      OrbitPinChange(
+        agentId: 'local-bot',
+        fromTrackId: 1,
+        toTrackId: 0,
+        evicted: false,
+        pin: OrbitPin(trackId: 0, pinnedAtMs: 20),
+      ),
+    ]);
+    final sent = h.host.requests.lastWhere((r) => r['type'] == 'set_orbit_pins');
+    expect(sent['changes'], [
+      {'agent_id': 'macro-1', 'orbit_track': 0, 'orbit_pinned_at': 20},
+      {'agent_id': 'ops-1', 'orbit_track': 1, 'orbit_pinned_at': 20},
+    ]);
+    expect(h.state.manualOrbitPins['macro-1'], const OrbitPin(trackId: 0, pinnedAtMs: 20));
+    expect(h.state.manualOrbitPins['ops-1'], const OrbitPin(trackId: 1, pinnedAtMs: 20));
+
+    // 主机拒了：重新拉主机的表盖回去。
+    h.host.handlers['set_orbit_pins'] = (_) => throw '找不到员工';
+    await h.state.syncOrbitPins(const [
+      OrbitPinChange(
+        agentId: 'macro-1',
+        fromTrackId: 0,
+        toTrackId: 2,
+        evicted: false,
+        pin: OrbitPin(trackId: 2, pinnedAtMs: 30),
+      ),
+    ]);
+    expect(h.state.manualOrbitPins['macro-1'], const OrbitPin(trackId: 0, pinnedAtMs: 5));
+    await h.stop(tester);
+  });
+
+  testWidgets('旧主机没有星图轨道表：拖好的轨道只留在本机，不发请求', (tester) async {
+    final h = staffed();
+    await h.savePaired();
+    await h.start(tester, size: const Size(390, 844));
+    expect(h.state.orbitPinsOnHost, isFalse);
+    await h.state.syncOrbitPins(const [
+      OrbitPinChange(
+        agentId: 'macro-1',
+        fromTrackId: 1,
+        toTrackId: 0,
+        evicted: false,
+        pin: OrbitPin(trackId: 0, pinnedAtMs: 20),
+      ),
+    ]);
+    expect(h.host.requests.where((r) => r['type'] == 'set_orbit_pins'), isEmpty);
     await h.stop(tester);
   });
 

@@ -236,6 +236,12 @@ impl Value {
     }
 }
 
+/// 按写入顺序找每个对话最后一条员工消息，填 `threads.last_agent_id`。
+const BACKFILL_THREAD_AGENTS: &str = "UPDATE threads SET last_agent_id = latest.agent_id FROM ( \
+     SELECT DISTINCT ON (thread_id) thread_id, json->'author'->>'agent_id' AS agent_id FROM messages \
+     WHERE json->'author'->>'kind' = 'agent' ORDER BY thread_id, pos DESC \
+     ) AS latest WHERE latest.thread_id = threads.id";
+
 /// 每张表导了几行。旧库里没有这张表时是 `None`。
 #[derive(Debug, Default)]
 pub struct ImportReport {
@@ -318,6 +324,8 @@ impl Store {
             }
             report.tables.push((table.name, Some(rows.len() as u64)));
         }
+        // 旧库的对话表没有“最后回复的员工”，按导进来的消息补上（和 migrations/0002 里的一样）。
+        transaction.batch_execute(BACKFILL_THREAD_AGENTS).await?;
         // 保留了原值的自增列，把序列调到最大值之后，新写入接着往下编号。
         for (table, column) in [("events", "seq"), ("memory_notes", "id")] {
             transaction
@@ -465,7 +473,15 @@ mod tests {
             .iter()
             .enumerate()
         {
-            let mut m = Message::text(ThreadId::from("t1"), Author::human("张三"), *body);
+            // 第二条是员工发的：导入后对话要记下最后回复的员工。
+            let author = if i == 0 {
+                Author::human("张三")
+            } else {
+                Author::Agent {
+                    agent_id: "ops-1".into(),
+                }
+            };
+            let mut m = Message::text(ThreadId::from("t1"), author, *body);
             m.at_ms = i as i64 + 1;
             let json = serde_json::to_string(&m).unwrap();
             db.execute(
@@ -516,7 +532,9 @@ mod tests {
         assert_eq!(store.search("销售报表", None, 10).await.unwrap().len(), 1);
         let messages = store.thread_messages(&"t1".into(), None, 10).await.unwrap();
         assert_eq!(messages.len(), 2);
-        assert_eq!(store.recent_threads(10).await.unwrap()[0].message_count, 2);
+        let threads = store.recent_threads(10).await.unwrap();
+        assert_eq!(threads[0].message_count, 2);
+        assert_eq!(threads[0].last_agent_id, Some("ops-1".into()));
         assert_eq!(
             store.setting("rules").await.unwrap(),
             Some(serde_json::json!({ "a": 1 }))

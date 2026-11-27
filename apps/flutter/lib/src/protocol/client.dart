@@ -444,6 +444,19 @@ extension IpRequests on IpClient {
   Future<List<ReportInfo>> listReports({String? agentId, int limit = 200}) =>
       _list(w.RequestListReports(agentId: agentId, limit: limit), ReportInfo.fromJson);
 
+  /// 星图上人固定了轨道的员工（m2-spec D-40）。
+  Future<List<PinnedOrbit>> listOrbitPins() => _list(const w.RequestListOrbitPins(), PinnedOrbit.fromJson);
+
+  /// 一次拖放改动的几位员工一起交给主机；`track` 为空是取消固定。回复改完后的整张表，主机有一项不认就整批不改。
+  Future<List<PinnedOrbit>> setOrbitPins(List<({String agentId, int? track, int? pinnedAtMs})> changes) => _list(
+    w.RequestSetOrbitPins(
+      changes: [
+        for (final c in changes) w.OrbitPinChange(agentId: c.agentId, orbitTrack: c.track, orbitPinnedAt: c.pinnedAtMs),
+      ],
+    ),
+    PinnedOrbit.fromJson,
+  );
+
   /// 读一份报告；`path` 是 `list_reports` 给的 `reports/<文件名>.md`。
   Future<ReportText> readReport(String agentId, String path) async =>
       ReportText.fromJson(await _object(w.RequestReadReport(agentId: agentId, path: path)));

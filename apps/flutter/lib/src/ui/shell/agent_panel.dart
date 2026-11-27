@@ -32,7 +32,7 @@ import 'tokens.dart';
 typedef AgentThread = ({String threadId, String title, int atMs, int count, bool waiting});
 
 /// 这位员工的对话：上次由它接手的、派给它的任务的执行对话、它在问你的那个对话、它最相关的对话。
-/// 主机的对话不记属于谁（只有 id），所以从这几处拼出来；按最近的时间排。
+/// 对话本身只记最后回复的员工（`ThreadSummary.lastAgentId`，已并进 `threadAgent`），所以再从任务、审批补上；按最近的时间排。
 List<AgentThread> agentThreads(AppState state, StarMap map, String agentId) {
   final out = <String, AgentThread>{};
   final waitingThreads = {
@@ -614,7 +614,7 @@ class _EmptyChatArea extends StatelessWidget {
     } else {
       icon = Icons.wb_sunny_outlined;
       title = '还没有配置幕僚长';
-      detail = '在主机的 ip.yaml 里加一个 id 含 coordinator 的岗位（或岗位名里有“协调”“幕僚”），重启主机后就能在这里直接对话。';
+      detail = '在主机的 ip.yaml 里给协调岗位写上 coordinator: true（并给它配一位员工），重启主机后就能在这里直接对话。';
     }
 
     return Column(

@@ -27,6 +27,8 @@ pub struct App {
     pub(crate) rules_from_console: Arc<std::sync::atomic::AtomicBool>,
     /// 串行化规则和草案的读改写。
     pub(crate) rules_lock: Arc<tokio::sync::Mutex<()>>,
+    /// 串行化星图轨道表的读改写（`star_map.rs`）。
+    pub(crate) star_map_lock: Arc<tokio::sync::Mutex<()>>,
     pub(crate) mcp: Option<Arc<ip_mcp::McpHub>>,
     /// 服务关闭时置为 true，让 WebSocket 会话主动断开，否则优雅关闭会一直等长连接。
     pub(crate) closing: Arc<tokio::sync::watch::Sender<bool>>,
@@ -60,6 +62,7 @@ impl App {
             ))),
             rules_from_console: Arc::default(),
             rules_lock: Arc::default(),
+            star_map_lock: Arc::default(),
             mcp: None,
             closing: Arc::new(closing),
             channels: Arc::default(),

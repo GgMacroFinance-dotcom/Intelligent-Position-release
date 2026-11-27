@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use ip_core::{Approval, ApprovalId, ApprovalState, Message, Task};
+use ip_core::{Approval, ApprovalId, ApprovalState, Author, Message, Task};
 use tokio::sync::{mpsc, oneshot};
 use tokio_postgres::error::SqlState;
 use tokio_postgres::types::ToSql;
@@ -801,13 +801,24 @@ async fn append_message(c: &Tx<'_, '_>, message: &Message) -> Result<Seq> {
         Err(error) => return Err(error.into()),
     }
     let preview = text.as_deref().map(preview);
+    // 员工的消息记下是谁，人和系统的消息不动它：对话列表按它把对话归到员工名下。
+    let agent = match &message.author {
+        Author::Agent { agent_id } => Some(clean_text(agent_id.as_str())),
+        _ => None,
+    };
     c.execute(
-        "INSERT INTO threads (id, last_at_ms, message_count, preview) VALUES ($1, $2, 1, $3)
+        "INSERT INTO threads (id, last_at_ms, message_count, preview, last_agent_id) VALUES ($1, $2, 1, $3, $4)
          ON CONFLICT (id) DO UPDATE SET
              last_at_ms = GREATEST(threads.last_at_ms, excluded.last_at_ms),
              message_count = threads.message_count + 1,
-             preview = COALESCE(excluded.preview, threads.preview)",
-        &[&clean_text(message.thread_id.as_str()), &message.at_ms, &preview],
+             preview = COALESCE(excluded.preview, threads.preview),
+             last_agent_id = COALESCE(excluded.last_agent_id, threads.last_agent_id)",
+        &[
+            &clean_text(message.thread_id.as_str()),
+            &message.at_ms,
+            &preview,
+            &agent,
+        ],
     )
     .await?;
     Ok(seq)

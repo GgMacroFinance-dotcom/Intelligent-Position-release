@@ -30,6 +30,15 @@ pub struct Role {
     /// 每日模型费用上限（美元）。
     #[serde(default)]
     pub budget_per_day_usd: Option<f64>,
+    /// 协调层岗位：接没有明确归属的需求，拆成任务派给执行岗位（App 星图中心的太阳）。最多一个岗位标这一项。
+    /// 只是标记，不改这个岗位的工具和提示词。是 false 时不出现在协议里，旧主机也一样没有。
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[ts(as = "Option<bool>", optional)]
+    pub coordinator: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// 岗位使用的模型。名字的格式是 `<端点>/<模型>`，本地岗位模型写成 `local/<基座>+<LoRA>`。
@@ -52,6 +61,22 @@ pub struct Agent {
     pub name: String,
 }
 
+/// 星图上的固定轨道条数：0 内环、1 中环、2 外环。
+pub const ORBIT_TRACKS: u8 = 3;
+
+/// 一位员工被人拖到星图某条轨道上固定住（App 桌面外壳，`docs/ip/m2-spec.md` D-40）。
+/// 没固定的员工按紧急度自动排轨，不在这张表里。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
+pub struct OrbitPin {
+    pub agent_id: AgentId,
+    /// 0 内环、1 中环、2 外环。
+    pub orbit_track: u8,
+    /// 放上这条轨道的时间（Unix 毫秒）。满环挤人时，同是人固定的，先放进来的先被挤出去。
+    #[ts(type = "number")]
+    pub orbit_pinned_at: i64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum OrgError {
     #[error("组织定义不是合法的 YAML：{0}")]
@@ -62,6 +87,8 @@ pub enum OrgError {
     Empty(RoleId, &'static str),
     #[error("岗位 {0} 的每日预算必须大于 0")]
     BadBudget(RoleId),
+    #[error("岗位 {0} 和 {1} 都标了 coordinator，最多只能有一个协调岗位")]
+    TwoCoordinators(RoleId, RoleId),
 }
 
 impl OrgSpec {
@@ -74,6 +101,7 @@ impl OrgSpec {
 
     pub fn validate(&self) -> Result<(), OrgError> {
         let mut seen = HashSet::new();
+        let mut coordinator: Option<&RoleId> = None;
         for role in &self.roles {
             if role.id.as_str().trim().is_empty() {
                 return Err(OrgError::Empty(role.id.clone(), "id"));
@@ -93,12 +121,23 @@ impl OrgSpec {
             {
                 return Err(OrgError::BadBudget(role.id.clone()));
             }
+            if role.coordinator {
+                if let Some(first) = coordinator {
+                    return Err(OrgError::TwoCoordinators(first.clone(), role.id.clone()));
+                }
+                coordinator = Some(&role.id);
+            }
         }
         Ok(())
     }
 
     pub fn role(&self, id: &RoleId) -> Option<&Role> {
         self.roles.iter().find(|role| &role.id == id)
+    }
+
+    /// 标了 `coordinator` 的岗位。
+    pub fn coordinator(&self) -> Option<&Role> {
+        self.roles.iter().find(|role| role.coordinator)
     }
 }
 
@@ -114,6 +153,11 @@ mod tests {
 
     const SAMPLE: &str = r#"
 roles:
+  - id: chief
+    name: 幕僚长
+    description: 接需求、拆任务、派活、汇总
+    model: { default: anthropic/claude }
+    coordinator: true
   - id: finance-ap
     name: 应付会计
     description: 应付账款：发票核对、付款申请
@@ -127,7 +171,9 @@ roles:
     #[test]
     fn parses_the_sample() {
         let spec = OrgSpec::from_yaml(SAMPLE).unwrap();
-        assert_eq!(spec.roles.len(), 2);
+        assert_eq!(spec.roles.len(), 3);
+        assert_eq!(spec.coordinator().map(|r| r.id.as_str()), Some("chief"));
+        assert!(!spec.role(&"finance-ap".into()).unwrap().coordinator);
         let ap = spec.role(&"finance-ap".into()).unwrap();
         assert_eq!(ap.display_name(), "应付会计");
         assert_eq!(ap.model.escalate.as_deref(), Some("anthropic/claude"));
@@ -145,5 +191,21 @@ roles:
         assert!(matches!(OrgSpec::from_yaml(unknown), Err(OrgError::Parse(_))));
         let budget = "roles:\n  - {id: a, description: x, model: {default: m}, budget_per_day_usd: 0}\n";
         assert!(matches!(OrgSpec::from_yaml(budget), Err(OrgError::BadBudget(_))));
+        let two = "roles:\n  - {id: a, description: x, model: {default: m}, coordinator: true}\n  - {id: b, description: y, model: {default: m}, coordinator: true}\n";
+        assert!(matches!(OrgSpec::from_yaml(two), Err(OrgError::TwoCoordinators(_, _))));
+    }
+
+    #[test]
+    fn coordinator_is_left_out_of_json_when_false() {
+        let spec = OrgSpec::from_yaml(SAMPLE).unwrap();
+        let json = serde_json::to_value(&spec.roles).unwrap();
+        assert_eq!(json[0]["coordinator"], serde_json::json!(true));
+        assert!(json[1].get("coordinator").is_none(), "{json}");
+        // 旧主机、旧客户端存下的 JSON 没有这一项：按 false 读。
+        let old: Role = serde_json::from_value(serde_json::json!({
+            "id": "a", "description": "x", "model": {"default": "m"}
+        }))
+        .unwrap();
+        assert!(!old.coordinator);
     }
 }

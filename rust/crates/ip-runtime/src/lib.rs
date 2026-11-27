@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock, Weak};
 
-use ip_core::{Agent, AgentId, Approval, Author, Message, Notice, Role, RoleId, Task, TaskId, ThreadId};
+use ip_core::{Agent, AgentId, Approval, Author, Message, Notice, OrbitPin, Role, RoleId, Task, TaskId, ThreadId};
 use ip_models::{ModelRegistry, Usage};
 use ip_store::Store;
 use ip_tools::Toolbox;
@@ -120,6 +120,10 @@ pub enum RuntimeEvent {
     /// 审批卡片新建或被选定。
     ApprovalChanged {
         approval: Approval,
+    },
+    /// 星图上人固定的轨道改了（`docs/ip/m2-spec.md` D-40）。`pins` 是改完后的整张表，各端直接换上。
+    OrbitPinsChanged {
+        pins: Vec<OrbitPin>,
     },
 }
 

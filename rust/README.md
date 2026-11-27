@@ -148,6 +148,7 @@ docker compose up -d --build
 - [x] App 里“管理”权限的页（backlog F-18）：设备、定时任务、记忆、路由规则四页，从“我”页进去，日常权限看不到。只在假主机上测过
 - [x] App 扫码配对（backlog F-19）：Android、iOS、macOS 用摄像头扫配对二维码，扫到后照常先确认主机再配对；本机解码，不用谷歌 ML Kit。只在假相机上测，真相机没扫过
 - [x] App 的协议类型从 Rust 生成（backlog F-20）：`apps/flutter/tool/gen_protocol.dart` 从 `web/src/types/*.ts` 生成 `wire.dart`，flutter CI 检查生成结果已提交；App 解析回复、事件和发请求都经过生成的类型，Rust 改了协议字段 Dart 就编不过
+- [ ] App 桌面外壳的后端适配（backlog F-23，`docs/ip/flutter-desktop-backend-adaptation.md`）：第一批已做（`docs/ip/m2-spec.md` D-40）：对话列表带上最后回复的员工（`ThreadSummary.last_agent_id`，迁移 0002 补旧对话）；岗位的 `coordinator: true` 显式标出协调岗位（最多一个），App 星图按它找太阳；星图轨道表 `list_orbit_pins`、`set_orbit_pins` 和事件 `orbit_pins_changed`，一次拖放整批提交、多端同步、重启后还在。只在假模型、假主机上测过。任务完成待审批、在线增删改岗位和员工、重要度传导到调度、聊天附件、定时任务在线编辑还没做
 - [ ] 手机锁屏推送（backlog F-21，`docs/ip/m2-spec.md` D-35）：主机放行 `push.hosts` 里的推送服务，负载上限 2800 字节；推送中转 `ip-relay`（`POST /register` 换订阅地址，`POST /w/<封条>` 转给 APNs 或 FCM，令牌失效回 410，限流，`ip bench relay` 接入 CI）。Android App 经 FCM 收推送、原生代码解密弹通知；iPhone App 经 APNs 收推送、通知扩展解密改写通知（`apps/flutter`，两边的解密都对过 RFC 8291 的例子）。只用假的 APNs、FCM 和假的推送通道测过；中转还没部署，没在真手机上收过
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片

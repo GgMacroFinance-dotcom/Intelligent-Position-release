@@ -991,6 +991,49 @@ final class NotifySettings {
   };
 }
 
+/// 一位员工被人拖到星图某条轨道上固定住（App 桌面外壳，`docs/ip/m2-spec.md` D-40）。
+/// 没固定的员工按紧急度自动排轨，不在这张表里。
+final class OrbitPin {
+  const OrbitPin({required this.agentId, required this.orbitTrack, required this.orbitPinnedAt});
+
+  factory OrbitPin.fromJson(Map<String, Object?> j) => OrbitPin(
+    agentId: j['agent_id'] as String,
+    orbitTrack: j['orbit_track'] as num,
+    orbitPinnedAt: j['orbit_pinned_at'] as num,
+  );
+
+  final AgentId agentId;
+
+  /// 0 内环、1 中环、2 外环。
+  final num orbitTrack;
+
+  /// 放上这条轨道的时间（Unix 毫秒）。满环挤人时，同是人固定的，先放进来的先被挤出去。
+  final num orbitPinnedAt;
+
+  Map<String, Object?> toJson() => {'agent_id': agentId, 'orbit_track': orbitTrack, 'orbit_pinned_at': orbitPinnedAt};
+}
+
+/// `set_orbit_pins` 的一项。
+final class OrbitPinChange {
+  const OrbitPinChange({required this.agentId, this.orbitTrack, this.orbitPinnedAt});
+
+  factory OrbitPinChange.fromJson(Map<String, Object?> j) => OrbitPinChange(
+    agentId: j['agent_id'] as String,
+    orbitTrack: j['orbit_track'] == null ? null : j['orbit_track'] as num,
+    orbitPinnedAt: j['orbit_pinned_at'] == null ? null : j['orbit_pinned_at'] as num,
+  );
+
+  final AgentId agentId;
+
+  /// 0 内环、1 中环、2 外环；为空是取消固定，回到按紧急度自动排轨。
+  final num? orbitTrack;
+
+  /// 放上去的时间（Unix 毫秒），满环挤人时用来排先后；省略时用主机收到的时间。
+  final num? orbitPinnedAt;
+
+  Map<String, Object?> toJson() => {'agent_id': agentId, 'orbit_track': ?orbitTrack, 'orbit_pinned_at': ?orbitPinnedAt};
+}
+
 /// 一个组织的全部岗位定义。
 final class OrgSpec {
   const OrgSpec({required this.roles});
@@ -1110,6 +1153,8 @@ sealed class Request {
       'subscribe_push' => RequestSubscribePush.fromJson(j),
       'unsubscribe_push' => RequestUnsubscribePush.fromJson(j),
       'presence' => RequestPresence.fromJson(j),
+      'list_orbit_pins' => RequestListOrbitPins.fromJson(j),
+      'set_orbit_pins' => RequestSetOrbitPins.fromJson(j),
       'send' => RequestSend.fromJson(j),
       _ => RequestUnknown(j),
     };
@@ -1684,6 +1729,31 @@ final class RequestPresence extends Request {
   Map<String, Object?> toJson() => {'type': 'presence', 'active': active};
 }
 
+final class RequestListOrbitPins extends Request {
+  const RequestListOrbitPins();
+
+  factory RequestListOrbitPins.fromJson(Map<String, Object?> j) => const RequestListOrbitPins();
+
+  @override
+  Map<String, Object?> toJson() => {'type': 'list_orbit_pins'};
+}
+
+final class RequestSetOrbitPins extends Request {
+  const RequestSetOrbitPins({required this.changes});
+
+  factory RequestSetOrbitPins.fromJson(Map<String, Object?> j) => RequestSetOrbitPins(
+    changes: [for (final x in j['changes'] as List<Object?>) OrbitPinChange.fromJson(x as Map<String, Object?>)],
+  );
+
+  final List<OrbitPinChange> changes;
+
+  @override
+  Map<String, Object?> toJson() => {
+    'type': 'set_orbit_pins',
+    'changes': [for (final x in changes) x.toJson()],
+  };
+}
+
 final class RequestSend extends Request {
   const RequestSend({this.agentId, this.threadId, required this.text, this.author});
 
@@ -1727,7 +1797,14 @@ final class RequestUnknown extends Request {
 
 /// 一个岗位。
 final class Role {
-  const Role({required this.id, this.name, required this.description, required this.model, this.budgetPerDayUsd});
+  const Role({
+    required this.id,
+    this.name,
+    required this.description,
+    required this.model,
+    this.budgetPerDayUsd,
+    this.coordinator,
+  });
 
   factory Role.fromJson(Map<String, Object?> j) => Role(
     id: j['id'] as String,
@@ -1735,6 +1812,7 @@ final class Role {
     description: j['description'] as String,
     model: ModelSlot.fromJson(j['model'] as Map<String, Object?>),
     budgetPerDayUsd: j['budget_per_day_usd'] == null ? null : j['budget_per_day_usd'] as num,
+    coordinator: j['coordinator'] == null ? null : j['coordinator'] as bool,
   );
 
   final RoleId id;
@@ -1750,12 +1828,17 @@ final class Role {
   /// 每日模型费用上限（美元）。
   final num? budgetPerDayUsd;
 
+  /// 协调层岗位：接没有明确归属的需求，拆成任务派给执行岗位（App 星图中心的太阳）。最多一个岗位标这一项。
+  /// 只是标记，不改这个岗位的工具和提示词。是 false 时不出现在协议里，旧主机也一样没有。
+  final bool? coordinator;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
     'description': description,
     'model': model.toJson(),
     'budget_per_day_usd': budgetPerDayUsd,
+    'coordinator': ?coordinator,
   };
 }
 
@@ -1878,6 +1961,7 @@ sealed class RuntimeEvent {
       'turn_failed' => RuntimeEventTurnFailed.fromJson(j),
       'task_changed' => RuntimeEventTaskChanged.fromJson(j),
       'approval_changed' => RuntimeEventApprovalChanged.fromJson(j),
+      'orbit_pins_changed' => RuntimeEventOrbitPinsChanged.fromJson(j),
       _ => RuntimeEventUnknown(j),
     };
   }
@@ -2016,6 +2100,22 @@ final class RuntimeEventApprovalChanged extends RuntimeEvent {
 
   @override
   Map<String, Object?> toJson() => {'type': 'approval_changed', 'approval': approval.toJson()};
+}
+
+final class RuntimeEventOrbitPinsChanged extends RuntimeEvent {
+  const RuntimeEventOrbitPinsChanged({required this.pins});
+
+  factory RuntimeEventOrbitPinsChanged.fromJson(Map<String, Object?> j) => RuntimeEventOrbitPinsChanged(
+    pins: [for (final x in j['pins'] as List<Object?>) OrbitPin.fromJson(x as Map<String, Object?>)],
+  );
+
+  final List<OrbitPin> pins;
+
+  @override
+  Map<String, Object?> toJson() => {
+    'type': 'orbit_pins_changed',
+    'pins': [for (final x in pins) x.toJson()],
+  };
 }
 
 /// 这个版本还不认识的RuntimeEvent（主机比 App 新），原样留着。
@@ -2540,13 +2640,20 @@ final class ThreadMemoryView {
 
 /// 对话列表的一项。
 final class ThreadSummary {
-  const ThreadSummary({required this.threadId, required this.lastAtMs, required this.messageCount, this.preview});
+  const ThreadSummary({
+    required this.threadId,
+    required this.lastAtMs,
+    required this.messageCount,
+    this.preview,
+    this.lastAgentId,
+  });
 
   factory ThreadSummary.fromJson(Map<String, Object?> j) => ThreadSummary(
     threadId: j['thread_id'] as String,
     lastAtMs: j['last_at_ms'] as num,
     messageCount: j['message_count'] as num,
     preview: j['preview'] == null ? null : j['preview'] as String,
+    lastAgentId: j['last_agent_id'] == null ? null : j['last_agent_id'] as String,
   );
 
   final ThreadId threadId;
@@ -2558,11 +2665,15 @@ final class ThreadSummary {
   /// 最后一条文字消息的开头。
   final String? preview;
 
+  /// 最后回复的员工；还没有员工说过话（比如刚发出、员工还没回）时为空。
+  final AgentId? lastAgentId;
+
   Map<String, Object?> toJson() => {
     'thread_id': threadId,
     'last_at_ms': lastAtMs,
     'message_count': messageCount,
     'preview': preview,
+    'last_agent_id': lastAgentId,
   };
 }
 

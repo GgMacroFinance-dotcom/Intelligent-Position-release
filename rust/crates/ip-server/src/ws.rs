@@ -117,6 +117,9 @@ fn daily_allows(request: &Request) -> bool {
             | Request::SubscribePush { .. }
             | Request::UnsubscribePush { .. }
             | Request::Presence { .. }
+            // 星图上拖员工换轨道：日常使用，各设备共用一张表（D-40）
+            | Request::ListOrbitPins
+            | Request::SetOrbitPins { .. }
     )
 }
 
@@ -527,6 +530,8 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
             app.push.presence(who, active, ip_core::now_ms());
             Ok(Value::Null)
         }
+        Request::ListOrbitPins => to_json(serde_json::to_value(crate::star_map::list(app).await?)),
+        Request::SetOrbitPins { changes } => to_json(serde_json::to_value(crate::star_map::set(app, changes).await?)),
         Request::ReadReport { agent_id, path } => {
             to_json(serde_json::to_value(crate::reports::read(app, &agent_id, &path).await?))
         }

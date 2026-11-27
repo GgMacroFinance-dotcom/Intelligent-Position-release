@@ -109,10 +109,18 @@ class _CreateBotModalState extends State<CreateBotModal> {
   }
 
   /// 过滤掉协调员/幕僚长岗位，避免新建普通行星 Bot 误挂到太阳专属岗位。
-  List<Role> _selectableExistingRoles(List<Role> allRoles) => [
-    for (final r in allRoles)
-      if (!isChiefOfStaff(Agent(id: '_probe', role: r.id, name: r.displayName), r)) r,
-  ];
+  List<Role> _selectableExistingRoles(List<Role> allRoles) {
+    final explicit = allRoles.any((r) => r.coordinator);
+    return [
+      for (final r in allRoles)
+        if (!isChiefOfStaff(
+          Agent(id: '_probe', role: r.id, name: r.displayName),
+          r,
+          explicit: explicit,
+        ))
+          r,
+    ];
+  }
 
   void _pickCelestial(Celestial c) {
     if (c.kind == CelestialKind.sun) return;

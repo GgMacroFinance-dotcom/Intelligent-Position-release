@@ -2,6 +2,7 @@
 import type { AgentId } from "./AgentId";
 import type { Approval } from "./Approval";
 import type { Message } from "./Message";
+import type { OrbitPin } from "./OrbitPin";
 import type { Task } from "./Task";
 import type { ThreadId } from "./ThreadId";
 import type { Usage } from "./Usage";
@@ -17,4 +18,4 @@ cost_usd: number,
 /**
  * 从开始处理到结束，不含在收件箱里排队的时间。
  */
-elapsed_ms: number, } | { "type": "turn_failed", agent_id: AgentId, thread_id: ThreadId, error: string, } | { "type": "task_changed", task: Task, } | { "type": "approval_changed", approval: Approval, };
+elapsed_ms: number, } | { "type": "turn_failed", agent_id: AgentId, thread_id: ThreadId, error: string, } | { "type": "task_changed", task: Task, } | { "type": "approval_changed", approval: Approval, } | { "type": "orbit_pins_changed", pins: Array<OrbitPin>, };

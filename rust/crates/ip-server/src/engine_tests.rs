@@ -119,6 +119,7 @@ async fn fixture_with(
             escalate: None,
         },
         budget_per_day_usd: None,
+        coordinator: false,
     };
     runtime
         .spawn_agent(AgentSetup {

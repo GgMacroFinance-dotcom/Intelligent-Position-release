@@ -63,6 +63,7 @@ fn role(id: &str, model: &str) -> Role {
             escalate: None,
         },
         budget_per_day_usd: None,
+        coordinator: false,
     }
 }
 

@@ -20,6 +20,7 @@ mod reports;
 mod routing;
 mod rules;
 pub mod schedule;
+mod star_map;
 pub mod webpush;
 mod work;
 mod ws;
