@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ip_app/src/protocol/models.dart';
+import 'package:ip_app/src/ui/rework_note.dart';
 import 'package:ip_app/src/ui/shell/agent_panel.dart';
 import 'package:ip_app/src/ui/shell/completion_approval.dart';
 import 'package:ip_app/src/ui/shell/desktop_shell.dart';
@@ -61,12 +62,63 @@ void main() {
     expect(items.single.source, CompletionSource.backendApproval);
     expect(items.single.summary, '初稿');
 
-    await h.state.decideCompletionApproval(items.single, CompletionDecision.reject, note: '加上 PPI');
+    // 待办里点“打回修改”：先问要改什么，取消就不打回。
+    await tester.tap(find.widgetWithText(OutlinedButton, '打回修改'));
+    await tester.pumpAndSettle();
+    expect(find.text('打回「验收 宏观研究员 交回的任务「写 CPI 点评」」'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(h.host.requests.where((r) => r['type'] == 'resolve_approval'), isEmpty);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '打回修改'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('rework-note')), '  加上 PPI  ');
+    await tester.tap(find.byKey(const ValueKey('rework-confirm')));
+    await tester.pumpAndSettle();
     final req = h.host.requests.lastWhere((r) => r['type'] == 'resolve_approval');
     expect(req, containsPair('approval_id', 'ap9'));
     expect(req, containsPair('choice', 1));
     expect(req, containsPair('note', '加上 PPI'));
     await h.stop(tester);
+  });
+
+  testWidgets('打回时不写意见：照样打回，不带 note', (tester) async {
+    final item = CompletionApproval(
+      id: 'approval:ap1',
+      agentId: 'macro-1',
+      agentName: '小宏',
+      taskTitle: '写周报',
+      summary: '初稿',
+      createdAtMs: 1,
+      source: CompletionSource.backendApproval,
+    );
+    String? got = 'unset';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) =>
+              TextButton(onPressed: () async => got = await askReworkNote(context, item), child: const Text('打回')),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打回'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('会发给小宏'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('rework-confirm')));
+    await tester.pumpAndSettle();
+    expect(got, '');
+    // 本地演示项不弹框。
+    final demo = CompletionApproval(
+      id: 'demo:1',
+      agentId: 'x',
+      agentName: 'x',
+      taskTitle: 't',
+      summary: '',
+      createdAtMs: 1,
+      source: CompletionSource.localDemo,
+    );
+    final ctx = tester.element(find.text('打回'));
+    expect(await askReworkNote(ctx, demo), '');
   });
 
   test('5A 语义隔离：仅采集 task_completion 审批与 pending_approval 任务，不吞并 agent_question', () {

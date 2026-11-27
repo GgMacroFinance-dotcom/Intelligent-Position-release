@@ -21,6 +21,7 @@ import '../report.dart' show openReport;
 import '../task_card.dart' show taskMeta, taskStatusLabel, taskStatusText;
 import 'completion_approval.dart';
 import 'tokens.dart';
+import '../rework_note.dart';
 
 /// 红 / 黄 / 绿三档紧急度分组。
 enum InboxLight {
@@ -827,9 +828,16 @@ class _GlassCompletionApprovalCardState extends State<_GlassCompletionApprovalCa
   CompletionDecision? _busy;
 
   Future<void> _decide(CompletionDecision decision) async {
+    String? note;
+    if (decision == CompletionDecision.reject) {
+      // 先问要改什么；取消就不打回。
+      note = await askReworkNote(context, widget.item);
+      if (note == null || !mounted) return;
+    }
     setState(() => _busy = decision);
     try {
-      await AppScope.read(context).decideCompletionApproval(widget.item, decision);
+      await AppScope.read(context)
+          .decideCompletionApproval(widget.item, decision, note: (note?.isEmpty ?? true) ? null : note);
     } on RequestError catch (e) {
       if (mounted) showError(context, '审批操作失败：$e');
     } finally {

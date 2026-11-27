@@ -27,6 +27,7 @@ import 'orbit.dart';
 import 'planet_importance.dart';
 import 'settings.dart';
 import 'tokens.dart';
+import '../rework_note.dart';
 
 /// 这位员工的一个对话（左栏的一行）。
 typedef AgentThread = ({String threadId, String title, int atMs, int count, bool waiting});
@@ -335,9 +336,16 @@ class _CompletionApprovalBannerState extends State<_CompletionApprovalBanner> {
   CompletionDecision? _busy;
 
   Future<void> _decide(CompletionDecision decision) async {
+    String? note;
+    if (decision == CompletionDecision.reject) {
+      // 先问要改什么；取消就不打回。
+      note = await askReworkNote(context, widget.item);
+      if (note == null || !mounted) return;
+    }
     setState(() => _busy = decision);
     try {
-      await AppScope.read(context).decideCompletionApproval(widget.item, decision);
+      await AppScope.read(context)
+          .decideCompletionApproval(widget.item, decision, note: (note?.isEmpty ?? true) ? null : note);
     } on RequestError catch (e) {
       if (mounted) showError(context, '审批操作失败：$e');
     } finally {

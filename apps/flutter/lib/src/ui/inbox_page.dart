@@ -10,6 +10,7 @@ import 'common.dart';
 import 'report.dart';
 import 'shell/completion_approval.dart';
 import 'task_card.dart';
+import 'rework_note.dart';
 
 /// “最近”是几天内，每类最多列几条。
 const _recent = Duration(days: 7);
@@ -108,9 +109,16 @@ class _CompletionApprovalCardState extends State<_CompletionApprovalCard> {
   CompletionDecision? _busy;
 
   Future<void> _decide(CompletionDecision decision) async {
+    String? note;
+    if (decision == CompletionDecision.reject) {
+      // 先问要改什么；取消就不打回。
+      note = await askReworkNote(context, widget.item);
+      if (note == null || !mounted) return;
+    }
     setState(() => _busy = decision);
     try {
-      await AppScope.read(context).decideCompletionApproval(widget.item, decision);
+      await AppScope.read(context)
+          .decideCompletionApproval(widget.item, decision, note: (note?.isEmpty ?? true) ? null : note);
     } on RequestError catch (e) {
       if (mounted) showError(context, '审批操作失败：$e');
     } finally {
