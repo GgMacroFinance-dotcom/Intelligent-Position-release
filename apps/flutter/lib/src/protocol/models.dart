@@ -286,7 +286,13 @@ class UnknownBody extends Body {
 }
 
 class ThreadSummary {
-  const ThreadSummary({required this.threadId, required this.lastAtMs, required this.messageCount, this.preview});
+  const ThreadSummary({
+    required this.threadId,
+    required this.lastAtMs,
+    required this.messageCount,
+    this.preview,
+    this.lastAgentId,
+  });
 
   factory ThreadSummary.fromJson(Json j) {
     final t = w.ThreadSummary.fromJson(j);
@@ -295,6 +301,7 @@ class ThreadSummary {
       lastAtMs: t.lastAtMs.toInt(),
       messageCount: t.messageCount.toInt(),
       preview: t.preview,
+      lastAgentId: t.lastAgentId,
     );
   }
 
@@ -304,6 +311,9 @@ class ThreadSummary {
 
   /// 最后一条文字消息的开头。
   final String? preview;
+
+  /// 最后回复的员工；员工还没说过话，或主机太旧（没有这一项）时为空。
+  final String? lastAgentId;
 }
 
 // ---------- 岗位和员工 ----------

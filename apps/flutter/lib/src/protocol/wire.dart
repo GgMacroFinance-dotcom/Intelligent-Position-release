@@ -2540,13 +2540,20 @@ final class ThreadMemoryView {
 
 /// 对话列表的一项。
 final class ThreadSummary {
-  const ThreadSummary({required this.threadId, required this.lastAtMs, required this.messageCount, this.preview});
+  const ThreadSummary({
+    required this.threadId,
+    required this.lastAtMs,
+    required this.messageCount,
+    this.preview,
+    this.lastAgentId,
+  });
 
   factory ThreadSummary.fromJson(Map<String, Object?> j) => ThreadSummary(
     threadId: j['thread_id'] as String,
     lastAtMs: j['last_at_ms'] as num,
     messageCount: j['message_count'] as num,
     preview: j['preview'] == null ? null : j['preview'] as String,
+    lastAgentId: j['last_agent_id'] == null ? null : j['last_agent_id'] as String,
   );
 
   final ThreadId threadId;
@@ -2558,11 +2565,15 @@ final class ThreadSummary {
   /// 最后一条文字消息的开头。
   final String? preview;
 
+  /// 最后回复的员工；还没有员工说过话（比如刚发出、员工还没回）时为空。
+  final AgentId? lastAgentId;
+
   Map<String, Object?> toJson() => {
     'thread_id': threadId,
     'last_at_ms': lastAtMs,
     'message_count': messageCount,
     'preview': preview,
+    'last_agent_id': lastAgentId,
   };
 }
 

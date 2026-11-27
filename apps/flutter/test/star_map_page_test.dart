@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ip_app/src/star_map.dart' show buildStarMap;
 import 'package:ip_app/src/ui/chat_page.dart' show Composer, ThreadView;
 import 'package:ip_app/src/ui/shell/agent_panel.dart';
 import 'package:ip_app/src/ui/shell/agent_sheet.dart';
@@ -158,6 +159,33 @@ void main() {
     await tester.tapAt(tester.getCenter(find.byKey(const ValueKey('star-ops-1'))));
     await settle(tester);
     expect(find.text('为什么在这条轨道上'), findsOneWidget);
+    await h.stop(tester);
+  });
+
+  testWidgets('主机记了最后回复的员工：没挂任务、审批的历史闲聊重启后也归到这位员工左栏', (tester) async {
+    final h = staffed();
+    h.host.handlers['list_threads'] = (_) => [
+      {'thread_id': 'tchat', 'last_at_ms': 3000, 'message_count': 4, 'preview': '上周的闲聊', 'last_agent_id': 'macro-1'},
+      // 刚发出、员工还没回：没有归属。旧主机不给这一项时也一样。
+      {'thread_id': 'tnew', 'last_at_ms': 2000, 'message_count': 1, 'preview': '刚发的'},
+    ];
+    await h.savePaired();
+    await h.start(tester, size: const Size(390, 844));
+    expect(h.state.threadAgent['tchat'], 'macro-1');
+    expect(h.state.threadAgent.containsKey('tnew'), isFalse);
+    final map = buildStarMap(
+      agents: h.state.agents,
+      roles: h.state.roles,
+      tasks: h.state.tasks,
+      approvals: h.state.approvals,
+      working: const {},
+      failures: const {},
+      now: 0,
+    );
+    final mine = agentThreads(h.state, map, 'macro-1');
+    expect(mine.map((t) => t.threadId), contains('tchat'));
+    expect(mine.firstWhere((t) => t.threadId == 'tchat').title, '上周的闲聊');
+    expect(agentThreads(h.state, map, 'ops-1').map((t) => t.threadId), isNot(contains('tchat')));
     await h.stop(tester);
   });
 

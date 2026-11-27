@@ -307,8 +307,71 @@ async fn migrations_run_once_and_reopening_is_harmless() {
         .await
         .unwrap()
         .get(0);
-    assert_eq!(versions, 1);
+    assert_eq!(versions, crate::schema::MIGRATIONS.len() as i64);
     assert_eq!(store.last_seq().await.unwrap(), 1);
+}
+
+fn by_agent(thread: &str, at_ms: i64, agent: &str, body: &str) -> Message {
+    let mut message = Message::text(ThreadId::from(thread), Author::Agent { agent_id: agent.into() }, body);
+    message.at_ms = at_ms;
+    message
+}
+
+#[tokio::test]
+async fn threads_remember_the_last_agent_who_replied() {
+    let store = crate::testing::store().await;
+    store.append_message(text("t", 1, "帮我看看 CPI")).await.unwrap();
+    let last = |store: &Store| {
+        let store = store.clone();
+        async move { store.recent_threads(10).await.unwrap()[0].last_agent_id.clone() }
+    };
+    assert_eq!(last(&store).await, None, "员工还没回");
+    store.append_message(by_agent("t", 2, "macro-1", "好的")).await.unwrap();
+    store.append_message(text("t", 3, "再看看 PPI")).await.unwrap();
+    assert_eq!(last(&store).await, Some("macro-1".into()), "人的消息不改归属");
+    store
+        .append_message(by_agent("t", 4, "coord-1", "我来派活"))
+        .await
+        .unwrap();
+    assert_eq!(last(&store).await, Some("coord-1".into()));
+    let between = store.threads_last_active_between(0, 10, 10).await.unwrap();
+    assert_eq!(between[0].last_agent_id, Some("coord-1".into()));
+}
+
+/// 迁移 2 之前就有的对话：升级时按消息补上最后回复的员工。
+#[tokio::test]
+async fn migration_backfills_the_last_agent_of_old_threads() {
+    let db = crate::testing::TestDb::new();
+    let store = db.open().await;
+    store
+        .append_message(by_agent("t1", 1, "macro-1", "第一版"))
+        .await
+        .unwrap();
+    store
+        .append_message(by_agent("t1", 2, "ops-1", "第二版"))
+        .await
+        .unwrap();
+    store.append_message(text("t1", 3, "人说的")).await.unwrap();
+    store.append_message(text("t2", 4, "没人回")).await.unwrap();
+    // 退回迁移 1 的样子，再打开一次让迁移 2 重新跑。
+    store
+        .reader()
+        .await
+        .unwrap()
+        .batch_execute("ALTER TABLE threads DROP COLUMN last_agent_id; DELETE FROM schema_migrations WHERE version = 2")
+        .await
+        .unwrap();
+    drop(store);
+    let store = db.open().await;
+    let threads = store.recent_threads(10).await.unwrap();
+    let agent = |id: &str| {
+        threads
+            .iter()
+            .find(|t| t.thread_id.as_str() == id)
+            .and_then(|t| t.last_agent_id.clone())
+    };
+    assert_eq!(agent("t1"), Some("ops-1".into()));
+    assert_eq!(agent("t2"), None);
 }
 
 #[tokio::test]

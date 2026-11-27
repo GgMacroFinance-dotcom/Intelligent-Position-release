@@ -674,7 +674,7 @@ class AppState extends ChangeNotifier {
       if (_client != c) return;
       roles = r[0] as List<Role>;
       agents = r[1] as List<Agent>;
-      threads = r[2] as List<ThreadSummary>;
+      _setThreads(r[2] as List<ThreadSummary>);
       hasRules = r[3] as bool;
       approvals = r[4] as List<Approval>;
       tasks = r[5] as List<Task>;
@@ -872,6 +872,16 @@ class AppState extends ChangeNotifier {
 
   Timer? _threadsTimer;
 
+  /// 换上主机给的对话列表，顺带按主机记的“最后回复的员工”补上还不知道归属的对话（App 重启后左栏也有历史闲聊）。
+  /// 已经知道的不覆盖：刚发给另一位员工、他还没回时，本地记的是新的那位。
+  void _setThreads(List<ThreadSummary> list) {
+    threads = list;
+    for (final t in list) {
+      final agent = t.lastAgentId;
+      if (agent != null) threadAgent.putIfAbsent(t.threadId, () => agent);
+    }
+  }
+
   /// 有新消息时刷新对话列表，合并短时间内的多次。
   void _refreshThreadsSoon() {
     _threadsTimer?.cancel();
@@ -879,7 +889,7 @@ class AppState extends ChangeNotifier {
       final c = _client;
       if (c == null || !connected) return;
       try {
-        threads = await c.listThreads();
+        _setThreads(await c.listThreads());
         notifyListeners();
       } on RequestError {
         // 断线重连后会整个重新拉。

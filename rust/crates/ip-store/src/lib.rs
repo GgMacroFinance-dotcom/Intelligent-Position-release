@@ -87,6 +87,8 @@ pub struct ThreadSummary {
     pub message_count: i64,
     /// 最后一条文字消息的开头。
     pub preview: Option<String>,
+    /// 最后回复的员工；还没有员工说过话（比如刚发出、员工还没回）时为空。
+    pub last_agent_id: Option<AgentId>,
 }
 
 /// 提炼的结果。
@@ -950,7 +952,7 @@ impl Store {
     ) -> Result<Vec<ThreadSummary>> {
         let rows = self
             .query(
-                "SELECT id, last_at_ms, message_count, preview FROM threads \
+                "SELECT id, last_at_ms, message_count, preview, last_agent_id FROM threads \
                  WHERE last_at_ms BETWEEN $1 AND $2 ORDER BY last_at_ms DESC LIMIT $3",
                 &[&from_ms, &until_ms, &limit_param(limit)],
             )
@@ -962,7 +964,7 @@ impl Store {
     pub async fn recent_threads(&self, limit: usize) -> Result<Vec<ThreadSummary>> {
         let rows = self
             .query(
-                "SELECT id, last_at_ms, message_count, preview FROM threads ORDER BY last_at_ms DESC LIMIT $1",
+                "SELECT id, last_at_ms, message_count, preview, last_agent_id FROM threads ORDER BY last_at_ms DESC LIMIT $1",
                 &[&limit_param(limit)],
             )
             .await?;
@@ -1104,6 +1106,7 @@ fn thread_summary_row(row: &Row) -> ThreadSummary {
         last_at_ms: row.get(1),
         message_count: row.get(2),
         preview: row.get(3),
+        last_agent_id: row.get::<_, Option<String>>(4).map(AgentId::from),
     }
 }
 

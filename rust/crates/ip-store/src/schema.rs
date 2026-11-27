@@ -12,7 +12,10 @@ pub const LOCK_MIGRATE: &str = "migrate";
 pub const LOCK_EVENTS: &str = "events";
 
 /// 按编号排好的迁移。已经发布的文件不要改，加新文件。
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../migrations/0001_init.sql"))];
+pub(crate) const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../migrations/0001_init.sql")),
+    (2, include_str!("../migrations/0002_thread_agent.sql")),
+];
 
 /// 第二个键按 schema 名区分，同一个库里多个 schema（测试时每个测试一个）互不影响。
 /// schema 名在 `DbConfig` 里校验过，只有小写字母、数字和下划线，可以直接拼进 SQL。
