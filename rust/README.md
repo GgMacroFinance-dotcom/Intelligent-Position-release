@@ -63,6 +63,7 @@ cargo run --release -p ip-cli -- bench store --check     # 5 万条消息写入�
 cargo run --release -p ip-cli -- bench agents --check    # 500 个数字员工常驻与并发
 cargo run --release -p ip-cli -- bench team --check      # 每轮开头取团队上下文包的开销
 cargo run --release -p ip-cli -- bench deliver --check   # 发往渠道的回复里认报告、改写链接
+cargo run --release -p ip-cli -- bench progress --check  # 估一张员工进度表（list_progress）
 ```
 
 `--check` 时未达标即失败。CI 每个 PR 都跑这几项，还有下面各条里提到的 `events`、`notify`、`relay`。
@@ -77,6 +78,8 @@ cargo run --release -p ip-cli -- bench deliver --check   # 发往渠道的回复
 | 写入吞吐（64 路并发） | 约 1,600 条/秒（PostgreSQL，同上）；SQLite 时约 1 万条/秒 | — | — |
 | 每个空闲数字员工的内存 | 4–12 KB | 64 KB | 每个 agent 一个 CLI 进程 |
 | 500 个员工同时工作，每轮额外耗时 p95 | 23–25 ms | 80 ms | — |
+| 估一张 500 位员工、2000 个任务的进度表（中位） | 3.3–3.5 ms（2026-11-27） | 10 ms | — |
+| 从存储取数据再估进度表 p95（50 位员工、200 个任务、2 万轮历史，基线已算好） | 7.8–9.9 ms；第一次现算基线 25–27 ms（目标 200 ms） | 30 ms | — |
 
 ## 用 Docker 部署
 
@@ -149,6 +152,7 @@ docker compose up -d --build
 - [x] App 扫码配对（backlog F-19）：Android、iOS、macOS 用摄像头扫配对二维码，扫到后照常先确认主机再配对；本机解码，不用谷歌 ML Kit。只在假相机上测，真相机没扫过
 - [x] App 的协议类型从 Rust 生成（backlog F-20）：`apps/flutter/tool/gen_protocol.dart` 从 `web/src/types/*.ts` 生成 `wire.dart`，flutter CI 检查生成结果已提交；App 解析回复、事件和发请求都经过生成的类型，Rust 改了协议字段 Dart 就编不过
 - [ ] App 桌面外壳的后端适配（backlog F-23，`docs/ip/flutter-desktop-backend-adaptation.md`）：第一批已做（`docs/ip/m2-spec.md` D-40）：对话列表带上最后回复的员工（`ThreadSummary.last_agent_id`，迁移 0002 补旧对话）；岗位的 `coordinator: true` 显式标出协调岗位（最多一个），App 星图按它找太阳；星图轨道表 `list_orbit_pins`、`set_orbit_pins` 和事件 `orbit_pins_changed`，一次拖放整批提交、多端同步、重启后还在。只在假模型、假主机上测过。任务完成待审批、在线增删改岗位和员工、重要度传导到调度、聊天附件、定时任务在线编辑还没做
+- [ ] 员工的任务进度和“要人看”的时间点（backlog F-24，`docs/ip/progress-design.md`、`docs/ip/m2-spec.md` D-42）：第一步的主机端已做：每一轮记一行 `turns`（迁移 0003），按同岗位做完的任务和最近的轮次估进度、预计做完的时刻和最晚时刻，排队、委派、等人分开算；`list_progress` 回每位员工的状态、头顶那一项和要人看的时间点（在问你、受阻、失败、停着、等你分配、过截止、可能赶不上、可能会问你、交回结果、汇总回复、可能走满步数、预算快用完）。样本不够就留空。`ip bench progress` 接入 CI。只在假模型、假主机上测过，估得准不准要等真实模型跑出一批任务。App 头顶的进度条和时间轴、员工自报计划（第二步）还没做
 - [ ] 手机锁屏推送（backlog F-21，`docs/ip/m2-spec.md` D-35）：主机放行 `push.hosts` 里的推送服务，负载上限 2800 字节；推送中转 `ip-relay`（`POST /register` 换订阅地址，`POST /w/<封条>` 转给 APNs 或 FCM，令牌失效回 410，限流，`ip bench relay` 接入 CI）。Android App 经 FCM 收推送、原生代码解密弹通知；iPhone App 经 APNs 收推送、通知扩展解密改写通知（`apps/flutter`，两边的解密都对过 RFC 8291 的例子）。只用假的 APNs、FCM 和假的推送通道测过；中转还没部署，没在真手机上收过
 - [x] `ip-router` 路由 v1：`ip.yaml` 里的规则（关键词、排除词、正则、发送人）按顺序匹配，把没指定员工的消息分派给岗位里最空闲的员工，可要求用升级模型；控制台有“自动分派”和路由规则页
 - [x] 路由 v2（一）：规则在控制台编辑并立即生效（存进数据库，重启后仍在，优先于 `ip.yaml`）；人工在审批卡片上改派时生成规则草案，人工编辑后才生效；拿不准时出审批卡片
