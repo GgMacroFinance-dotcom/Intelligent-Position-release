@@ -10,6 +10,8 @@ import '../app_state.dart';
 import '../protocol/client.dart';
 import '../protocol/models.dart';
 import 'common.dart';
+import 'inbox_page.dart' show ApprovalCard;
+import 'shell/tokens.dart';
 
 /// 列表和对话并排的最小宽度。
 const double kWideChat = 840;
@@ -144,7 +146,13 @@ class ThreadScreen extends StatelessWidget {
 }
 
 class ThreadView extends StatefulWidget {
-  const ThreadView({super.key});
+  const ThreadView({super.key, this.fixedAgentId, this.onOpenThread});
+
+  /// 固定发给某一位员工时传入（比如点星球打开的单员工面板）：隐藏输入框里多余的“发给谁”下拉。
+  final String? fixedAgentId;
+
+  /// 对话里嵌着的审批卡片若需要跳去别的对话时调；不传时只在当前对话里直接点选。
+  final void Function(String threadId)? onOpenThread;
 
   @override
   State<ThreadView> createState() => _ThreadViewState();
@@ -179,6 +187,10 @@ class _ThreadViewState extends State<ThreadView> {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final id = state.threadId;
+    final fixed = widget.fixedAgentId;
+    final threadApprovals = id == null
+        ? const <Approval>[]
+        : state.pendingApprovals.where((a) => a.subjectThreadId == id).toList();
     final items = <Widget>[
       for (final m in state.messages) _message(state, m),
       for (final MapEntry(key: agentId, value: text) in state.drafts.entries)
@@ -188,18 +200,35 @@ class _ThreadViewState extends State<ThreadView> {
             note: '正在输入…',
             child: MessageMarkdown(text, reportHint: agentId),
           ),
+      for (final a in threadApprovals)
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: Sizes.cardMax),
+            child: ApprovalCard(
+              key: ValueKey('thread-approval-${a.id}'),
+              approval: a,
+              hideThreadLink: true,
+              onOpenThread: widget.onOpenThread ?? state.openThread,
+            ),
+          ),
+        ),
       if (id != null && state.turnNote[id] != null)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text(state.turnNote[id]!, style: TextStyle(color: Theme.of(context).hintColor, fontSize: 13)),
         ),
     ];
+    final emptyHint = id != null
+        ? ''
+        : fixed != null
+        ? '写点什么给 ${state.agentName(fixed)}，开始新对话。'
+        : (state.agents.isEmpty ? '主机上没有数字员工。' : '选一位员工，或者交给自动分派，开始新对话。');
     return Column(
       children: [
         if (id != null && state.memoryOff != null) ThreadMemoryBar(threadId: id, off: state.memoryOff!.contains(id)),
         Expanded(
           child: items.isEmpty
-              ? EmptyHint(id == null ? (state.agents.isEmpty ? '主机上没有数字员工。' : '选一位员工，或者交给自动分派，开始新对话。') : '')
+              ? EmptyHint(emptyHint)
               // 倒过来排：最新的在底部，来了新内容自动停在底部，往上翻时不会被拽下来。
               : ListView.builder(
                   controller: _scroll,
@@ -209,7 +238,7 @@ class _ThreadViewState extends State<ThreadView> {
                   itemBuilder: (context, i) => items[items.length - 1 - i],
                 ),
         ),
-        const Composer(),
+        Composer(fixedAgentId: fixed),
       ],
     );
   }
@@ -300,7 +329,7 @@ class MessageTile extends StatelessWidget {
         note: time,
         human: m.author is HumanAuthor,
         child: switch (m.author) {
-          HumanAuthor() => SelectableText(text),
+          HumanAuthor() => SelectableText(text, style: TextStyle(color: Shell.of(context).bubbleUserInk)),
           AgentAuthor(:final agentId) => MessageMarkdown(text, reportHint: agentId),
           SystemAuthor() => MessageMarkdown(text),
         },
@@ -332,39 +361,50 @@ class _Bubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    // 照 dusk bot：人写的是墨色气泡靠右，员工的是浅灰块靠左，名字和时间是气泡上方一行小字。
+    final s = Shell.of(context);
+    final ink = human ? s.bubbleUserInk : s.ink;
     return Align(
       alignment: human ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720),
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-          decoration: BoxDecoration(
-            color: human ? scheme.primaryContainer : scheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(12),
-          ),
+        constraints: BoxConstraints(maxWidth: human ? Sizes.bubbleMax : 720),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: human ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
-              Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(
-                      text: who,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    TextSpan(
-                      text: '  $note',
-                      style: TextStyle(color: theme.hintColor),
-                    ),
-                  ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: who,
+                        style: TextStyle(color: s.inkSecondary, fontWeight: FontWeight.w500),
+                      ),
+                      TextSpan(
+                        text: '  $note',
+                        style: TextStyle(color: s.inkTertiary),
+                      ),
+                    ],
+                  ),
+                  style: const TextStyle(fontSize: 12),
                 ),
-                style: theme.textTheme.bodySmall,
               ),
-              const SizedBox(height: 4),
-              child,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  color: human ? s.bubbleUser : s.card,
+                  borderRadius: BorderRadius.circular(Radii.bubble),
+                ),
+                child: DefaultTextStyle.merge(
+                  style: TextStyle(color: ink, fontSize: 15, height: 1.45),
+                  child: IconTheme.merge(
+                    data: IconThemeData(color: ink),
+                    child: child,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -410,20 +450,25 @@ class _Folded extends StatelessWidget {
 
 /// 输入框和“发给谁”。输入框在重建时保留内容，事件推送不会冲掉正在打的字。
 class Composer extends StatefulWidget {
-  const Composer({super.key});
+  const Composer({super.key, this.fixedAgentId});
+
+  /// 固定发给某一位员工时（点星球打开的单员工面板），不显示“发给谁”下拉框。
+  final String? fixedAgentId;
 
   @override
   State<Composer> createState() => _ComposerState();
 }
 
+/// 输入框的文字跟着 App 状态走，不跟着控件走：窗口在三栏外壳和窄屏导航之间切换时，控件会重建，草稿要留着。
+final _drafts = Expando<TextEditingController>('输入框草稿');
+
 class _ComposerState extends State<Composer> {
-  final _text = TextEditingController();
+  late final TextEditingController _text = _drafts[AppScope.read(context)] ??= TextEditingController();
   final _focus = FocusNode();
   bool _sending = false;
 
   @override
   void dispose() {
-    _text.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -459,63 +504,115 @@ class _ComposerState extends State<Composer> {
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    final theme = Theme.of(context);
-    final current = state.currentAgent;
+    final s = Shell.of(context);
+    final fixed = widget.fixedAgentId;
+    final current = fixed ?? state.currentAgent;
     // 当前选的员工不在名单里（名单还没加载）时先显示自动分派。
     final value = state.agents.any((a) => a.id == current) ? current : null;
-    return Material(
-      color: theme.colorScheme.surfaceContainerLow,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            DropdownButtonHideUnderline(
-              child: DropdownButton<String?>(
-                isExpanded: true,
-                isDense: true,
-                value: value,
-                hint: const Text('自动分派（按路由规则）'),
-                items: [
-                  const DropdownMenuItem<String?>(value: null, child: Text('自动分派（按路由规则）')),
-                  for (final a in state.agents)
-                    DropdownMenuItem<String?>(value: a.id, child: Text('${a.name}（${a.role}）')),
-                ],
-                onChanged: state.connected ? state.chooseAgent : null,
+    final canSend = state.connected && !_sending;
+    // 照 dusk bot：白底圆角的输入框浮在对话底部，左边 +，右边一个实心的发送按钮。
+    // “发给谁”放在输入框里左下角，像一个小胶囊。
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 14),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: Sizes.chatColumn),
+          child: AnimatedContainer(
+            duration: Motion.fast,
+            curve: Motion.curve,
+            decoration: ShapeDecoration(
+              color: s.composer,
+              shape: RoundedSuperellipseBorder(
+                borderRadius: BorderRadius.circular(Radii.x4),
+                side: BorderSide(color: _focus.hasFocus ? s.hairline : s.composerRing, width: 0.8),
               ),
+              shadows: s.floatShadow,
             ),
-            const SizedBox(height: 4),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
+            padding: const EdgeInsets.fromLTRB(6, 3, 6, 5),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Focus(
-                    onKeyEvent: _onKey,
-                    child: TextField(
-                      controller: _text,
-                      focusNode: _focus,
-                      minLines: 1,
-                      maxLines: 6,
-                      textInputAction: TextInputAction.newline,
-                      keyboardType: TextInputType.multiline,
-                      decoration: const InputDecoration(
-                        hintText: '写给员工……',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
+                Focus(
+                  onKeyEvent: _onKey,
+                  onFocusChange: (_) => setState(() {}),
+                  child: TextField(
+                    controller: _text,
+                    focusNode: _focus,
+                    minLines: 1,
+                    maxLines: 8,
+                    textInputAction: TextInputAction.newline,
+                    keyboardType: TextInputType.multiline,
+                    style: TextStyle(color: s.ink, fontSize: 15, height: 1.4),
+                    decoration: InputDecoration(
+                      hintText: value == null ? '写给员工……（自动分派）' : '写给 ${state.agentName(value)}……',
+                      filled: false,
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      contentPadding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  tooltip: '发送',
-                  onPressed: state.connected && !_sending ? _send : null,
-                  icon: const Icon(Icons.send),
+                Row(
+                  children: [
+                    Tooltip(
+                      message: '附件（主机还不支持）',
+                      child: IconButton(
+                        onPressed: null,
+                        icon: Icon(Icons.add, size: 20, color: s.inkTertiary),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                    if (fixed == null)
+                      Flexible(
+                        child: Container(
+                          height: 30,
+                          constraints: const BoxConstraints(maxWidth: 260),
+                          padding: const EdgeInsets.only(left: 10, right: 4),
+                          decoration: BoxDecoration(color: s.card, borderRadius: BorderRadius.circular(999)),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String?>(
+                              isDense: true,
+                              isExpanded: true,
+                              value: value,
+                              borderRadius: BorderRadius.circular(Radii.menu),
+                              dropdownColor: s.menu,
+                              icon: Icon(Icons.expand_more, size: 16, color: s.inkSecondary),
+                              style: TextStyle(color: s.ink, fontSize: 13),
+                              hint: Text('自动分派（按路由规则）', style: TextStyle(color: s.ink, fontSize: 13)),
+                              items: [
+                                const DropdownMenuItem<String?>(value: null, child: Text('自动分派（按路由规则）')),
+                                for (final a in state.agents)
+                                  DropdownMenuItem<String?>(value: a.id, child: Text('${a.name}（${a.role}）')),
+                              ],
+                              onChanged: state.connected ? state.chooseAgent : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    const Spacer(),
+                    Tooltip(
+                      message: '发送',
+                      child: Material(
+                        color: canSend ? s.ink : s.control,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: canSend ? _send : null,
+                          child: SizedBox.square(
+                            dimension: 32,
+                            child: Icon(Icons.arrow_upward, size: 18, color: canSend ? s.app : s.inkTertiary),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );

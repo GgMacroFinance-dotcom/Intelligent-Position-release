@@ -27,7 +27,8 @@ class RolesPage extends StatelessWidget {
     final state = AppScope.of(context);
     final theme = Theme.of(context);
     final muted = TextStyle(color: theme.hintColor);
-    if (state.roles.isEmpty) {
+    final allRoles = state.allRoles;
+    if (allRoles.isEmpty) {
       return EmptyHint(state.connected ? '还没有岗位。在主机的 ip.yaml 里定义 roles。' : '连上主机后，岗位和员工会显示在这里。');
     }
     final spend = state.spend;
@@ -46,7 +47,7 @@ class RolesPage extends StatelessWidget {
               style: muted,
             ),
           ),
-        for (final role in state.roles) _RoleCard(role: role, onChat: onChat),
+        for (final role in allRoles) _RoleCard(role: role, onChat: onChat),
       ],
     );
   }
@@ -63,7 +64,7 @@ class _RoleCard extends StatelessWidget {
     final state = AppScope.of(context);
     final theme = Theme.of(context);
     final muted = TextStyle(color: theme.hintColor);
-    final agents = state.agents.where((a) => a.role == role.id).toList();
+    final agents = state.allAgents.where((a) => a.role == role.id).toList();
     final spent = state.spend?.roles[role.id] ?? 0;
     final limit = role.budgetPerDayUsd;
     final over = limit != null && spent >= limit;

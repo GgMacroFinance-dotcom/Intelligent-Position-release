@@ -422,7 +422,12 @@ class Approval {
   /// 推荐理由或背景。
   final String reason;
 
-  /// `route_message`（路由拿不准）、`agent_question`（员工提问）或 `question`。
+  /// `route_message`（路由拿不准）、`agent_question`（员工中途提问）或 `question`。
+  ///
+  /// TODO(backend-completion-approval) — 协议状态空缺说明：
+  /// 当前 Rust/wire.dart 尚未定义「任务已完成待审批」的独立 subjectKind（建议新增 `task_completion`
+  /// 或 `task_approval`，并附带 `agent_id`、`task_id`、`thread_id`）。
+  /// 在后端补齐之前，`ApprovalSubjectUnknown` 会透传未知 `kind`，但不会解析 `subjectAgentId`。
   final String subjectKind;
   final String? subjectThreadId;
   final String? subjectAgentId;
@@ -433,6 +438,9 @@ class Approval {
 
   bool get pending => resolution == null;
   bool get isAgentQuestion => subjectKind == 'agent_question';
+
+  /// 是否为「任务完成待审批」类型（与 `agent_question` 员工中途提问解耦，供左中下待审批停泊区消费）。
+  bool get isTaskCompletion => subjectKind == 'task_completion' || subjectKind == 'task_approval';
 }
 
 class Resolution {
@@ -490,6 +498,10 @@ class Task {
   final String description;
 
   /// `open`、`in_progress`、`blocked`、`done`、`cancelled`；这个版本不认识的状态是空字符串。
+  ///
+  /// TODO(backend-completion-approval) — 协议状态空缺说明：
+  /// 当前 Rust/wire.dart 的 `TaskStatus` 尚无「已完成待人工审批」枚举（建议新增 `pending_approval`
+  /// 或 `awaiting_approval`）。前端已通过 [isPendingApproval] 预留兼容，后端补齐并重新生成 wire.dart 后自动生效。
   final String status;
   final String? role;
   final String? assignee;
@@ -514,6 +526,9 @@ class Task {
 
   /// 还没结束（没完成也没取消）。
   bool get isOpen => status != 'done' && status != 'cancelled';
+
+  /// 是否处于「已完成、等待人工审批」状态（后端协议补齐 `pending_approval` / `awaiting_approval` 后自动命中）。
+  bool get isPendingApproval => status == 'pending_approval' || status == 'awaiting_approval';
 }
 
 // ---------- 发消息 ----------

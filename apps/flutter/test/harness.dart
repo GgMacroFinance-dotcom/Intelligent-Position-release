@@ -13,6 +13,7 @@ import 'package:ip_app/src/push/lock_push.dart';
 import 'package:ip_app/src/qr/scanner.dart';
 import 'package:ip_app/src/storage.dart';
 import 'package:ip_app/src/ui/me_page.dart';
+import 'package:ip_app/src/ui/shell/cosmos.dart';
 
 import 'fake_host.dart';
 
@@ -50,6 +51,8 @@ class Harness {
   late final AppState state;
 
   Future<void> start(WidgetTester tester, {Size size = const Size(390, 844)}) async {
+    // 宽窗口的天穹一直在流动，pumpAndSettle 会等不完；测试里停在一帧。
+    CosmosBackdrop.animate = false;
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -64,11 +67,18 @@ class Harness {
           .save(HostEntry(address: HostAddress.parse('https://ip.example.com'), deviceName: '张三的手机'), 'ipd_abc');
 
   /// 在“我”页里往下滚到 `finder`（后面的主界面里也有能滚的列表，要指定“我”页的）。
-  Future<void> scrollMe(WidgetTester tester, Finder finder) => tester.scrollUntilVisible(
-    finder,
-    200,
-    scrollable: find.descendant(of: find.byType(MePage), matching: find.byType(Scrollable)).first,
-  );
+  /// 宽窗口里“我”是设置弹窗，不用滚。
+  Future<void> scrollMe(WidgetTester tester, Finder finder) async {
+    if (find.byType(MePage).evaluate().isEmpty) return;
+    await tester.scrollUntilVisible(
+      finder,
+      200,
+      scrollable: find.descendant(of: find.byType(MePage), matching: find.byType(Scrollable)).first,
+    );
+    // 列表提前建好了屏幕外的一截，找得到不等于看得见：再滚到它整个露出来。
+    await tester.ensureVisible(finder);
+    await tester.pumpAndSettle();
+  }
 
   Future<void> stop(WidgetTester tester) async {
     await tester.pumpWidget(const SizedBox());

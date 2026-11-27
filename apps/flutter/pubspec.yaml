@@ -53,3 +53,10 @@ flutter:
   # 托盘图标：Windows 要 .ico，其余用 .png。
   assets:
     - assets/tray/
+  # 天穹的背景层（lib/src/ui/shell/cosmos.dart）。
+  shaders:
+    - shaders/sky.frag
+    - shaders/cloud.frag
+    - shaders/body.frag
+    - shaders/body_surface.frag
+    - shaders/modal_veil.frag

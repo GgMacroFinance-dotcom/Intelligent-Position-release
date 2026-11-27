@@ -9,6 +9,8 @@ import 'common.dart';
 import 'inbox_page.dart';
 import 'me_page.dart';
 import 'roles_page.dart';
+import 'shell/desktop_shell.dart';
+import 'shell/tokens.dart';
 import 'star_map_page.dart';
 import 'tasks_page.dart';
 
@@ -87,6 +89,18 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // 宽窗口先只有黑底和左下角“我”、连接状态（设计重构，2026-11-24 维护者定）；手机和窄窗口还是下面原来的导航。
+    final state0 = AppScope.read(context);
+    if (MediaQuery.sizeOf(context).width >= Sizes.shellMin) {
+      // 点通知要去的对话记下来：窗口变窄退回原来的导航时直接打开它。
+      return DesktopShell(
+        onOpenThread: (id) {
+          state0.openThread(id);
+          _tab = kTabChat;
+          _threadOpen = true;
+        },
+      );
+    }
     final state = AppScope.of(context);
     _handlePendingOpen();
     final wide = MediaQuery.sizeOf(context).width >= kWideNav;

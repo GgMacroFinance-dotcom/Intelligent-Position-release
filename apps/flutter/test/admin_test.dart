@@ -351,7 +351,7 @@ void main() {
       },
     });
     await h.savePaired();
-    await h.start(tester, size: const Size(1280, 800));
+    await h.start(tester, size: const Size(960, 800));
     await tester.tap(find.text('对话'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('最近 CPI 怎么样'));
@@ -380,7 +380,7 @@ void main() {
     final h = Harness();
     h.host.handlers['list_memory_off_threads'] = (_) => ['t1'];
     await h.savePaired();
-    await h.start(tester, size: const Size(1280, 800));
+    await h.start(tester, size: const Size(960, 800));
     await tester.tap(find.text('对话'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('最近 CPI 怎么样'));
@@ -392,7 +392,7 @@ void main() {
     final old = Harness();
     old.host.handlers.remove('list_memory_off_threads');
     await old.savePaired();
-    await old.start(tester, size: const Size(1280, 800));
+    await old.start(tester, size: const Size(960, 800));
     await tester.tap(find.text('对话'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('最近 CPI 怎么样'));
