@@ -163,8 +163,11 @@ double orbitRadius(double urgency, {double inner = 130, double outer = 390}) =>
 /// 图标半径：重要度 0 到 1 对应 13 到 34。
 double bodyRadius(double importance) => 13 + importance.clamp(0.0, 1.0) * 21;
 
-/// 谁是幕僚长：岗位 id 含 coordinator 或 chief，或者岗位名、员工名里有“协调”“幕僚”。
-bool isChiefOfStaff(Agent a, Role? role) {
+/// 谁是幕僚长：主机标了协调岗位（`Role.coordinator`）时就是那个岗位的员工；
+/// 一个都没标（旧主机，或 ip.yaml 没写）时退回猜：岗位 id 含 coordinator 或 chief，或者岗位名、员工名里有“协调”“幕僚”。
+/// [explicit] 是“主机标过协调岗位”，由调用方对整个岗位表算一次。
+bool isChiefOfStaff(Agent a, Role? role, {bool explicit = false}) {
+  if (explicit) return role?.coordinator ?? false;
   final id = a.role.toLowerCase();
   if (id.contains('coordinator') || id.contains('chief')) return true;
   final names = '${role?.name ?? ''} ${a.name}';
@@ -226,11 +229,12 @@ StarMap buildStarMap({
   Map<String, double> importanceOverrides = const {},
 }) {
   final roleById = {for (final r in roles) r.id: r};
+  final explicit = roles.any((r) => r.coordinator);
   Agent? chiefAgent;
   for (final a in agents) {
     // 明确手选了非太阳行星形态的员工不抢占中心太阳（幕僚长）席位。
     if (celestialOverrides.containsKey(a.id)) continue;
-    if (isChiefOfStaff(a, roleById[a.role])) {
+    if (isChiefOfStaff(a, roleById[a.role], explicit: explicit)) {
       chiefAgent = a;
       break;
     }

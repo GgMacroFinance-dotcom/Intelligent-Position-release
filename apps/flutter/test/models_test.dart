@@ -165,6 +165,17 @@ void main() {
     expect(role.escalateModel, 'openai/gpt-6-astra');
     expect(role.budgetPerDayUsd, 2.0);
     expect(role.displayName, 'macro');
+    // 主机只给协调岗位带 coordinator: true；旧主机、普通岗位没有这一项。
+    expect(role.coordinator, isFalse);
+    final chief = Role.fromJson({
+      'id': 'lead',
+      'name': '牵头人',
+      'description': 'd',
+      'model': {'default': 'm', 'escalate': null},
+      'budget_per_day_usd': null,
+      'coordinator': true,
+    });
+    expect(chief.coordinator, isTrue);
   });
 
   test('少了协议里必有的字段时报错，不悄悄补默认值（F-20：解析交给从 Rust 生成的类型）', () {

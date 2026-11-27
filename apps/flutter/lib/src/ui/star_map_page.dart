@@ -1074,7 +1074,7 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
           const Text('太阳的位置留给幕僚长。', style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Text(
-            '主机上没有协调员岗位。在 ip.yaml 里加一个 id 含 coordinator 的岗位（或岗位名里有“协调”“幕僚”），'
+            '主机上没有协调员岗位。在 ip.yaml 里给协调岗位写上 coordinator: true（并给它配一位员工），'
             '它的员工就会坐到这里，其他员工绕着它转。',
             style: TextStyle(fontSize: 12.5, color: Colors.white.withValues(alpha: 0.75), height: 1.5),
           ),

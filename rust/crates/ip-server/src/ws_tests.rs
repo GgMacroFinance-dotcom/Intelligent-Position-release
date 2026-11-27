@@ -66,6 +66,7 @@ async fn start_with_schedules(
             escalate: None,
         },
         budget_per_day_usd: None,
+        coordinator: false,
     };
     let runtime = Runtime::new(store, models, RuntimeConfig::default());
     let agent = Agent {
@@ -1109,6 +1110,10 @@ async fn app_starts_when_an_mcp_server_is_unreachable() {
 fn shipped_example_config_is_valid() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ip.example.yaml");
     let c = Config::load(&path).unwrap();
+    // 协调员显式标了 coordinator，App 不用再按名字猜太阳。
+    let org = c.org();
+    assert_eq!(org.coordinator().map(|r| r.id.as_str()), Some("coordinator"));
+    assert_eq!(org.roles.iter().filter(|r| r.coordinator).count(), 1);
     // 示例数据源随仓库一起提供，路径按配置文件所在目录换算后能打开。
     let data = ip_data::DataHub::open(&c.data_sources, std::path::Path::new("/nonexistent")).unwrap();
     assert!(!data.specs_for(&"macro-researcher".into()).is_empty());
@@ -1634,6 +1639,7 @@ async fn memory_background_task_distills_cooled_threads() {
             escalate: None,
         },
         budget_per_day_usd: None,
+        coordinator: false,
     };
     // 闲置时间设成 0，对话一结束就算凉下来，测试不用等。
     let config = RuntimeConfig {

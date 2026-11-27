@@ -25,6 +25,7 @@ fn role(model: &str) -> Role {
             escalate: None,
         },
         budget_per_day_usd: None,
+        coordinator: false,
     }
 }
 

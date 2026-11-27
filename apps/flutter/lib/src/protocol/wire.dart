@@ -1727,7 +1727,14 @@ final class RequestUnknown extends Request {
 
 /// 一个岗位。
 final class Role {
-  const Role({required this.id, this.name, required this.description, required this.model, this.budgetPerDayUsd});
+  const Role({
+    required this.id,
+    this.name,
+    required this.description,
+    required this.model,
+    this.budgetPerDayUsd,
+    this.coordinator,
+  });
 
   factory Role.fromJson(Map<String, Object?> j) => Role(
     id: j['id'] as String,
@@ -1735,6 +1742,7 @@ final class Role {
     description: j['description'] as String,
     model: ModelSlot.fromJson(j['model'] as Map<String, Object?>),
     budgetPerDayUsd: j['budget_per_day_usd'] == null ? null : j['budget_per_day_usd'] as num,
+    coordinator: j['coordinator'] == null ? null : j['coordinator'] as bool,
   );
 
   final RoleId id;
@@ -1750,12 +1758,17 @@ final class Role {
   /// 每日模型费用上限（美元）。
   final num? budgetPerDayUsd;
 
+  /// 协调层岗位：接没有明确归属的需求，拆成任务派给执行岗位（App 星图中心的太阳）。最多一个岗位标这一项。
+  /// 只是标记，不改这个岗位的工具和提示词。是 false 时不出现在协议里，旧主机也一样没有。
+  final bool? coordinator;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
     'description': description,
     'model': model.toJson(),
     'budget_per_day_usd': budgetPerDayUsd,
+    'coordinator': ?coordinator,
   };
 }
 

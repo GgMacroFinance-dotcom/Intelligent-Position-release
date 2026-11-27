@@ -614,7 +614,7 @@ class _EmptyChatArea extends StatelessWidget {
     } else {
       icon = Icons.wb_sunny_outlined;
       title = '还没有配置幕僚长';
-      detail = '在主机的 ip.yaml 里加一个 id 含 coordinator 的岗位（或岗位名里有“协调”“幕僚”），重启主机后就能在这里直接对话。';
+      detail = '在主机的 ip.yaml 里给协调岗位写上 coordinator: true（并给它配一位员工），重启主机后就能在这里直接对话。';
     }
 
     return Column(

@@ -326,6 +326,7 @@ class Role {
     this.budgetPerDayUsd,
     this.model = '',
     this.escalateModel,
+    this.coordinator = false,
   });
 
   factory Role.fromJson(Json j) {
@@ -337,8 +338,12 @@ class Role {
       budgetPerDayUsd: r.budgetPerDayUsd?.toDouble(),
       model: r.model.defaultValue,
       escalateModel: r.model.escalate,
+      coordinator: r.coordinator ?? false,
     );
   }
+
+  /// 主机明确标了这是协调岗位（`ip.yaml` 里 `coordinator: true`，最多一个）。旧主机没有这一项，都是 false。
+  final bool coordinator;
 
   /// 岗位用的模型，`<端点>/<模型>`。
   final String model;

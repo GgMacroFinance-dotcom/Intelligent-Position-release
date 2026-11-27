@@ -86,6 +86,7 @@ async fn measure() -> anyhow::Result<Report> {
             escalate: None,
         },
         budget_per_day_usd: None,
+        coordinator: false,
     };
 
     // 先热身一个员工，让分配器、存储连接池、tokio 线程都就绪，避免把一次性开销算到每个员工头上。
