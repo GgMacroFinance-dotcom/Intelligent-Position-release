@@ -1069,11 +1069,12 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 - **`list_progress`**：回复 `ProgressBoard { now_ms, agents: AgentProgress[], attention: AttentionPoint[] }`。
   - `AgentProgress { agent_id, phase, headline: Estimate | null, tasks: Estimate[] }`，`phase` 是 `idle`、`queued`、`working`、`waiting_human`、`waiting_colleague`、`blocked`、`stalled`、`failed` 之一，按员工 id 排。
   - `Estimate { scope: task | turn, thread_id, task_id, title, phase, started_ms, steps_done, steps_expected, fraction, eta_ms, eta_late_ms, samples, basis }`。
-  - `AttentionPoint { kind, agent_id, role_id, task_id, thread_id, at_ms, late_ms, likelihood, text }`，`kind` 是 `question`、`blocked`、`failed`、`stalled`、`unassigned`、`overdue`、`due_risk`、`due`、`likely_question`、`result`、`reply`、`step_limit`、`budget` 之一，各自的条件见 progress-design.md 2.5。已经发生的 `at_ms` 是发生的时刻、`likelihood` 是 1；按速度外推的 `likelihood` 为空；预测的只列 24 小时以内的，可能性低于 0.2 的不列。`text` 不含时刻，由客户端按本地时区显示。清单按 `at_ms` 排，同一时刻可能性大的在前。
+  - `AttentionPoint { kind, agent_id, role_id, task_id, thread_id, at_ms, late_ms, likelihood, text }`，`kind` 是 `question`、`review`、`blocked`、`failed`、`stalled`、`unassigned`、`overdue`、`due_risk`、`due`、`likely_question`、`result`、`reply`、`step_limit`、`budget` 之一，各自的条件见 progress-design.md 2.5。已经发生的 `at_ms` 是发生的时刻、`likelihood` 是 1；按速度外推的 `likelihood` 为空；预测的只列 24 小时以内的，可能性低于 0.2 的不列。`text` 不含时刻，由客户端按本地时区显示。清单按 `at_ms` 排，同一时刻可能性大的在前。
   - 权限：给 `daily`（只读）。
+  - 和 D-41 一起：等验收（`pending_approval`）的任务算 `waiting_human`，`fraction` 是 1，不估时间；验收卡片（`task_completion`）列成 `review`；做完要验收的任务（`needs_approval`）不论谁派的，预计交回时都列 `result`。
 - 不加推送事件：客户端收到 `turn_started`、`turn_finished`、`message`、`task_changed`、`approval_changed` 时防抖重拉，两次之间按 `now_ms` 和 `eta_ms` 自己往前推。
 - 基准 `ip bench progress`：估一张 500 位员工、2000 个任务的表（中位数目标 10 毫秒），以及从存储取数据再估（50 位员工、200 个任务、2 万轮历史，p95 目标 30 毫秒；第一次现算基线目标 200 毫秒），接入 CI。每轮多写的一行算在 `ip bench agents` 里。
-- 测试：存储（记录、按对话汇总、按岗位和员工取、费用、做完的任务、提问卡片的时刻）；估算（条件余量、样本、没有历史不估、进度不到 1、排队、委派和汇总回复、受阻、在问你、停着要过 2 分钟才列、等你分配、失败不和受阻重复、截止、步数上限、预算、24 小时以外不列）；运行时（真跑一轮后记下步数，进度表里任务停着）；`/ws`（日常设备能用、跑完一轮后记在主机上），都在假模型、假主机上。
+- 测试：存储（记录、按对话汇总、按岗位和员工取、费用、做完的任务、提问卡片的时刻）；估算（条件余量、样本、没有历史不估、进度不到 1、排队、委派和汇总回复、受阻、在问你、停着要过 2 分钟才列、等你分配、失败不和受阻重复、截止、步数上限、预算、24 小时以外不列、等验收不算停着）；运行时（真跑一轮后记下步数，进度表里任务停着）；`/ws`（日常设备能用、跑完一轮后记在主机上），都在假模型、假主机上。
 
 ## 10. 浏览器
 

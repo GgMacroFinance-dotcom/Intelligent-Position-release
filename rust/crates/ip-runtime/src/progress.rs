@@ -346,6 +346,8 @@ pub struct Estimate {
 pub enum AttentionKind {
     /// 员工在问你，或别的等你决定的卡片。
     Question,
+    /// 员工交回了要验收的任务，等你通过或打回（`docs/ip/m2-spec.md` D-41 的验收卡片）。
+    Review,
     Blocked,
     Failed,
     Stalled,
@@ -563,7 +565,7 @@ pub fn estimate(input: &Inputs<'_>) -> ProgressBoard {
             .unwrap_or_default();
         let phase = if task.status == TaskStatus::Blocked {
             ProgressPhase::Blocked
-        } else if thread.is_some_and(|th| questions_on.contains(th)) {
+        } else if task.status == TaskStatus::PendingApproval || thread.is_some_and(|th| questions_on.contains(th)) {
             ProgressPhase::WaitingHuman
         } else if !open_children.is_empty() {
             ProgressPhase::WaitingColleague
@@ -572,6 +574,12 @@ pub fn estimate(input: &Inputs<'_>) -> ProgressBoard {
         };
         let totals = thread.and_then(|th| input.totals.get(th)).copied().unwrap_or_default();
         let mut est = task_estimate(task, phase, totals, 0, &base, &rname, None);
+        if task.status == TaskStatus::PendingApproval {
+            // 员工这边做完了，进度条走满，等人通过或打回。
+            est.estimate.fraction = Some(1.0);
+            est.estimate.steps_expected = Some(est.estimate.steps_done);
+            est.estimate.basis = "做完了，等你验收".to_string();
+        }
         if phase == ProgressPhase::WaitingColleague {
             // 子任务里最晚的做完，再加汇总的一轮。子任务有一个估不出，就不估。
             let mut latest: Option<(i64, i64)> = Some((now, now));
@@ -685,31 +693,47 @@ pub fn estimate(input: &Inputs<'_>) -> ProgressBoard {
 
     // 4. 要人看的时间点。
     for a in input.approvals {
-        let (kind, agent, thread, text) = match &a.subject {
+        let (kind, agent, thread, task_id, text) = match &a.subject {
             ApprovalSubject::AgentQuestion { agent_id, thread_id } => (
                 AttentionKind::Question,
                 Some(agent_id.clone()),
                 Some(thread_id.clone()),
+                task_by_thread.get(thread_id).map(|t| t.id.clone()),
                 format!("{} 在问你：{}", name_of(agent_id), short(&a.question, 40)),
             ),
+            ApprovalSubject::TaskCompletion {
+                agent_id,
+                task_id,
+                thread_id,
+            } => {
+                let title = input
+                    .tasks
+                    .iter()
+                    .find(|t| &t.id == task_id)
+                    .map_or_else(|| short(&a.question, 40), |t| short(&t.title, 24));
+                (
+                    AttentionKind::Review,
+                    Some(agent_id.clone()),
+                    thread_id.clone(),
+                    Some(task_id.clone()),
+                    format!("{} 交回了，等你验收：{title}", name_of(agent_id)),
+                )
+            }
             ApprovalSubject::RouteMessage { thread_id, .. } => (
                 AttentionKind::Unassigned,
                 None,
                 Some(thread_id.clone()),
+                None,
                 format!("有一条消息等你决定交给谁：{}", short(&a.question, 40)),
             ),
-            #[allow(unreachable_patterns)] // 以后加的卡片种类先按一般问题算
-            _ => (
+            ApprovalSubject::Question => (
                 AttentionKind::Question,
+                None,
                 None,
                 None,
                 format!("等你决定：{}", short(&a.question, 40)),
             ),
         };
-        let task_id = thread
-            .as_ref()
-            .and_then(|th| task_by_thread.get(th))
-            .map(|t| t.id.clone());
         attention.push(AttentionPoint {
             kind,
             role_id: agent.as_ref().and_then(|a| role_of.get(a)).map(|r| (*r).clone()),
@@ -859,8 +883,9 @@ pub fn estimate(input: &Inputs<'_>) -> ProgressBoard {
                 }
             }
         }
-        // 交回结果：只算人派的任务。员工派的回到派活的员工那里，由下面的“汇总回复”算。
-        if matches!(task.created_by, Author::Human { .. })
+        // 交回结果：人派的任务，和做完要人验收的任务（谁派的都一样）。
+        // 员工派、不用验收的回到派活的员工那里，由下面的“汇总回复”算。
+        if (matches!(task.created_by, Author::Human { .. }) || task.needs_approval)
             && let (Some(eta), Some(late)) = (e.eta_ms, e.eta_late_ms)
         {
             attention.push(point(
@@ -868,7 +893,11 @@ pub fn estimate(input: &Inputs<'_>) -> ProgressBoard {
                 eta,
                 Some(late),
                 Some(1.0),
-                format!("{who} 交回结果：{title}"),
+                if task.needs_approval {
+                    format!("{who} 交回结果，等你验收：{title}")
+                } else {
+                    format!("{who} 交回结果：{title}")
+                },
             ));
         }
     }

@@ -377,6 +377,7 @@ final class ApprovalSubjectUnknown extends ApprovalSubject {
 
 enum AttentionKind {
   question('question'),
+  review('review'),
   blocked('blocked'),
   failed('failed'),
   stalled('stalled'),

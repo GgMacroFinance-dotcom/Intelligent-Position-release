@@ -520,3 +520,57 @@ fn far_predictions_are_dropped() {
     assert!(board.attention.is_empty(), "24 小时以外的预测不列：{:?}", kinds(&board));
 }
 
+#[test]
+fn pending_review_waits_for_a_human_and_is_not_stalled() {
+    let mut w = World::new(history());
+    let mut done = task("v", Some("a1"), TaskStatus::PendingApproval);
+    done.needs_approval = true;
+    done.updated_at_ms = NOW - STALL_GRACE_MS * 10;
+    w.tasks.push(done);
+    w.totals.insert(
+        "th-v".into(),
+        TurnTotals {
+            steps: 9,
+            ..TurnTotals::default()
+        },
+    );
+    w.approvals.push(Approval {
+        id: "c9".into(),
+        question: "研究员交回了“任务v”".into(),
+        options: vec![ApprovalOption {
+            label: "通过".into(),
+            consequence: String::new(),
+        }],
+        recommended: Some(0),
+        reason: String::new(),
+        subject: ApprovalSubject::TaskCompletion {
+            agent_id: "a1".into(),
+            task_id: "v".into(),
+            thread_id: Some("th-v".into()),
+        },
+        state: ApprovalState::Pending,
+        created_at_ms: NOW - 5_000,
+    });
+    let board = w.board();
+    let a = &board.agents[0];
+    assert_eq!(a.phase, ProgressPhase::WaitingHuman);
+    let head = a.headline.as_ref().unwrap();
+    assert_eq!((head.fraction, head.eta_ms), (Some(1.0), None));
+    assert_eq!(kinds(&board), [AttentionKind::Review], "等验收的不算停着");
+    let review = point(&board, AttentionKind::Review);
+    assert_eq!(review.task_id.as_ref().unwrap().as_str(), "v");
+    assert!(review.text.contains("等你验收：任务v"), "{}", review.text);
+
+    // 做完要验收的任务，员工派的也要人看：预计交回时提醒。
+    let mut w = World::new(history());
+    let mut t = task("1", Some("a1"), TaskStatus::InProgress);
+    t.created_by = Author::Agent {
+        agent_id: "boss".into(),
+    };
+    t.needs_approval = true;
+    w.tasks.push(t);
+    w.asked.insert("th-1".into());
+    w.run("a1", "th-1", NOW, 1);
+    let board = w.board();
+    assert!(point(&board, AttentionKind::Result).text.contains("等你验收"));
+}
