@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.28（2026-11-27）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-38（回复里提到的报告作为文件发进线程，backlog E-13，v0.24）是提议，代码和这次修改放在同一个 PR 里，等工程师审查。D-39（浏览器走 Playwright MCP、`mcp_servers` 的 `tools` 白名单，backlog E-5，v0.25）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-40（App 桌面外壳的协议补充：对话的最后回复员工、协调岗位标记、星图轨道表，backlog F-23，v0.26）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-41（任务完成待验收，backlog F-23 ②，v0.27）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-42（在线改组织，backlog F-23 ③，v0.28）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.29（2026-11-28）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-38（回复里提到的报告作为文件发进线程，backlog E-13，v0.24）是提议，代码和这次修改放在同一个 PR 里，等工程师审查。D-39（浏览器走 Playwright MCP、`mcp_servers` 的 `tools` 白名单，backlog E-5，v0.25）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-40（App 桌面外壳的协议补充：对话的最后回复员工、协调岗位标记、星图轨道表，backlog F-23，v0.26）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-41（任务完成待验收，backlog F-23 ②，v0.27）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-42（在线改组织，backlog F-23 ③，v0.28）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-43（员工的任务进度和“要人看”的时间点，第一步主机按历史推算，backlog F-24，v0.29）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -939,7 +939,7 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 
 - 每台设备一档权限：`daily`（日常）或 `admin`（管理）。新配对的设备是 `daily`；D-30 之前存下、没有这一项的设备也按 `daily` 算。共用令牌（以及本机不设令牌时）等同 `admin`。
 - `/ws` 每个请求先看权限：`admin` 什么都能做；`daily` 只能用 `ws.rs` 里 `daily_allows` 列出的请求类型，其余回错误“这台设备是‘日常’权限…”。没列出的都算 `admin`，以后新加的请求类型也一样，要给日常设备用得明确加进去（默认拒绝）。
-- `daily` 能用的：`list_roles`、`list_agents`、`spend_today`、`list_threads`、`history`、`search`、`route`、`send`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`、`list_reports`、`read_report`、`who_am_i`，外加两个只读的：`list_rules`（新对话默认要不要自动分派，看有没有路由规则）、`list_memory_off_threads`（对话页顶上显示这个对话进不进岗位记忆），以及星图上拖员工换轨道的 `list_orbit_pins`、`set_orbit_pins`（D-40）。改路由规则、规则草案、定时任务（看和立即运行）、记忆（看、改、抹掉、清空、开关对话记忆）、设备管理都只给 `admin`。
+- `daily` 能用的：`list_roles`、`list_agents`、`spend_today`、`list_threads`、`history`、`search`、`route`、`send`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`、`list_reports`、`read_report`、`who_am_i`，外加两个只读的：`list_rules`（新对话默认要不要自动分派，看有没有路由规则）、`list_memory_off_threads`（对话页顶上显示这个对话进不进岗位记忆），以及星图上拖员工换轨道的 `list_orbit_pins`、`set_orbit_pins`（D-40）和只读的进度表 `list_progress`（D-43）。改路由规则、规则草案、定时任务（看和立即运行）、记忆（看、改、抹掉、清空、开关对话记忆）、设备管理都只给 `admin`。
 - 新请求 `set_device_scope {device_id, scope}`，要 `admin`，回改完后的 `DeviceInfo[]`。`DeviceInfo` 和 `who_am_i` 的回复多了 `scope`；`who_am_i` 原来的 `can_manage_devices` 去掉。
 - 每个请求按设备现在的名字和权限算：改名、改权限后，连着的连接下一个请求就生效，不用重连；吊销到断开之间的请求一律拒绝。
 - 管理设备可以改所有设备的权限，包括自己；共用令牌一直是 `admin`，不会把自己锁在外面。
@@ -1084,6 +1084,23 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 
 ---
 
+### D-43 员工的任务进度和“要人看”的时间点 · 提议（backlog F-24）
+
+背景：维护者 2026-11-27 提出，星图上每位员工头顶显示任务进度，并估出什么时候要人来看。当天定：分两步，第一步主机按历史推算，不改提示词、不多调模型；第二步员工自报计划，等第一步有了真实数据再定。算法见 [progress-design.md](progress-design.md)。
+
+- **每一轮的记录**：新表 `turns`（迁移 0003）：`agent_id`、`role_id`、`thread_id`、`started_ms`、`finished_ms`、`steps`、`ok`、`cost_usd`、`error`（截到 300 字）。每一轮结束（成功或失败）记一行，在发 `turn_finished`、`turn_failed` 之前写好。不进事件日志，不自动清理。`approvals` 加一个按卡片对话找的表达式索引。
+- **内存里的实时状态**：员工正在跑的一轮（对话、开始时刻、第几步，外部引擎看不到步数）和收件箱里排着的对话。只在内存里，重启后从空的开始。
+- **估算**：一步是一次模型调用。基线按岗位：最近 30 天做完的任务（最多 50 个，至少 3 个才估）和最近 200 轮（至少 5 轮才估时间），60 秒内复用。已经走了 `s` 步时，只看历史上比 `s` 长的样本估还剩几步（中位数和 80 分位），进度 = `s ÷ (s + 还剩)`，没做完时最多 0.95；时间 = 还剩几步 × 每步用时（各轮“用时 ÷ 步数”的中位数）。同一位员工的事按“正在跑的、收件箱里排着的”顺序往后排。等同事的任务 = 子任务里最晚的做完 + 一轮的中位用时。在等人、受阻、停着的不估时间。样本不够的字段为空，`basis` 写明为什么。
+- **`list_progress`**：回复 `ProgressBoard { now_ms, agents: AgentProgress[], attention: AttentionPoint[] }`。
+  - `AgentProgress { agent_id, phase, headline: Estimate | null, tasks: Estimate[] }`，`phase` 是 `idle`、`queued`、`working`、`waiting_human`、`waiting_colleague`、`blocked`、`stalled`、`failed` 之一，按员工 id 排。
+  - `Estimate { scope: task | turn, thread_id, task_id, title, phase, started_ms, steps_done, steps_expected, fraction, eta_ms, eta_late_ms, samples, basis }`。
+  - `AttentionPoint { kind, agent_id, role_id, task_id, thread_id, at_ms, late_ms, likelihood, text }`，`kind` 是 `question`、`review`、`blocked`、`failed`、`stalled`、`unassigned`、`overdue`、`due_risk`、`due`、`likely_question`、`result`、`reply`、`step_limit`、`budget` 之一，各自的条件见 progress-design.md 2.5。已经发生的 `at_ms` 是发生的时刻、`likelihood` 是 1；按速度外推的 `likelihood` 为空；预测的只列 24 小时以内的，可能性低于 0.2 的不列。`text` 不含时刻，由客户端按本地时区显示。清单按 `at_ms` 排，同一时刻可能性大的在前。
+  - 权限：给 `daily`（只读）。
+  - 和 D-41 一起：等验收（`pending_approval`）的任务算 `waiting_human`，`fraction` 是 1，不估时间；验收卡片（`task_completion`）列成 `review`；做完要验收的任务（`needs_approval`）不论谁派的，预计交回时都列 `result`。
+- 不加推送事件：客户端收到 `turn_started`、`turn_finished`、`message`、`task_changed`、`approval_changed` 时防抖重拉，两次之间按 `now_ms` 和 `eta_ms` 自己往前推。
+- 基准 `ip bench progress`：估一张 500 位员工、2000 个任务的表（中位数目标 10 毫秒），以及从存储取数据再估（50 位员工、200 个任务、2 万轮历史，p95 目标 30 毫秒；第一次现算基线目标 200 毫秒），接入 CI。每轮多写的一行算在 `ip bench agents` 里。
+- 测试：存储（记录、按对话汇总、按岗位和员工取、费用、做完的任务、提问卡片的时刻）；估算（条件余量、样本、没有历史不估、进度不到 1、排队、委派和汇总回复、受阻、在问你、停着要过 2 分钟才列、等你分配、失败不和受阻重复、截止、步数上限、预算、24 小时以外不列、等验收不算停着）；运行时（真跑一轮后记下步数，进度表里任务停着）；`/ws`（日常设备能用、跑完一轮后记在主机上），都在假模型、假主机上。
+
 ## 10. 浏览器
 
 ### D-39 浏览器走 Playwright MCP，`mcp_servers` 加 `tools` 白名单 · 提议（backlog E-5）
@@ -1129,3 +1146,4 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 | 2026-11-27 | v0.26 | 新增 D-40（提议，backlog F-23）：App 桌面外壳的第一批协议补充：`ThreadSummary.last_agent_id`（`threads` 表加列，迁移 0002）、`Role.coordinator`（最多一个）、星图轨道表 `list_orbit_pins`、`set_orbit_pins` 和事件 `orbit_pins_changed`；D-31 的日常权限加这两个请求。只在假模型、假主机上测过 |
 | 2026-11-27 | v0.27 | 新增 D-41（提议，backlog F-23 ②）：任务完成待验收。`TaskStatus` 加 `pending_approval`，`Task` 加 `needs_approval`，`Role` 加 `approve_completion`，`ApprovalSubject` 加 `task_completion`；`create_task` 加 `needs_approval`，`resolve_approval` 加 `note`。只在假模型、假主机上测过 |
 | 2026-11-27 | v0.28 | 新增 D-42（提议，backlog F-23 ③）：在线改组织。`create_role`、`create_agent`、`update_agent`、`delete_agent`（管理权限），事件 `org_changed`；改动存设置表 `org.console`，合并到 ip.yaml 后整份校验；`Agent` 和 ip.yaml 的员工加 `celestial_style`。只在假模型、假主机上测过 |
+| 2026-11-28 | v0.29 | 新增 D-43（提议，backlog F-24）：员工的任务进度和“要人看”的时间点，第一步主机按历史推算：`turns` 表（迁移 0003）、内存里的实时状态、`list_progress`（日常权限）和 `ProgressBoard` 等类型、`ip bench progress`。D-31 的日常权限加 `list_progress`。只在假模型、假主机上测过 |

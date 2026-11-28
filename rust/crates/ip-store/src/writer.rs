@@ -14,7 +14,7 @@ use tokio_postgres::error::SqlState;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, Row, Statement, Transaction};
 
-use crate::{Binding, Delivery, EngineSession, Result, Seq, StoreError, schema, segment};
+use crate::{Binding, Delivery, EngineSession, Result, Seq, StoreError, TURN_ERROR_CHARS, TurnRecord, schema, segment};
 
 /// 单个事务最多合并的请求数，避免一个事务持锁太久。
 const MAX_BATCH: usize = 512;
@@ -45,6 +45,10 @@ pub enum Op {
     },
     PutEngineSession {
         session: EngineSession,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    RecordTurn {
+        turn: TurnRecord,
         reply: oneshot::Sender<Result<()>>,
     },
     PutThreadMemory {
@@ -288,6 +292,9 @@ async fn run_batch(
                 step!(transaction, cache, finishes, reply, |c| put_engine_session(
                     &c, &session
                 ))
+            }
+            Op::RecordTurn { turn, reply } => {
+                step!(transaction, cache, finishes, reply, |c| record_turn(&c, &turn))
             }
             Op::PutThreadMemory { memory, reply } => {
                 step!(transaction, cache, finishes, reply, |c| put_thread_memory(&c, &memory))
@@ -647,6 +654,30 @@ async fn put_delivery(c: &Tx<'_, '_>, d: &Delivery) -> Result<()> {
 }
 
 /// 引擎会话是运行状态，不写事件：每轮都会更新，写进事件日志只会让日志膨胀。
+async fn record_turn(c: &Tx<'_, '_>, t: &TurnRecord) -> Result<()> {
+    let error = t
+        .error
+        .as_deref()
+        .map(|e| clean_text(e).chars().take(TURN_ERROR_CHARS).collect::<String>());
+    c.execute(
+        "INSERT INTO turns (agent_id, role_id, thread_id, started_ms, finished_ms, steps, ok, cost_usd, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        &[
+            &clean_text(t.agent_id.as_str()),
+            &clean_text(t.role_id.as_str()),
+            &clean_text(t.thread_id.as_str()),
+            &t.started_ms,
+            &t.finished_ms,
+            &i64::from(t.steps),
+            &t.ok,
+            &(if t.cost_usd.is_finite() { t.cost_usd } else { 0.0 }),
+            &error,
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
 async fn put_engine_session(c: &Tx<'_, '_>, s: &EngineSession) -> Result<()> {
     c.execute(
         "INSERT INTO engine_sessions

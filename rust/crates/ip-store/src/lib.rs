@@ -237,6 +237,42 @@ pub struct SessionUsage {
     pub completion_tokens: u32,
 }
 
+/// 一轮工作的记录（`turns` 表，`docs/ip/progress-design.md` 2.1）。成功和失败的轮次都记。
+#[derive(Clone, Debug, PartialEq)]
+pub struct TurnRecord {
+    pub agent_id: AgentId,
+    pub role_id: RoleId,
+    pub thread_id: ThreadId,
+    /// 从开始处理到结束，不含在收件箱里排队的时间。
+    pub started_ms: i64,
+    pub finished_ms: i64,
+    /// 调了几次模型；外部引擎按引擎报的步数。
+    pub steps: u32,
+    pub ok: bool,
+    pub cost_usd: f64,
+    /// 失败的原因，最多 [`TURN_ERROR_CHARS`] 个字。
+    pub error: Option<String>,
+}
+
+impl TurnRecord {
+    pub fn active_ms(&self) -> i64 {
+        (self.finished_ms - self.started_ms).max(0)
+    }
+}
+
+/// 失败原因最多记这么多字。
+pub const TURN_ERROR_CHARS: usize = 300;
+
+/// 一个对话里已经结束的各轮加起来。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TurnTotals {
+    pub turns: u32,
+    pub steps: u32,
+    /// 各轮用时之和。
+    pub active_ms: i64,
+    pub last_finished_ms: i64,
+}
+
 /// 连哪个库、用哪个 schema。
 #[derive(Clone)]
 pub struct DbConfig {
@@ -689,6 +725,135 @@ impl Store {
             .await
     }
 
+    /// 记一轮工作（`docs/ip/progress-design.md` 2.1）。
+    pub async fn record_turn(&self, turn: TurnRecord) -> Result<()> {
+        let (reply, receive) = oneshot::channel();
+        self.inner.writer.send(writer::Op::RecordTurn { turn, reply })?;
+        receive.await.map_err(|_| StoreError::Closed)?
+    }
+
+    /// 这些对话里已经结束的各轮加起来；还没有记录的对话不在结果里。
+    pub async fn turn_totals(&self, threads: &[ThreadId]) -> Result<std::collections::HashMap<ThreadId, TurnTotals>> {
+        if threads.is_empty() {
+            return Ok(Default::default());
+        }
+        let ids: Vec<&str> = threads.iter().map(ThreadId::as_str).collect();
+        let rows = self
+            .query(
+                "SELECT thread_id, COUNT(*), COALESCE(SUM(steps), 0)::bigint,
+                        COALESCE(SUM(finished_ms - started_ms), 0)::bigint, MAX(finished_ms)
+                 FROM turns WHERE thread_id = ANY($1) GROUP BY thread_id",
+                &[&ids],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let totals = TurnTotals {
+                    turns: to_u32(row.get(1)),
+                    steps: to_u32(row.get(2)),
+                    active_ms: row.get::<_, i64>(3).max(0),
+                    last_finished_ms: row.get(4),
+                };
+                (ThreadId::from(row.get::<_, String>(0)), totals)
+            })
+            .collect())
+    }
+
+    /// 这些对话里的全部轮次，按对话、开始时间排。
+    pub async fn turns_in_threads(&self, threads: &[ThreadId]) -> Result<Vec<TurnRecord>> {
+        if threads.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<&str> = threads.iter().map(ThreadId::as_str).collect();
+        let rows = self
+            .query(
+                &format!(
+                    "SELECT {TURN_COLUMNS} FROM turns WHERE thread_id = ANY($1) ORDER BY thread_id, started_ms, id"
+                ),
+                &[&ids],
+            )
+            .await?;
+        Ok(rows.iter().map(turn_row).collect())
+    }
+
+    /// 这个岗位最近结束的轮次，新的在前。`ok_only` 时只要成功的。
+    pub async fn recent_turns(&self, role: &RoleId, ok_only: bool, limit: usize) -> Result<Vec<TurnRecord>> {
+        let rows = self
+            .query(
+                &format!(
+                    "SELECT {TURN_COLUMNS} FROM turns WHERE role_id = $1 AND (ok OR NOT $2)
+                     ORDER BY finished_ms DESC, id DESC LIMIT $3"
+                ),
+                &[&role.as_str(), &ok_only, &limit_param(limit)],
+            )
+            .await?;
+        Ok(rows.iter().map(turn_row).collect())
+    }
+
+    /// 这些员工各自最近结束的一轮；还没跑过的员工不在结果里。
+    pub async fn last_turns(&self, agents: &[AgentId]) -> Result<Vec<TurnRecord>> {
+        if agents.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<&str> = agents.iter().map(AgentId::as_str).collect();
+        let rows = self
+            .query(
+                &format!(
+                    "SELECT t.* FROM unnest($1::text[]) AS a(id),
+                     LATERAL (SELECT {TURN_COLUMNS} FROM turns WHERE agent_id = a.id
+                              ORDER BY finished_ms DESC, id DESC LIMIT 1) AS t"
+                ),
+                &[&ids],
+            )
+            .await?;
+        Ok(rows.iter().map(turn_row).collect())
+    }
+
+    /// 从 `since_ms` 起结束的轮次，按岗位加起来的费用（美元）。
+    pub async fn turn_cost_since(&self, since_ms: i64) -> Result<std::collections::HashMap<RoleId, f64>> {
+        let rows = self
+            .query(
+                "SELECT role_id, SUM(cost_usd) FROM turns WHERE finished_ms >= $1 GROUP BY role_id",
+                &[&since_ms],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| (RoleId::from(row.get::<_, String>(0)), row.get::<_, f64>(1)))
+            .collect())
+    }
+
+    /// 这个岗位从 `since_ms` 起做完的任务，最近做完的在前。
+    pub async fn done_tasks(&self, role: &RoleId, since_ms: i64, limit: usize) -> Result<Vec<Task>> {
+        self.json_rows(
+            "SELECT json::text FROM tasks WHERE status = 'done' AND updated_at_ms >= $2 AND json->>'role' = $1
+             ORDER BY updated_at_ms DESC LIMIT $3",
+            &[&role.as_str(), &since_ms, &limit_param(limit)],
+        )
+        .await
+    }
+
+    /// 这些对话里员工提问卡片（`agent_question`）发出的时刻，不论选没选；按对话、时间排。
+    pub async fn question_times(&self, threads: &[ThreadId]) -> Result<Vec<(ThreadId, i64)>> {
+        if threads.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<&str> = threads.iter().map(ThreadId::as_str).collect();
+        let rows = self
+            .query(
+                "SELECT json->'subject'->>'thread_id', created_at_ms FROM approvals
+                 WHERE json->'subject'->>'thread_id' = ANY($1) AND json->'subject'->>'kind' = 'agent_question'
+                 ORDER BY 1, 2",
+                &[&ids],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| (ThreadId::from(row.get::<_, String>(0)), row.get::<_, i64>(1)))
+            .collect())
+    }
+
     /// 写入或更新某员工在某对话里的引擎会话。
     pub async fn put_engine_session(&self, session: EngineSession) -> Result<()> {
         let (reply, receive) = oneshot::channel();
@@ -1053,6 +1218,22 @@ impl Store {
 
 #[cfg(test)]
 mod tests;
+
+const TURN_COLUMNS: &str = "agent_id, role_id, thread_id, started_ms, finished_ms, steps, ok, cost_usd, error";
+
+fn turn_row(row: &Row) -> TurnRecord {
+    TurnRecord {
+        agent_id: AgentId::from(row.get::<_, String>(0)),
+        role_id: RoleId::from(row.get::<_, String>(1)),
+        thread_id: ThreadId::from(row.get::<_, String>(2)),
+        started_ms: row.get(3),
+        finished_ms: row.get(4),
+        steps: to_u32(row.get(5)),
+        ok: row.get(6),
+        cost_usd: row.get(7),
+        error: row.get(8),
+    }
+}
 
 fn limit_param(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)

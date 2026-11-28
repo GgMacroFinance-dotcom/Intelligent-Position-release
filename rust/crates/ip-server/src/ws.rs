@@ -92,6 +92,8 @@ fn daily_allows(request: &Request) -> bool {
         Request::ListRoles
             | Request::ListAgents
             | Request::SpendToday
+            // 只读：星图头顶的进度条和“接下来要你看的”（D-43）
+            | Request::ListProgress
             | Request::ListThreads { .. }
             | Request::History { .. }
             | Request::Search { .. }
@@ -333,6 +335,9 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
         Request::ListRoles => to_json(serde_json::to_value(&app.org().roles)),
         Request::ListAgents => to_json(serde_json::to_value(rt.agents())),
         Request::SpendToday => to_json(serde_json::to_value(rt.spend_today().await.map_err(|e| e.to_string())?)),
+        Request::ListProgress => to_json(serde_json::to_value(
+            rt.progress(ip_core::now_ms()).await.map_err(|e| e.to_string())?,
+        )),
         Request::ListThreads { limit: l } => {
             let threads = rt
                 .store()

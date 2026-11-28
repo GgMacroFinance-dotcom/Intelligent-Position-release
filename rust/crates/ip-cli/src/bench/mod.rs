@@ -12,6 +12,7 @@ use clap::{Args, ValueEnum};
 mod agents;
 mod events;
 mod notify;
+mod progress;
 mod relay;
 mod store;
 mod team;
@@ -56,6 +57,8 @@ enum Which {
     Relay,
     /// 每轮开头经 MCP 取一次团队上下文包，I.P. 这一侧的耗时。
     Team,
+    /// 估一张员工进度表（`list_progress`）的耗时：纯估算，和从存储取数据再估。
+    Progress,
 }
 
 #[derive(Serialize)]
@@ -99,6 +102,7 @@ pub fn run(args: BenchArgs) -> anyhow::Result<()> {
         Which::Notify => notify::run(args.check),
         Which::Relay => relay::run(args.check),
         Which::Team => team::run(args.check),
+        Which::Progress => progress::run(args.check),
     }
 }
 

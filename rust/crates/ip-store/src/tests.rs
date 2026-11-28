@@ -808,3 +808,127 @@ async fn forgotten_thread_memories_keep_their_row_but_lose_their_content() {
     assert!(listed(&macro_role).await.is_empty());
     assert_eq!(listed(&ops).await.len(), 1);
 }
+
+fn turn(agent: &str, role: &str, thread: &str, started: i64, finished: i64, steps: u32, ok: bool) -> TurnRecord {
+    TurnRecord {
+        agent_id: agent.into(),
+        role_id: role.into(),
+        thread_id: thread.into(),
+        started_ms: started,
+        finished_ms: finished,
+        steps,
+        ok,
+        cost_usd: 0.01 * f64::from(steps),
+        error: (!ok).then(|| format!("模型报错{}", "很长".repeat(400))),
+    }
+}
+
+#[tokio::test]
+async fn turns_record_and_summarize() {
+    use ip_core::{Approval, ApprovalOption, ApprovalState, ApprovalSubject, TaskStatus::*};
+    let store = crate::testing::store().await;
+    let before = store.last_seq().await.unwrap();
+    store
+        .record_turn(turn("r1", "macro", "t1", 100, 200, 3, true))
+        .await
+        .unwrap();
+    store
+        .record_turn(turn("r1", "macro", "t1", 300, 450, 4, false))
+        .await
+        .unwrap();
+    store
+        .record_turn(turn("r2", "macro", "t2", 120, 180, 2, true))
+        .await
+        .unwrap();
+    store
+        .record_turn(turn("o1", "ops", "t3", 500, 900, 9, true))
+        .await
+        .unwrap();
+    assert_eq!(store.last_seq().await.unwrap(), before, "轮次不进事件日志");
+
+    let totals = store.turn_totals(&["t1".into(), "t9".into()]).await.unwrap();
+    assert_eq!(totals.len(), 1, "没有记录的对话不在结果里");
+    assert_eq!(
+        totals[&ThreadId::from("t1")],
+        TurnTotals {
+            turns: 2,
+            steps: 7,
+            active_ms: 250,
+            last_finished_ms: 450
+        }
+    );
+    assert!(store.turn_totals(&[]).await.unwrap().is_empty());
+
+    let in_threads = store.turns_in_threads(&["t1".into()]).await.unwrap();
+    assert_eq!(in_threads.iter().map(|t| t.started_ms).collect::<Vec<_>>(), [100, 300]);
+    let failed = &in_threads[1];
+    assert!(!failed.ok);
+    assert_eq!(
+        failed.error.as_ref().unwrap().chars().count(),
+        TURN_ERROR_CHARS,
+        "失败原因截短"
+    );
+
+    let ok_only = store.recent_turns(&"macro".into(), true, 10).await.unwrap();
+    assert_eq!(ok_only.iter().map(|t| t.finished_ms).collect::<Vec<_>>(), [200, 180]);
+    let all = store.recent_turns(&"macro".into(), false, 1).await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].finished_ms, 450);
+
+    let last = store
+        .last_turns(&["r1".into(), "o1".into(), "nobody".into()])
+        .await
+        .unwrap();
+    let mut last: Vec<_> = last.iter().map(|t| (t.agent_id.to_string(), t.finished_ms)).collect();
+    last.sort();
+    assert_eq!(last, [("o1".to_string(), 900), ("r1".to_string(), 450)]);
+
+    let cost = store.turn_cost_since(210).await.unwrap();
+    assert!(
+        (cost[&RoleId::from("macro")] - 0.04).abs() < 1e-9,
+        "只算 210 之后结束的"
+    );
+    assert!((cost[&RoleId::from("ops")] - 0.09).abs() < 1e-9);
+
+    // 做完的任务按岗位找。
+    let mut done = task("d1", Done, 50);
+    done.role = Some("macro".into());
+    store.put_task(done).await.unwrap();
+    let mut old = task("d0", Done, 5);
+    old.role = Some("macro".into());
+    store.put_task(old).await.unwrap();
+    let mut open = task("d2", InProgress, 60);
+    open.role = Some("macro".into());
+    store.put_task(open).await.unwrap();
+    let found = store.done_tasks(&"macro".into(), 10, 10).await.unwrap();
+    assert_eq!(found.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["d1"]);
+    assert!(store.done_tasks(&"ops".into(), 0, 10).await.unwrap().is_empty());
+
+    // 员工提问卡片按对话找，别的卡片不算。
+    let card = |id: &str, subject: ApprovalSubject, at: i64| Approval {
+        id: id.into(),
+        question: "要哪个口径？".into(),
+        options: vec![ApprovalOption {
+            label: "同比".into(),
+            consequence: "按同比算".into(),
+        }],
+        recommended: None,
+        reason: String::new(),
+        subject,
+        state: ApprovalState::Pending,
+        created_at_ms: at,
+    };
+    let asked = |thread: &str| ApprovalSubject::AgentQuestion {
+        agent_id: "r1".into(),
+        thread_id: thread.into(),
+    };
+    store.put_approval(card("q2", asked("t1"), 320)).await.unwrap();
+    store.put_approval(card("q1", asked("t1"), 150)).await.unwrap();
+    store.put_approval(card("q3", asked("t2"), 160)).await.unwrap();
+    store
+        .put_approval(card("q4", ApprovalSubject::Question, 170))
+        .await
+        .unwrap();
+    let times = store.question_times(&["t1".into(), "t3".into()]).await.unwrap();
+    assert_eq!(times, [(ThreadId::from("t1"), 150), (ThreadId::from("t1"), 320)]);
+}

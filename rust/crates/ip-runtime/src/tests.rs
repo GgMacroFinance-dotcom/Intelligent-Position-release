@@ -2629,6 +2629,62 @@ fn distilling_input_is_the_roles_own_view_and_output_parsing_is_forgiving() {
     assert_eq!(parse("标题：只有标题"), Some((None, "标题：只有标题".into())));
 }
 
+/// 每一轮结束记进 `turns` 表，进度表从里面算（`docs/ip/progress-design.md`）。
+#[tokio::test]
+async fn turns_are_recorded_and_feed_the_progress_board() {
+    use crate::progress::{AttentionKind, ProgressPhase, STALL_GRACE_MS};
+    let call = ToolCall {
+        id: "c1".into(),
+        name: "list_tasks".into(),
+        arguments: "{}".into(),
+    };
+    let f = fixture(
+        vec![ScriptedTurn::ToolCalls(vec![call]), ScriptedTurn::Text("看过了".into())],
+        memory_off(),
+    )
+    .await;
+    f.spawn("a1", false);
+    let mut rx = f.runtime.subscribe();
+    let task = f
+        .runtime
+        .create_task(
+            crate::NewTask {
+                title: "整理本周的 CPI".into(),
+                assignee: Some("a1".into()),
+                ..Default::default()
+            },
+            human(),
+        )
+        .await
+        .unwrap();
+    until_agent_turn_end(&mut rx, "a1").await;
+
+    let turns = f
+        .runtime
+        .store()
+        .recent_turns(&RoleId::from("researcher"), false, 10)
+        .await
+        .unwrap();
+    assert_eq!(turns.len(), 1);
+    let t = &turns[0];
+    assert_eq!((t.agent_id.as_str(), t.steps, t.ok), ("a1", 2, true));
+    assert_eq!(Some(&t.thread_id), task.thread_id.as_ref());
+    assert!(t.finished_ms >= t.started_ms);
+
+    // 员工回复完没把任务设成做完：任务停着。做完的任务还不够，不估进度。
+    let now = ip_core::now_ms();
+    let board = f.runtime.progress(now).await.unwrap();
+    let a1 = &board.agents[0];
+    assert_eq!(a1.phase, ProgressPhase::Stalled);
+    let head = a1.headline.as_ref().unwrap();
+    assert_eq!((head.steps_done, head.fraction), (2, None));
+    assert!(board.attention.is_empty(), "刚停下的不算：{:?}", board.attention);
+    let later = f.runtime.progress(now + STALL_GRACE_MS + 1).await.unwrap();
+    assert_eq!(later.attention.len(), 1);
+    assert_eq!(later.attention[0].kind, AttentionKind::Stalled);
+    assert_eq!(later.attention[0].task_id.as_ref(), Some(&task.id));
+}
+
 /// 要验收的任务（D-41）：员工交回 done 先变成待验收、发验收卡片，派活的协调员先不叫回；
 /// 打回时意见写进负责人的对话并叫他接着改；再交回、通过后才结项，回报派活的对话。
 #[tokio::test]
