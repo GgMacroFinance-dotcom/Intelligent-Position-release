@@ -126,6 +126,11 @@ pub enum RuntimeEvent {
     OrbitPinsChanged {
         pins: Vec<OrbitPin>,
     },
+    /// 组织在线改了：新建了岗位，新建、改了或删了员工（D-42）。带上改完后的全部岗位和员工，各端直接换上。
+    OrgChanged {
+        roles: Vec<Role>,
+        agents: Vec<Agent>,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -138,6 +143,8 @@ pub enum RuntimeError {
     RoleMismatch(AgentId, String, String),
     #[error("数字员工 {0} 已停止")]
     AgentStopped(AgentId),
+    #[error("数字员工 {0} 正在处理工作，等这一轮做完再改")]
+    AgentBusy(AgentId),
     #[error("{0}")]
     Invalid(String),
     #[error(transparent)]
@@ -427,6 +434,48 @@ impl Runtime {
             },
         );
         Ok(())
+    }
+
+    /// 停掉一个数字员工并从组织里拿掉（在线改组织，`docs/ip/m2-spec.md` D-42）。
+    /// 他正在处理或还有没处理的工作时拒绝（`AgentBusy`），不打断进行中的一轮；空闲时关掉收件箱、等任务退出。
+    /// 他的对话、任务和记忆都留在存储里。
+    pub async fn remove_agent(&self, id: &AgentId) -> Result<Agent, RuntimeError> {
+        let entry = {
+            let mut agents = self.agents.write().unwrap_or_else(|p| p.into_inner());
+            let Some(entry) = agents.get(id) else {
+                return Err(RuntimeError::UnknownAgent(id.clone()));
+            };
+            if entry.pending.load(Ordering::Relaxed) > 0 {
+                return Err(RuntimeError::AgentBusy(id.clone()));
+            }
+            agents.remove(id).expect("刚查到")
+        };
+        {
+            let mut dir = self.shared.directory.write().unwrap_or_else(|p| p.into_inner());
+            dir.agents.remove(id);
+        }
+        let AgentEntry { agent, inbox, task, .. } = entry;
+        // 收件箱的发送端只有这一个（派活时临时克隆的发完就丢），关掉后员工任务读完就退出。
+        drop(inbox);
+        let _ = task.await;
+        Ok(agent)
+    }
+
+    /// 改员工在星图上的天体形态。不影响他干活，忙的时候也能改。
+    pub fn set_agent_style(&self, id: &AgentId, style: Option<String>) -> Result<Agent, RuntimeError> {
+        let agent = {
+            let mut agents = self.agents.write().unwrap_or_else(|p| p.into_inner());
+            let entry = agents
+                .get_mut(id)
+                .ok_or_else(|| RuntimeError::UnknownAgent(id.clone()))?;
+            entry.agent.celestial_style = style;
+            entry.agent.clone()
+        };
+        let mut dir = self.shared.directory.write().unwrap_or_else(|p| p.into_inner());
+        if let Some(a) = dir.agents.get_mut(id) {
+            a.celestial_style = agent.celestial_style.clone();
+        }
+        Ok(agent)
     }
 
     /// 当前所有数字员工。

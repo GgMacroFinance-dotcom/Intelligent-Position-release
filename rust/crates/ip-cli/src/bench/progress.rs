@@ -1,4 +1,4 @@
-//! 进度表基准（`docs/ip/progress-design.md`，backlog F-24，`docs/ip/m2-spec.md` D-42）：App 每收到员工的一步、
+//! 进度表基准（`docs/ip/progress-design.md`，backlog F-24，`docs/ip/m2-spec.md` D-43）：App 每收到员工的一步、
 //! 一轮结束、任务或卡片变了就防抖重拉一次 `list_progress`，几台设备同时开着时每秒可能有好几次，算在热路径上。
 //!
 //! 量两样：
@@ -164,6 +164,7 @@ fn baseline(seed: usize) -> Baseline {
         id: "x".into(),
         role: "r".into(),
         name: "x".into(),
+        celestial_style: None,
     };
     let turns: Vec<TurnRecord> = (0..200)
         .map(|i| turn(&agent, "old", i as i64 * 100_000, 1 + (i % 9) as u32))
@@ -181,6 +182,7 @@ async fn measure() -> anyhow::Result<Report> {
             id: format!("agent{i}").into(),
             role: format!("role{}", i % ROLES).into(),
             name: format!("员工{i}"),
+            celestial_style: None,
         })
         .collect();
     let statuses = [
@@ -286,6 +288,7 @@ async fn measure() -> anyhow::Result<Report> {
             id: format!("agent{i}").into(),
             role: format!("role{}", i % DB_ROLES).into(),
             name: format!("员工{i}"),
+            celestial_style: None,
         })
         .collect();
     for a in &db_agents {

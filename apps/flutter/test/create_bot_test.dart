@@ -9,6 +9,7 @@ import 'package:ip_app/src/ui/shell/local_bot.dart';
 import 'harness.dart';
 
 void main() {
+  hostTests();
   test('可选星球严格包含 9 种非太阳形态，排除太阳，并支持生成合法唯一 ID 与预期协议载荷', () {
     expect(selectableBotCelestials.length, 9);
     expect(selectableBotCelestials.any((c) => c.kind == CelestialKind.sun), isFalse);
@@ -167,6 +168,99 @@ void main() {
     expect(find.byType(AgentPanel), findsNothing);
     expect(find.byKey(ValueKey('planet-${created.agent.id}')), findsNothing);
 
+    await h.stop(tester);
+  });
+}
+
+/// 管理权限的设备连着主机（m2-spec D-42）。
+Harness _admin() {
+  final h = Harness();
+  h.host.handlers['who_am_i'] = (_) => {
+    'device': {'id': 'd1', 'name': '张三的电脑', 'scope': 'admin', 'paired_at_ms': 1, 'last_seen_ms': 1, 'online': true},
+    'scope': 'admin',
+  };
+  h.host.handlers['create_role'] = (req) => req['role'];
+  h.host.handlers['create_agent'] = (req) => {
+    'id': req['agent_id'],
+    'role': req['role'],
+    'name': req['name'],
+    'celestial_style': ?req['celestial_style'],
+  };
+  return h;
+}
+
+void hostTests() {
+  testWidgets('管理权限连着主机时新建 Bot 建在主机上：新岗位先 create_role 再 create_agent，形态存成 celestial_style', (tester) async {
+    final h = _admin();
+    await h.savePaired();
+    await h.start(tester);
+    expect(h.state.createsBotsOnHost, isTrue);
+    final created = await h.state.createBot(
+      CreateBotDraft(
+        name: 'Alpha Quant',
+        celestial: selectableCelestialById('saturn')!,
+        newRoleName: 'Quant',
+        newRoleDescription: '做量化回测',
+        modelDefault: 'fake/m',
+        budgetPerDayUsd: 2,
+      ),
+    );
+    expect(created.onHost, isTrue);
+    final role = h.host.requests.firstWhere((r) => r['type'] == 'create_role')['role'] as Map;
+    expect(role['id'], 'quant');
+    expect(role['description'], '做量化回测');
+    expect(role['model'], {'default': 'fake/m', 'escalate': null});
+    expect(role['budget_per_day_usd'], 2);
+    final agent = h.host.requests.firstWhere((r) => r['type'] == 'create_agent');
+    expect(agent, containsPair('agent_id', 'alpha-quant'));
+    expect(agent, containsPair('role', 'quant'));
+    expect(agent, containsPair('celestial_style', 'saturn'));
+    expect(h.state.isLocalBot('alpha-quant'), isFalse, reason: '建在主机上，不是本地演示');
+    expect(h.state.agents.map((a) => a.id), contains('alpha-quant'));
+    expect(h.state.celestialOverrides['alpha-quant']?.id, 'saturn', reason: '主机下发的形态进星图');
+
+    // 选已有岗位：只建员工。在线建的员工不能指定工作目录。
+    await h.state.createBot(
+      CreateBotDraft(name: '小宏二', celestial: selectableCelestialById('star')!, existingRoleId: 'macro'),
+    );
+    expect(h.host.requests.where((r) => r['type'] == 'create_role').length, 1);
+    expect(h.host.requests.last, containsPair('celestial_style', 'star'));
+    await expectLater(
+      h.state.createBot(CreateBotDraft(name: 'x', celestial: selectableCelestialById('mars')!, workspace: '/tmp/x')),
+      throwsA(isA<Object>().having((e) => '$e', 'message', contains('工作目录'))),
+    );
+
+    // 别的设备改了组织：整个换上。
+    h.host.event({
+      'type': 'org_changed',
+      'roles': [
+        {
+          'id': 'macro',
+          'name': '宏观研究',
+          'description': 'd',
+          'model': {'default': 'fake/m', 'escalate': null},
+          'budget_per_day_usd': null,
+        },
+      ],
+      'agents': [
+        {'id': 'macro-1', 'role': 'macro', 'name': '宏观研究员', 'celestial_style': 'jupiter'},
+      ],
+    });
+    await tester.pump();
+    expect(h.state.agents.map((a) => a.id), ['macro-1']);
+    expect(h.state.celestialOverrides['macro-1']?.id, 'jupiter');
+    await h.stop(tester);
+  });
+
+  testWidgets('主机太旧不认 create_role：这次和以后都只建在本机', (tester) async {
+    final h = _admin();
+    h.host.handlers['create_role'] = (_) => throw '请求格式错误：unknown variant `create_role`';
+    await h.savePaired();
+    await h.start(tester);
+    final created = await h.state.createBot(CreateBotDraft(name: '小研', celestial: selectableCelestialById('venus')!));
+    expect(created.onHost, isFalse);
+    expect(h.state.isLocalBot(created.agent.id), isTrue);
+    expect(h.state.createsBotsOnHost, isFalse);
     await h.stop(tester);
   });
 }

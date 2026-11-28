@@ -22,7 +22,7 @@ pub const MAX_LIST: usize = 500;
 pub const MAX_READ_BYTES: u64 = 1 << 20;
 
 pub async fn list(app: &App, agent: Option<&AgentId>, limit: usize) -> Result<Vec<ReportInfo>, String> {
-    let workspaces = app.workspaces.clone();
+    let workspaces = app.workspaces();
     let agent = agent.cloned();
     tokio::task::spawn_blocking(move || list_in(&workspaces, agent.as_ref(), limit))
         .await
@@ -30,7 +30,7 @@ pub async fn list(app: &App, agent: Option<&AgentId>, limit: usize) -> Result<Ve
 }
 
 pub async fn read(app: &App, agent: &AgentId, path: &str) -> Result<ReportText, String> {
-    let workspaces = app.workspaces.clone();
+    let workspaces = app.workspaces();
     let agent = agent.clone();
     let path = path.to_string();
     tokio::task::spawn_blocking(move || read_in(&workspaces, &agent, &path))

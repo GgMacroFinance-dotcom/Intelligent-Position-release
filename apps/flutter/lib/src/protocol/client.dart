@@ -459,6 +459,54 @@ extension IpRequests on IpClient {
   Future<List<ReportInfo>> listReports({String? agentId, int limit = 200}) =>
       _list(w.RequestListReports(agentId: agentId, limit: limit), ReportInfo.fromJson);
 
+  // ---------- 在线改组织（m2-spec D-42，要“管理”权限） ----------
+
+  /// 新建一个岗位，回复建好的岗位。
+  Future<Role> createRole({
+    required String id,
+    required String name,
+    required String description,
+    required String model,
+    String? escalateModel,
+    double? budgetPerDayUsd,
+  }) async => Role.fromJson(
+    await _object(
+      w.RequestCreateRole(
+        role: w.Role(
+          id: id,
+          name: name,
+          description: description,
+          model: w.ModelSlot(defaultValue: model, escalate: escalateModel),
+          budgetPerDayUsd: budgetPerDayUsd,
+        ),
+      ),
+    ),
+  );
+
+  /// 新建一位员工并启动他（用主机默认的工作目录），回复他的样子。
+  Future<Agent> createAgent({
+    required String agentId,
+    required String role,
+    required String name,
+    bool tools = true,
+    String? celestialStyle,
+  }) async => Agent.fromJson(
+    await _object(
+      w.RequestCreateAgent(agentId: agentId, role: role, name: name, tools: tools, celestialStyle: celestialStyle),
+    ),
+  );
+
+  /// 改一位员工；没给的不改，[celestialStyle] 给空字符串是清掉。
+  Future<Agent> updateAgent(String agentId, {String? name, String? role, bool? tools, String? celestialStyle}) async =>
+      Agent.fromJson(
+        await _object(
+          w.RequestUpdateAgent(agentId: agentId, name: name, role: role, tools: tools, celestialStyle: celestialStyle),
+        ),
+      );
+
+  /// 删掉一位员工。
+  Future<void> deleteAgent(String agentId) => rpc(w.RequestDeleteAgent(agentId: agentId));
+
   /// 星图上人固定了轨道的员工（m2-spec D-40）。
   Future<List<PinnedOrbit>> listOrbitPins() => _list(const w.RequestListOrbitPins(), PinnedOrbit.fromJson);
 

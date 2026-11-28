@@ -5,4 +5,9 @@ import type { RoleId } from "./RoleId";
 /**
  * 一个数字员工：某个岗位的一个实例。
  */
-export type Agent = { id: AgentId, role: RoleId, name: string, };
+export type Agent = { id: AgentId, role: RoleId, name: string, 
+/**
+ * App 星图上用哪种天体画他（`CELESTIAL_STYLES` 之一，`docs/ip/m2-spec.md` D-42）；没写时 App 按 id 自己挑。
+ * 太阳留给协调员，不能选。
+ */
+celestial_style?: string, };

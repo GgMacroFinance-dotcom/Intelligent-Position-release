@@ -1,7 +1,7 @@
 # M2 规格：Slack 渠道、MCP 服务端、Codex 引擎
 
 > **这是活文档。** 接口、表结构、行为有变化时，先改这里，再改代码，两者放在同一个 PR 里。
-> 当前版本：v0.28（2026-11-27）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-38（回复里提到的报告作为文件发进线程，backlog E-13，v0.24）是提议，代码和这次修改放在同一个 PR 里，等工程师审查。D-39（浏览器走 Playwright MCP、`mcp_servers` 的 `tools` 白名单，backlog E-5，v0.25）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-40（App 桌面外壳的协议补充：对话的最后回复员工、协调岗位标记、星图轨道表，backlog F-23，v0.26）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-41（任务完成待验收，backlog F-23 ②，v0.27）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-42（员工的任务进度和“要人看”的时间点，第一步主机按历史推算，backlog F-24，v0.28）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
+> 当前版本：v0.29（2026-11-28）。第 3 到 6 节（D-01 到 D-25）和 D-26、D-27 都已实现；D-28（确认前持久化、处理成功后才记去重，#69）是提议，代码和这次修改在同一个 PR 里，等工程师审查。M2-6（真实 Codex 验收）2026-11-14 通过。D-20、D-23 加了会话累计用量（修 backlog E-10 的重复记账，v0.20），是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-37（Socket Mode 经 HTTP 代理连接，backlog E-12，v0.22）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-35 的 iPhone 实现（F-21 之五，v0.23）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-38（回复里提到的报告作为文件发进线程，backlog E-13，v0.24）是提议，代码和这次修改放在同一个 PR 里，等工程师审查。D-39（浏览器走 Playwright MCP、`mcp_servers` 的 `tools` 白名单，backlog E-5，v0.25）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-40（App 桌面外壳的协议补充：对话的最后回复员工、协调岗位标记、星图轨道表，backlog F-23，v0.26）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-41（任务完成待验收，backlog F-23 ②，v0.27）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-42（在线改组织，backlog F-23 ③，v0.28）是提议，代码和这次修改在同一个 PR 里，等工程师审查。D-43（员工的任务进度和“要人看”的时间点，第一步主机按历史推算，backlog F-24，v0.29）是提议，代码和这次修改在同一个 PR 里，等工程师审查。剩下的是 Slack 真实验收（M2-5，按 `docs/ip/m2-acceptance.md` 第 4 节做），以及第 7 节的待定问题。
 
 ## 0. 怎么改这份文档
 
@@ -939,7 +939,7 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 
 - 每台设备一档权限：`daily`（日常）或 `admin`（管理）。新配对的设备是 `daily`；D-30 之前存下、没有这一项的设备也按 `daily` 算。共用令牌（以及本机不设令牌时）等同 `admin`。
 - `/ws` 每个请求先看权限：`admin` 什么都能做；`daily` 只能用 `ws.rs` 里 `daily_allows` 列出的请求类型，其余回错误“这台设备是‘日常’权限…”。没列出的都算 `admin`，以后新加的请求类型也一样，要给日常设备用得明确加进去（默认拒绝）。
-- `daily` 能用的：`list_roles`、`list_agents`、`spend_today`、`list_threads`、`history`、`search`、`route`、`send`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`、`list_reports`、`read_report`、`who_am_i`，外加两个只读的：`list_rules`（新对话默认要不要自动分派，看有没有路由规则）、`list_memory_off_threads`（对话页顶上显示这个对话进不进岗位记忆），以及星图上拖员工换轨道的 `list_orbit_pins`、`set_orbit_pins`（D-40）和只读的进度表 `list_progress`（D-42）。改路由规则、规则草案、定时任务（看和立即运行）、记忆（看、改、抹掉、清空、开关对话记忆）、设备管理都只给 `admin`。
+- `daily` 能用的：`list_roles`、`list_agents`、`spend_today`、`list_threads`、`history`、`search`、`route`、`send`、`list_tasks`、`create_task`、`update_task`、`list_approvals`、`resolve_approval`、`list_reports`、`read_report`、`who_am_i`，外加两个只读的：`list_rules`（新对话默认要不要自动分派，看有没有路由规则）、`list_memory_off_threads`（对话页顶上显示这个对话进不进岗位记忆），以及星图上拖员工换轨道的 `list_orbit_pins`、`set_orbit_pins`（D-40）和只读的进度表 `list_progress`（D-43）。改路由规则、规则草案、定时任务（看和立即运行）、记忆（看、改、抹掉、清空、开关对话记忆）、设备管理都只给 `admin`。
 - 新请求 `set_device_scope {device_id, scope}`，要 `admin`，回改完后的 `DeviceInfo[]`。`DeviceInfo` 和 `who_am_i` 的回复多了 `scope`；`who_am_i` 原来的 `can_manage_devices` 去掉。
 - 每个请求按设备现在的名字和权限算：改名、改权限后，连着的连接下一个请求就生效，不用重连；吊销到断开之间的请求一律拒绝。
 - 管理设备可以改所有设备的权限，包括自己；共用令牌一直是 `admin`，不会把自己锁在外面。
@@ -1057,9 +1057,34 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 - 不加 `ip bench`：交回和验收由人和员工的动作触发，不在热路径上。
 - 测试：运行时（岗位配置打开验收、交回变待验收并发卡、派活人不被叫回、等验收时不能改、不能直接设待验收、打回带意见并叫回负责人、再交再通过后回报派活人、人直接设 done 不发卡）；通知（验收卡片的标题和对话）；`/ws`（建任务勾上、交回推卡片、等验收时取消被拒、打回带 `note`、任务页改 done 等于选通过、通过后解除轨道固定）；App（解析卡片的员工、对话、任务，和待验收任务去重；点“打回修改”先弹框填要改什么，取消不打回，填了作为 `note` 发出，演示项不弹；任务页显示待验收、选已完成发 `update_task`；新建任务勾“做完要我验收”）。都在假模型、假主机上。
 
+### D-42 在线改组织 · 提议（backlog F-23 ③）
+
+背景：App 桌面外壳的后端适配清单第 3 项。右下角“+ 新建 Bot”原来只在 App 本地闭环，主机上的岗位和员工只能改 ip.yaml 重启。维护者 2026-11-27 定：在线改动存数据库，启动时合并到 ip.yaml 的组织上（和路由规则一样），不写回 ip.yaml。
+
+- **新请求**（都要“管理”权限，D-31 不变：日常设备一律拒绝）：
+  - `create_role { role }`：字段和 ip.yaml 的岗位一样。回复建好的 `Role`。岗位 id 只能有字母、数字、`-`、`_`，不能和已有的重。
+  - `create_agent { agent_id, role, name, tools?, celestial_style? }`：新建并启动一位员工，`tools` 省略时是 true。回复他的 `Agent`。
+  - `update_agent { agent_id, name?, role?, tools?, celestial_style? }`：没给的不改，`celestial_style` 给空字符串是清掉；ip.yaml 里的员工也能改。回复改完的 `Agent`。
+  - `delete_agent { agent_id }`：ip.yaml 里的员工也能删。回复 `null`。他的对话、任务、记忆和工作目录都留着。
+  - 每次改完推事件 `org_changed { roles, agents }`（改完后的全部岗位和员工），各端直接换上；它照常编号、断线补发（D-29），不发通知。
+- **校验和 ip.yaml 一样**：每次改动都把“ip.yaml + 存下的改动 + 这次的改动”拼成一份完整配置，整份过一遍 ip.yaml 的校验（模型要写成 `<端点>/<模型>` 且端点存在、设了预算就要有价格、最多一个协调岗位、外部引擎的岗位要工作目录、定时任务和渠道指定的员工要在、路由规则指向的岗位和员工要在……），再用现在生效的路由规则和改后的组织编一遍路由。不过就回错误，什么都不动。员工名字不能为空。
+- **工作目录**：在线建的员工只用默认工作目录 `<data_dir>/workspaces/<id>`，不能指到主机上别的目录（那等于让一台设备决定员工的 shell 能碰哪里）；ip.yaml 里指定了工作目录的员工改了以后照旧用它。外部引擎、MCP 服务器、数据源照 ip.yaml 按岗位配，在线建的岗位没有这些。
+- **重启员工**：改名字、岗位、工具要把这位员工停掉再启动；他正在干活（有没处理完的工作）时回错误“正在处理工作，等这一轮做完再改”，不打断进行中的一轮。删员工也一样。只改星图形态不用重启。运行时加了 `remove_agent`、`set_agent_style`。
+- **存储**：改动存在设置表的 `org.console` 键里，整份读写，由一把锁串行化（和保存路由规则也互斥）：新建或改过的岗位（按 id 整个替换 ip.yaml 里的）、新建或改过的员工（按 id 替换 ip.yaml 里的名字、岗位、工具、形态）、删掉的 ip.yaml 员工。运行时先改，再存；存失败时回错误说明“已经生效，但重启后会回到原来的样子”。
+- **启动时**：读出改动，合并后整份校验；通过就用合并后的组织启动，不通过（比如 ip.yaml 删了它用到的端点）记一条警告、这次只用 ip.yaml，存下的改动先不删，下一次在线改动成功时才覆盖。
+- **星图形态**：`Agent` 和 ip.yaml 的员工加可选的 `celestial_style`：`mercury`、`venus`、`earth`、`mars`、`jupiter`、`saturn`、`uranus`、`neptune`、`star` 之一，不能是 `sun`（留给协调员）；没写时 App 按 id 自己挑，协议里不带。
+- **App**：
+  - 连着主机、这台设备有“管理”权限时，“新建 Bot”建在主机上：选新岗位时先 `create_role`（id 由名字生成），再 `create_agent`，形态写进 `celestial_style`。
+  - 日常权限、没连上、或主机太旧（回“请求格式错误”）时，照旧只建在本机。
+  - 主机下发的形态并进星图；收到 `org_changed` 时换上新的岗位和员工。
+  - 在 App 里改、删主机上的员工的界面放在第 ⑦ 项（三栏右栏“高级”页）。
+- **控制台**：收到 `org_changed` 换上新的岗位和员工；没有新建、改、删的界面。
+- 不加 `ip bench`：改组织是人偶尔做的事，不在热路径上。
+- 测试：运行时（忙时拒绝停员工、改形态不用等、停掉后发消息和派活都找不到他、同一个 id 能再启动）；`/ws`（从配置文件启动：新建岗位和它的几种校验错误、新建员工并建好工作目录和几种错误、清掉形态、改名字、定时任务指着的员工删不掉、删 ip.yaml 里的员工、删掉后发不了消息、重启后照旧、ip.yaml 对不上时只用 ip.yaml；日常设备四个请求都被拒）；App（管理权限下新建 Bot 先建岗位再建员工、选已有岗位只建员工、不能指定工作目录、`org_changed` 换上列表和形态、旧主机退回本机）。都在假模型、假主机上。
+
 ---
 
-### D-42 员工的任务进度和“要人看”的时间点 · 提议（backlog F-24）
+### D-43 员工的任务进度和“要人看”的时间点 · 提议（backlog F-24）
 
 背景：维护者 2026-11-27 提出，星图上每位员工头顶显示任务进度，并估出什么时候要人来看。当天定：分两步，第一步主机按历史推算，不改提示词、不多调模型；第二步员工自报计划，等第一步有了真实数据再定。算法见 [progress-design.md](progress-design.md)。
 
@@ -1120,4 +1145,5 @@ Claude Code 没有 Codex 那样的系统沙箱，能做什么全靠它的权限�
 | 2026-11-24 | v0.25 | 新增第 10 节和 D-39（提议，backlog E-5）：浏览器走 Playwright MCP，删掉空壳 `ip-browser`；`mcp_servers` 每项加可选的 `tools` 白名单，只把单子里的工具交给员工。第 1 节“本阶段不做”里那一条指向 D-39。只用真的 Playwright MCP 在 macOS 上跑过集成测试，没让模型用过 |
 | 2026-11-27 | v0.26 | 新增 D-40（提议，backlog F-23）：App 桌面外壳的第一批协议补充：`ThreadSummary.last_agent_id`（`threads` 表加列，迁移 0002）、`Role.coordinator`（最多一个）、星图轨道表 `list_orbit_pins`、`set_orbit_pins` 和事件 `orbit_pins_changed`；D-31 的日常权限加这两个请求。只在假模型、假主机上测过 |
 | 2026-11-27 | v0.27 | 新增 D-41（提议，backlog F-23 ②）：任务完成待验收。`TaskStatus` 加 `pending_approval`，`Task` 加 `needs_approval`，`Role` 加 `approve_completion`，`ApprovalSubject` 加 `task_completion`；`create_task` 加 `needs_approval`，`resolve_approval` 加 `note`。只在假模型、假主机上测过 |
-| 2026-11-27 | v0.28 | 新增 D-42（提议，backlog F-24）：员工的任务进度和“要人看”的时间点，第一步主机按历史推算：`turns` 表（迁移 0003）、内存里的实时状态、`list_progress`（日常权限）和 `ProgressBoard` 等类型、`ip bench progress`。D-31 的日常权限加 `list_progress`。只在假模型、假主机上测过 |
+| 2026-11-27 | v0.28 | 新增 D-42（提议，backlog F-23 ③）：在线改组织。`create_role`、`create_agent`、`update_agent`、`delete_agent`（管理权限），事件 `org_changed`；改动存设置表 `org.console`，合并到 ip.yaml 后整份校验；`Agent` 和 ip.yaml 的员工加 `celestial_style`。只在假模型、假主机上测过 |
+| 2026-11-28 | v0.29 | 新增 D-43（提议，backlog F-24）：员工的任务进度和“要人看”的时间点，第一步主机按历史推算：`turns` 表（迁移 0003）、内存里的实时状态、`list_progress`（日常权限）和 `ProgressBoard` 等类型、`ip bench progress`。D-31 的日常权限加 `list_progress`。只在假模型、假主机上测过 |

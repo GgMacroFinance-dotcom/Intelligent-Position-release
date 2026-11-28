@@ -133,6 +133,7 @@ fn agent() -> Agent {
         id: "a1".into(),
         role: "researcher".into(),
         name: "小宏".into(),
+        celestial_style: None,
     }
 }
 

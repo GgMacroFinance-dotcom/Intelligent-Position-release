@@ -63,6 +63,21 @@ pub struct Agent {
     pub id: AgentId,
     pub role: RoleId,
     pub name: String,
+    /// App 星图上用哪种天体画他（`CELESTIAL_STYLES` 之一，`docs/ip/m2-spec.md` D-42）；没写时 App 按 id 自己挑。
+    /// 太阳留给协调员，不能选。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub celestial_style: Option<String>,
+}
+
+/// 员工能选的天体形态。太阳（`sun`）留给协调员，不在里面。
+pub const CELESTIAL_STYLES: [&str; 9] = [
+    "mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune", "star",
+];
+
+/// `celestial_style` 合法吗。
+pub fn celestial_style_ok(style: &str) -> bool {
+    CELESTIAL_STYLES.contains(&style)
 }
 
 /// 星图上的固定轨道条数：0 内环、1 中环、2 外环。

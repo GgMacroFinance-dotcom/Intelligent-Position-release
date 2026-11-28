@@ -1,4 +1,4 @@
-//! 员工的任务进度和“要人看”的时间点（`docs/ip/progress-design.md`，backlog F-24，`docs/ip/m2-spec.md` D-42）。
+//! 员工的任务进度和“要人看”的时间点（`docs/ip/progress-design.md`，backlog F-24，`docs/ip/m2-spec.md` D-43）。
 //!
 //! 第一步只按历史推算：主机记每一轮的步数和用时（`turns` 表），按同岗位做完的任务估还剩几步，
 //! 再按每步用时换算成时间。不改提示词，不为估算多调模型；样本不够就留空，不编数。

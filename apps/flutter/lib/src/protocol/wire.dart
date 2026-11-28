@@ -6,10 +6,14 @@
 
 /// 一个数字员工：某个岗位的一个实例。
 final class Agent {
-  const Agent({required this.id, required this.role, required this.name});
+  const Agent({required this.id, required this.role, required this.name, this.celestialStyle});
 
-  factory Agent.fromJson(Map<String, Object?> j) =>
-      Agent(id: j['id'] as String, role: j['role'] as String, name: j['name'] as String);
+  factory Agent.fromJson(Map<String, Object?> j) => Agent(
+    id: j['id'] as String,
+    role: j['role'] as String,
+    name: j['name'] as String,
+    celestialStyle: j['celestial_style'] == null ? null : j['celestial_style'] as String,
+  );
 
   final AgentId id;
 
@@ -17,7 +21,11 @@ final class Agent {
 
   final String name;
 
-  Map<String, Object?> toJson() => {'id': id, 'role': role, 'name': name};
+  /// App 星图上用哪种天体画他（`CELESTIAL_STYLES` 之一，`docs/ip/m2-spec.md` D-42）；没写时 App 按 id 自己挑。
+  /// 太阳留给协调员，不能选。
+  final String? celestialStyle;
+
+  Map<String, Object?> toJson() => {'id': id, 'role': role, 'name': name, 'celestial_style': ?celestialStyle};
 }
 
 /// 数字员工 ID。
@@ -1455,6 +1463,10 @@ sealed class Request {
       'subscribe_push' => RequestSubscribePush.fromJson(j),
       'unsubscribe_push' => RequestUnsubscribePush.fromJson(j),
       'presence' => RequestPresence.fromJson(j),
+      'create_role' => RequestCreateRole.fromJson(j),
+      'create_agent' => RequestCreateAgent.fromJson(j),
+      'update_agent' => RequestUpdateAgent.fromJson(j),
+      'delete_agent' => RequestDeleteAgent.fromJson(j),
       'list_orbit_pins' => RequestListOrbitPins.fromJson(j),
       'set_orbit_pins' => RequestSetOrbitPins.fromJson(j),
       'send' => RequestSend.fromJson(j),
@@ -2051,6 +2063,99 @@ final class RequestPresence extends Request {
   Map<String, Object?> toJson() => {'type': 'presence', 'active': active};
 }
 
+final class RequestCreateRole extends Request {
+  const RequestCreateRole({required this.role});
+
+  factory RequestCreateRole.fromJson(Map<String, Object?> j) =>
+      RequestCreateRole(role: Role.fromJson(j['role'] as Map<String, Object?>));
+
+  final Role role;
+
+  @override
+  Map<String, Object?> toJson() => {'type': 'create_role', 'role': role.toJson()};
+}
+
+final class RequestCreateAgent extends Request {
+  const RequestCreateAgent({
+    required this.agentId,
+    required this.role,
+    required this.name,
+    this.tools,
+    this.celestialStyle,
+  });
+
+  factory RequestCreateAgent.fromJson(Map<String, Object?> j) => RequestCreateAgent(
+    agentId: j['agent_id'] as String,
+    role: j['role'] as String,
+    name: j['name'] as String,
+    tools: j['tools'] == null ? null : j['tools'] as bool,
+    celestialStyle: j['celestial_style'] == null ? null : j['celestial_style'] as String,
+  );
+
+  final AgentId agentId;
+
+  final RoleId role;
+
+  final String name;
+
+  final bool? tools;
+
+  final String? celestialStyle;
+
+  @override
+  Map<String, Object?> toJson() => {
+    'type': 'create_agent',
+    'agent_id': agentId,
+    'role': role,
+    'name': name,
+    'tools': ?tools,
+    'celestial_style': ?celestialStyle,
+  };
+}
+
+final class RequestUpdateAgent extends Request {
+  const RequestUpdateAgent({required this.agentId, this.name, this.role, this.tools, this.celestialStyle});
+
+  factory RequestUpdateAgent.fromJson(Map<String, Object?> j) => RequestUpdateAgent(
+    agentId: j['agent_id'] as String,
+    name: j['name'] == null ? null : j['name'] as String,
+    role: j['role'] == null ? null : j['role'] as String,
+    tools: j['tools'] == null ? null : j['tools'] as bool,
+    celestialStyle: j['celestial_style'] == null ? null : j['celestial_style'] as String,
+  );
+
+  final AgentId agentId;
+
+  final String? name;
+
+  final RoleId? role;
+
+  final bool? tools;
+
+  final String? celestialStyle;
+
+  @override
+  Map<String, Object?> toJson() => {
+    'type': 'update_agent',
+    'agent_id': agentId,
+    'name': ?name,
+    'role': ?role,
+    'tools': ?tools,
+    'celestial_style': ?celestialStyle,
+  };
+}
+
+final class RequestDeleteAgent extends Request {
+  const RequestDeleteAgent({required this.agentId});
+
+  factory RequestDeleteAgent.fromJson(Map<String, Object?> j) => RequestDeleteAgent(agentId: j['agent_id'] as String);
+
+  final AgentId agentId;
+
+  @override
+  Map<String, Object?> toJson() => {'type': 'delete_agent', 'agent_id': agentId};
+}
+
 final class RequestListOrbitPins extends Request {
   const RequestListOrbitPins();
 
@@ -2290,6 +2395,7 @@ sealed class RuntimeEvent {
       'task_changed' => RuntimeEventTaskChanged.fromJson(j),
       'approval_changed' => RuntimeEventApprovalChanged.fromJson(j),
       'orbit_pins_changed' => RuntimeEventOrbitPinsChanged.fromJson(j),
+      'org_changed' => RuntimeEventOrgChanged.fromJson(j),
       _ => RuntimeEventUnknown(j),
     };
   }
@@ -2443,6 +2549,26 @@ final class RuntimeEventOrbitPinsChanged extends RuntimeEvent {
   Map<String, Object?> toJson() => {
     'type': 'orbit_pins_changed',
     'pins': [for (final x in pins) x.toJson()],
+  };
+}
+
+final class RuntimeEventOrgChanged extends RuntimeEvent {
+  const RuntimeEventOrgChanged({required this.roles, required this.agents});
+
+  factory RuntimeEventOrgChanged.fromJson(Map<String, Object?> j) => RuntimeEventOrgChanged(
+    roles: [for (final x in j['roles'] as List<Object?>) Role.fromJson(x as Map<String, Object?>)],
+    agents: [for (final x in j['agents'] as List<Object?>) Agent.fromJson(x as Map<String, Object?>)],
+  );
+
+  final List<Role> roles;
+
+  final List<Agent> agents;
+
+  @override
+  Map<String, Object?> toJson() => {
+    'type': 'org_changed',
+    'roles': [for (final x in roles) x.toJson()],
+    'agents': [for (final x in agents) x.toJson()],
   };
 }
 

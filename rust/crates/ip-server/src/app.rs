@@ -7,9 +7,9 @@ use anyhow::{Context, bail};
 use ip_core::{AgentId, OrgSpec, RoleId};
 use ip_models::{ModelRegistry, OpenAiCompatible, OpenAiConfig};
 use ip_router::{Router, RouterSpec};
-use ip_runtime::{AgentSetup, Runtime, RuntimeConfig};
+use ip_runtime::{Runtime, RuntimeConfig};
 use ip_store::Store;
-use ip_tools::{Limits, Sandbox, Toolbox};
+use ip_tools::Sandbox;
 
 use crate::config::{Config, SandboxMode};
 
@@ -17,7 +17,8 @@ use crate::config::{Config, SandboxMode};
 #[derive(Clone)]
 pub struct App {
     pub(crate) runtime: Runtime,
-    pub(crate) org: Arc<OrgSpec>,
+    /// 当前的组织：ip.yaml 加上控制台在线改过的（`org_admin.rs`，D-42）。在线改了整体替换。
+    org: Arc<std::sync::RwLock<Arc<OrgSpec>>>,
     pub(crate) token: Option<Arc<str>>,
     /// 除同源外允许连 `/ws` 的来源（`ip.yaml` 的 `allowed_origins`）。
     pub(crate) allowed_origins: Arc<[crate::origin::Origin]>,
@@ -36,7 +37,9 @@ pub struct App {
     channels: Arc<tokio::sync::Mutex<Vec<crate::channels::ChannelHandle>>>,
     pub(crate) schedules: Arc<crate::schedule::Schedules>,
     /// 有工作目录的员工和他们的工作目录，控制台从这里读报告（backlog F-4）。
-    pub(crate) workspaces: Arc<std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>>,
+    workspaces: Arc<std::sync::RwLock<Arc<std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>>>>,
+    /// 在线改组织要用的东西：ip.yaml 原样、控制台的改动、组装员工的材料。按 ip.yaml 启动时才有。
+    pub(crate) org_admin: Option<Arc<crate::org_admin::OrgAdmin>>,
     /// 编好号、留着备补发的事件（`docs/ip/m2-spec.md` D-29）。转发任务在第一个 `/ws` 连接进来时启动。
     pub(crate) events: Arc<crate::events::EventLog>,
     /// 配对过的设备和设备令牌（backlog F-7）。
@@ -54,7 +57,7 @@ impl App {
         let store = runtime.store().clone();
         Self {
             runtime,
-            org: Arc::new(org),
+            org: Arc::new(std::sync::RwLock::new(Arc::new(org))),
             token: token.map(Arc::from),
             allowed_origins: Arc::new([]),
             router: Arc::new(std::sync::RwLock::new(Arc::new(
@@ -68,6 +71,7 @@ impl App {
             channels: Arc::default(),
             schedules: Arc::default(),
             workspaces: Arc::default(),
+            org_admin: None,
             events: Arc::default(),
             devices: Arc::new(crate::devices::Devices::new(store.clone())),
             notifier: Arc::new(crate::notify::Notifier::new(store.clone())),
@@ -88,8 +92,26 @@ impl App {
         mut self,
         workspaces: std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>,
     ) -> Self {
-        self.workspaces = Arc::new(workspaces);
+        self.workspaces = Arc::new(std::sync::RwLock::new(Arc::new(workspaces)));
         self
+    }
+
+    /// 当前的组织。
+    pub(crate) fn org(&self) -> Arc<OrgSpec> {
+        self.org.read().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    pub(crate) fn set_org(&self, org: OrgSpec) {
+        *self.org.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(org);
+    }
+
+    /// 有工作目录的员工和他们的工作目录。
+    pub(crate) fn workspaces(&self) -> Arc<std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>> {
+        self.workspaces.read().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    pub(crate) fn set_workspaces(&self, workspaces: std::collections::HashMap<ip_core::AgentId, std::path::PathBuf>) {
+        *self.workspaces.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(workspaces);
     }
 
     /// 换上定时任务（还要调用 [`App::start_schedules`] 才会到点运行）。
@@ -311,53 +333,49 @@ impl App {
             tracing::info!(role = %role, engine = ec.label(), "岗位使用外部引擎");
             engines.insert(role.clone(), engine);
         }
-        let org = config.org();
+        // 控制台在线改过的组织（D-42）：合并到 ip.yaml 上，整份校验通过才用。
+        let overlay = crate::org_admin::load(&store).await;
+        let (effective, overlay) = crate::org_admin::merge_at_startup(config, overlay);
+        let factory = crate::org_admin::AgentFactory {
+            data_dir: config.data_dir.clone(),
+            sandbox: sandbox.clone(),
+            mcp: mcp.clone(),
+            data: data.clone(),
+            engines,
+        };
+        let org = effective.org();
         let runtime = Runtime::new(store, models, rc);
         for role in &org.roles {
             runtime.add_role(role.clone());
         }
         let mut workspaces = std::collections::HashMap::new();
-        for a in &config.agents {
+        for a in &effective.agents {
             let Some(role) = org.role(&RoleId::from(a.role.as_str())) else {
                 bail!("数字员工 {} 的岗位 {} 不存在", a.id, a.role);
             };
-            let toolbox = if a.tools {
-                let ws = match &a.workspace {
-                    Some(ws) => {
-                        if !ws.is_dir() {
-                            bail!("数字员工 {} 的工作目录 {} 不存在", a.id, ws.display());
-                        }
-                        ws.clone()
-                    }
-                    None => {
-                        let ws = config.data_dir.join("workspaces").join(&a.id);
-                        std::fs::create_dir_all(&ws).with_context(|| format!("创建工作目录 {}", ws.display()))?;
-                        ws
-                    }
-                };
-                let toolbox = Toolbox::new(&ws, sandbox.clone(), Limits::default())?;
+            let (setup, workspace) = factory.setup(a, role)?;
+            if let Some(ws) = workspace {
                 workspaces.insert(ip_core::AgentId::from(a.id.as_str()), ws);
-                Some(toolbox)
-            } else {
-                None
-            };
-            runtime.spawn_agent(AgentSetup {
-                agent: a.agent(),
-                role: role.clone(),
-                toolbox,
-                mcp: mcp.clone(),
-                data: data.clone(),
-                engine: engines.get(&a.role).cloned(),
-            })?;
+            }
+            runtime.spawn_agent(setup)?;
         }
-        tracing::info!(agents = config.agents.len(), roles = config.roles.len(), "组织已启动");
-        let router = config.router()?;
+        tracing::info!(
+            agents = effective.agents.len(),
+            roles = effective.roles.len(),
+            "组织已启动"
+        );
+        let router = effective.router()?;
         let mut app = Self::new(runtime, org, token)
             .with_allowed_origins(allowed_origins)
             .with_router(router)
-            .with_schedules(config.schedules()?)
+            .with_schedules(effective.schedules()?)
             .with_workspaces(workspaces);
         app.mcp = mcp;
+        app.org_admin = Some(Arc::new(crate::org_admin::OrgAdmin {
+            base: config.clone(),
+            factory,
+            overlay: tokio::sync::Mutex::new(overlay),
+        }));
         app.devices
             .load()
             .await

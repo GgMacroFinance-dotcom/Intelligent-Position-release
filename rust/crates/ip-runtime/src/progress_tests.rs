@@ -33,6 +33,7 @@ fn agent(id: &str, role: &str) -> Agent {
         id: id.into(),
         role: role.into(),
         name: format!("员工{id}"),
+        celestial_style: None,
     }
 }
 
