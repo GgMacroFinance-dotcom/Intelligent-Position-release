@@ -363,6 +363,7 @@ class Role {
     this.model = '',
     this.escalateModel,
     this.coordinator = false,
+    this.approveCompletion = false,
   });
 
   factory Role.fromJson(Json j) => Role.fromWire(w.Role.fromJson(j));
@@ -376,8 +377,42 @@ class Role {
       model: r.model.defaultValue,
       escalateModel: r.model.escalate,
       coordinator: r.coordinator ?? false,
+      approveCompletion: r.approveCompletion ?? false,
     );
   }
+
+  /// 发给主机的整个岗位（`update_role`，m2-spec D-44）。
+  w.Role toWire() => w.Role(
+    id: id,
+    name: name,
+    description: description,
+    model: w.ModelSlot(defaultValue: model, escalate: escalateModel),
+    budgetPerDayUsd: budgetPerDayUsd,
+    coordinator: coordinator ? true : null,
+    approveCompletion: approveCompletion ? true : null,
+  );
+
+  Role copyWith({
+    String? name,
+    String? description,
+    String? model,
+    String? Function()? escalateModel,
+    double? Function()? budgetPerDayUsd,
+    bool? coordinator,
+    bool? approveCompletion,
+  }) => Role(
+    id: id,
+    name: name ?? this.name,
+    description: description ?? this.description,
+    model: model ?? this.model,
+    escalateModel: escalateModel == null ? this.escalateModel : escalateModel(),
+    budgetPerDayUsd: budgetPerDayUsd == null ? this.budgetPerDayUsd : budgetPerDayUsd(),
+    coordinator: coordinator ?? this.coordinator,
+    approveCompletion: approveCompletion ?? this.approveCompletion,
+  );
+
+  /// 派给这个岗位员工的任务做完要人验收（`approve_completion`，m2-spec D-41）。
+  final bool approveCompletion;
 
   /// 主机明确标了这是协调岗位（`ip.yaml` 里 `coordinator: true`，最多一个）。旧主机没有这一项，都是 false。
   final bool coordinator;

@@ -1464,6 +1464,8 @@ sealed class Request {
       'unsubscribe_push' => RequestUnsubscribePush.fromJson(j),
       'presence' => RequestPresence.fromJson(j),
       'create_role' => RequestCreateRole.fromJson(j),
+      'update_role' => RequestUpdateRole.fromJson(j),
+      'delete_role' => RequestDeleteRole.fromJson(j),
       'create_agent' => RequestCreateAgent.fromJson(j),
       'update_agent' => RequestUpdateAgent.fromJson(j),
       'delete_agent' => RequestDeleteAgent.fromJson(j),
@@ -2073,6 +2075,29 @@ final class RequestCreateRole extends Request {
 
   @override
   Map<String, Object?> toJson() => {'type': 'create_role', 'role': role.toJson()};
+}
+
+final class RequestUpdateRole extends Request {
+  const RequestUpdateRole({required this.role});
+
+  factory RequestUpdateRole.fromJson(Map<String, Object?> j) =>
+      RequestUpdateRole(role: Role.fromJson(j['role'] as Map<String, Object?>));
+
+  final Role role;
+
+  @override
+  Map<String, Object?> toJson() => {'type': 'update_role', 'role': role.toJson()};
+}
+
+final class RequestDeleteRole extends Request {
+  const RequestDeleteRole({required this.roleId});
+
+  factory RequestDeleteRole.fromJson(Map<String, Object?> j) => RequestDeleteRole(roleId: j['role_id'] as String);
+
+  final RoleId roleId;
+
+  @override
+  Map<String, Object?> toJson() => {'type': 'delete_role', 'role_id': roleId};
 }
 
 final class RequestCreateAgent extends Request {

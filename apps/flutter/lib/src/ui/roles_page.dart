@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../protocol/models.dart';
 import 'common.dart';
+import 'org_editor.dart';
 import 'report.dart';
 
 /// 和控制台一样：不到一分钱的显示四位小数。
@@ -70,6 +71,8 @@ class _RoleCard extends StatelessWidget {
     final over = limit != null && spent >= limit;
     final ids = {for (final a in agents) a.id};
     final reports = state.reports.where((r) => ids.contains(r.agentId)).take(5).toList();
+    // 有“管理”权限时能在线改主机上的岗位和员工（m2-spec D-42、D-44）；只建在本机的改不了。
+    final editable = state.canEditOrg && state.roles.any((r) => r.id == role.id);
 
     Widget row(String label, Widget value) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -89,16 +92,39 @@ class _RoleCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(text: role.displayName, style: theme.textTheme.titleMedium),
-                  TextSpan(
-                    text: '  ${role.id}',
-                    style: muted.copyWith(fontFamily: 'monospace', fontSize: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(text: role.displayName, style: theme.textTheme.titleMedium),
+                        TextSpan(
+                          text: '  ${role.id}',
+                          style: muted.copyWith(fontFamily: 'monospace', fontSize: 12),
+                        ),
+                      ],
+                    ),
                   ),
+                ),
+                if (editable) ...[
+                  IconButton(
+                    key: ValueKey('edit-role-${role.id}'),
+                    tooltip: '编辑岗位',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => showRoleEditor(context, role),
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                  ),
+                  if (agents.isEmpty)
+                    IconButton(
+                      key: ValueKey('delete-role-${role.id}'),
+                      tooltip: '删掉岗位',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => confirmDeleteRole(context, role),
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                    ),
                 ],
-              ),
+              ],
             ),
             if (role.description.isNotEmpty) ...[const SizedBox(height: 6), _Description(role.description)],
             const SizedBox(height: 8),
@@ -139,7 +165,8 @@ class _RoleCard extends StatelessWidget {
               runSpacing: 8,
               children: [
                 for (final a in agents)
-                  ActionChip(
+                  InputChip(
+                    key: ValueKey('agent-chip-${a.id}'),
                     avatar: _AgentDot(
                       working: state.agentsWorking.contains(a.id),
                       failed: state.agentFailures.containsKey(a.id),
@@ -147,6 +174,12 @@ class _RoleCard extends StatelessWidget {
                     label: Text('和 ${a.name} 对话'),
                     tooltip: state.agentFailures[a.id] == null ? a.id : '上一轮失败了：${state.agentFailures[a.id]}',
                     onPressed: () => onChat(a.id),
+                    // 有“管理”权限时，后面的小铅笔改这位员工。
+                    deleteIcon: const Icon(Icons.edit_outlined, size: 16),
+                    deleteButtonTooltipMessage: '编辑员工',
+                    onDeleted: editable && state.agents.any((x) => x.id == a.id)
+                        ? () => showAgentEditor(context, a)
+                        : null,
                   ),
               ],
             ),
