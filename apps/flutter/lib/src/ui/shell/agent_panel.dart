@@ -16,6 +16,7 @@ import '../../protocol/models.dart';
 import '../../star_map.dart';
 import '../chat_page.dart' show ThreadView;
 import '../common.dart';
+import '../progress_bar.dart' show ProgressDetails, showsHeadBar;
 import '../report.dart' show openReport;
 import '../roles_page.dart' show usd;
 import '../task_card.dart' show taskStatusLabel, taskStatusText;
@@ -1554,6 +1555,9 @@ class _DoingState extends State<_Doing> {
       padding: const EdgeInsets.fromLTRB(10, 4, 12, 12),
       children: [
         _card(s, [_kv(s, '现在', b.working ? '正在处理一轮' : '空闲'), if (failure != null) _kv(s, '上一轮失败', failure)]),
+        // 主机估的进度和依据（F-24）；旧主机没有。
+        if (state.progress case final board? when showsHeadBar(board.of(id)))
+          _card(s, [ProgressDetails(progress: board.of(id)!, board: board, ink: s.ink)]),
         heading(
           '手上的任务',
           trailing: TextButton.icon(

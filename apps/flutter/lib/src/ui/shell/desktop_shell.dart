@@ -25,10 +25,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app_state.dart';
+import '../../progress.dart';
 import '../../protocol/client.dart';
 import '../../protocol/models.dart';
 import '../../star_map.dart';
 import '../common.dart';
+import '../progress_bar.dart';
 import 'agent_panel.dart';
 import 'agent_sheet.dart';
 import 'celestial_body.dart';
@@ -912,6 +914,8 @@ class _DesktopShellState extends State<DesktopShell> {
                                 approvalDockScale: isDocked ? dockScale : null,
                                 evictTargetTrackId: previewEvictedTo[id],
                                 zoomPillText: zoomPill,
+                                board: state.progress,
+                                progress: state.progress?.of(id),
                                 onHoverChanged: (h) {
                                   setState(() => _hoveredBodyId = h ? id : null);
                                   if (isDocked) {
@@ -1272,6 +1276,8 @@ class _OrbitingPlanetItem extends StatefulWidget {
     this.approvalDockScale,
     this.evictTargetTrackId,
     this.zoomPillText,
+    this.board,
+    this.progress,
     required this.onHoverChanged,
     required this.onTap,
     this.onScrollZoom,
@@ -1320,6 +1326,10 @@ class _OrbitingPlanetItem extends StatefulWidget {
 
   /// 方案 A 滚轮调重要度时短暂显示的瞬态读数（如 `重要度 78% · 顺位 #1`），停滚后自动清空为 null。
   final String? zoomPillText;
+
+  /// 主机的进度表和这位员工的那一项（F-24）；旧主机、本地新建的 Bot、演示星球没有。
+  final ProgressBoard? board;
+  final AgentProgress? progress;
 
   final ValueChanged<bool> onHoverChanged;
   final VoidCallback onTap;
@@ -1663,11 +1673,20 @@ class _OrbitingPlanetItemState extends State<_OrbitingPlanetItem> with TickerPro
             };
         // 窗顶统一名字水平基线：太阳与所有行星的名字严格对齐在同一条水平线上，不再参差不齐。
         final labelY = ui.lerpDouble(orbitLabelY, w.topLabelY, d)!;
+        final board = w.board;
+        final progress = w.progress;
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
+        // 头顶的进度条（F-24）：在轨、没开大窗、不在拖、没在待审批停泊区时画。
+        final showBar =
+            board != null && showsHeadBar(progress) && !w.sheetOpen && !isDragging && !w.isApprovalDocked && d < 0.01;
         final labelSubtitle = w.sheetOpen
             ? null
             : evictTrack != null
             ? '将移至${evictTrack.label}'
+            : showBar && progress!.phase.moving
+            ? '$role · ${progressCaption(progress, board, nowMs)}'
             : '$role · $statusWord';
+        final barWidth = (radius * scale * 1.6).clamp(26.0, 64.0);
         Widget planetChild = Transform.scale(scale: scale, child: child!);
         if (evictTrack != null) {
           planetChild = Opacity(opacity: 0.62, child: planetChild);
@@ -1675,6 +1694,25 @@ class _OrbitingPlanetItemState extends State<_OrbitingPlanetItem> with TickerPro
         return Stack(
           children: [
             Positioned(left: cx - extent / 2, top: cy - extent / 2, width: extent, height: extent, child: planetChild),
+            if (showBar)
+              Positioned(
+                left: cx - barWidth / 2,
+                top: cy - radius * scale - 11,
+                child: IgnorePointer(
+                  child: Opacity(
+                    opacity: labelOpacity,
+                    child: HeadProgressBar(
+                      key: ValueKey('planet-progress-${body.agent.id}'),
+                      progress: progress!,
+                      board: board,
+                      deviceNowMs: nowMs,
+                      t: t,
+                      width: barWidth,
+                      height: 3.5,
+                    ),
+                  ),
+                ),
+              ),
             if (showLabel)
               Positioned(
                 left: cx - 88,
