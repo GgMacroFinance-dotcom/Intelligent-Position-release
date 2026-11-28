@@ -230,6 +230,12 @@ pub enum Request {
     /// 新建一个岗位（D-42，要“管理”权限）。字段和 ip.yaml 的岗位一样；校验也一样（模型端点、预算要有价格、
     /// 最多一个协调岗位）。存进数据库，不写回 ip.yaml。回复建好的 `Role`，并推 `org_changed`。
     CreateRole { role: ip_core::Role },
+    /// 改一个岗位（D-44，要“管理”权限），ip.yaml 里的也行：给出整个岗位，按 id 整个替换，校验和 `create_role` 一样。
+    /// 这个岗位的员工会重启，有人在干活时回错误。回复改完的 `Role`，并推 `org_changed`。
+    UpdateRole { role: ip_core::Role },
+    /// 删掉一个岗位（D-44，要“管理”权限），ip.yaml 里的也行。还有员工在这个岗位、或配置里别处还指着它时回错误。
+    /// 回复 `null`，并推 `org_changed`。
+    DeleteRole { role_id: RoleId },
     /// 新建一位员工并启动他（D-42，要“管理”权限）。在线建的员工用默认工作目录，不能指定别的目录；
     /// `tools` 省略时是 true。回复他的 `Agent`，并推 `org_changed`。
     CreateAgent {

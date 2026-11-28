@@ -538,6 +538,11 @@ async fn dispatch(app: &App, caller: &Caller, request: Request) -> Result<Value,
             Ok(Value::Null)
         }
         Request::CreateRole { role } => to_json(serde_json::to_value(crate::org_admin::create_role(app, role).await?)),
+        Request::UpdateRole { role } => to_json(serde_json::to_value(crate::org_admin::update_role(app, role).await?)),
+        Request::DeleteRole { role_id } => {
+            crate::org_admin::delete_role(app, &role_id).await?;
+            Ok(Value::Null)
+        }
         Request::CreateAgent {
             agent_id,
             role,

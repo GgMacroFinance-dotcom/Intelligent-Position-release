@@ -568,6 +568,12 @@ impl Runtime {
         dir.roles.insert(role.id.clone(), role);
     }
 
+    /// 从组织里拿掉一个岗位（在线删岗位，D-44）。调用方保证已经没有员工在这个岗位；之后不能再把任务派给它。
+    pub fn remove_role(&self, id: &RoleId) {
+        let mut dir = self.shared.directory.write().unwrap_or_else(|p| p.into_inner());
+        dir.roles.remove(id);
+    }
+
     /// 新建任务。指定了负责人时岗位取负责人的岗位；岗位或员工不存在时返回 `Invalid`。
     pub async fn create_task(&self, new: NewTask, created_by: Author) -> Result<Task, RuntimeError> {
         self.shared.create_task(new, created_by).await
