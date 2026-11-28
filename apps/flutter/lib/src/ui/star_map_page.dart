@@ -17,6 +17,7 @@ import 'celestial_painter.dart';
 import 'chat_page.dart' show ThreadView;
 import 'common.dart';
 import 'inbox_page.dart' show ApprovalCard;
+import 'progress_bar.dart';
 
 // Obsidian 深色主题的几种颜色，和维护者给的样稿一致。
 const _ink = Color(0xFF0B0D13);
@@ -481,6 +482,12 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
     final hot = b != null && b != map.chief && b.urgency >= urgencyBands.first.at;
     // 名字可能比天体宽：外框至少 200 宽，天体居中。
     final width = math.max(box, 200.0);
+    // 头顶的进度条（F-24）：主机有进度表、这位员工手上有事时画。
+    final board = state.progress;
+    final progress = b == null ? null : board?.of(b.agent.id);
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final barWidth = (p.radius * 2.4).clamp(28.0, 64.0);
+    final bodyTop = box / 2 - p.radius * (celestial.kind == CelestialKind.planet ? 1.0 : 0.8);
     return Positioned(
       left: p.pos.dx - width / 2,
       top: p.pos.dy - box / 2,
@@ -504,19 +511,61 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CustomPaint(
-                      key: ValueKey('star-$id'),
-                      size: Size.square(box),
-                      painter: _BodyPainter(
-                        celestial: celestial,
-                        radius: p.radius,
-                        t: t,
-                        ring: selected ? Colors.white : (hovered ? p.color : null),
-                        searchHit: searchHit,
-                        hot: hot,
-                        color: p.color,
-                        box: box,
-                      ),
+                    Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.topCenter,
+                      children: [
+                        CustomPaint(
+                          key: ValueKey('star-$id'),
+                          size: Size.square(box),
+                          painter: _BodyPainter(
+                            celestial: celestial,
+                            radius: p.radius,
+                            t: t,
+                            ring: selected ? Colors.white : (hovered ? p.color : null),
+                            searchHit: searchHit,
+                            hot: hot,
+                            color: p.color,
+                            box: box,
+                          ),
+                        ),
+                        if (board != null && showsHeadBar(progress))
+                          Positioned(
+                            top: bodyTop - 9 - (showLabel && (hovered || selected) ? 14 : 0),
+                            child: IgnorePointer(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (showLabel && (hovered || selected))
+                                    Padding(
+                                      padding: const EdgeInsets.only(bottom: 3),
+                                      child: Text(
+                                        progressCaption(progress!, board, nowMs),
+                                        key: ValueKey('star-progress-caption-$id'),
+                                        maxLines: 1,
+                                        style: TextStyle(
+                                          color: progressColor(progress.phase),
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                          fontFeatures: const [ui.FontFeature.tabularFigures()],
+                                          shadows: const [Shadow(color: _ink, blurRadius: 3)],
+                                        ),
+                                      ),
+                                    ),
+                                  HeadProgressBar(
+                                    key: ValueKey('star-progress-$id'),
+                                    progress: progress!,
+                                    board: board,
+                                    deviceNowMs: nowMs,
+                                    t: t,
+                                    width: barWidth,
+                                    height: 3.5,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     if (showLabel)
                       Transform.translate(
@@ -727,6 +776,8 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
     ),
     child: Text(
       text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
       style: TextStyle(color: Color.lerp(color, Colors.white, 0.45), fontSize: 10, fontWeight: FontWeight.w600),
     ),
   );
@@ -1007,7 +1058,8 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
                         const SizedBox(width: 8),
                         if (b != null) _chip(b == map.chief ? '幕僚长' : _roleName(state.roles, b.agent.role), color),
                         const SizedBox(width: 6),
-                        _chip('${celestial.name} ${celestial.english}', _sunColor),
+                        // 手机宽度下名字、岗位、天体三样放不下：天体那一项让出来，截短。
+                        Flexible(child: _chip('${celestial.name} ${celestial.english}', _sunColor)),
                       ],
                     ),
                     const SizedBox(height: 2),
@@ -1083,6 +1135,10 @@ class _StarMapPageState extends State<StarMapPage> with SingleTickerProviderStat
             Text('有 ${map.routingWaiting} 条消息等你分派，在“待办”里。', style: const TextStyle(color: Color(0xFFFACC15))),
           ],
         ] else ...[
+          if (state.progress case final board? when showsHeadBar(board.of(b.agent.id))) ...[
+            ProgressDetails(progress: board.of(b.agent.id)!, board: board),
+            const SizedBox(height: 12),
+          ],
           Text(
             b == map.chief ? '幕僚长在中心，统筹派活。' : '为什么在这条轨道上',
             style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.white),

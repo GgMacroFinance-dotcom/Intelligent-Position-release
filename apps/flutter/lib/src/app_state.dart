@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'host.dart';
 import 'notifications.dart';
 import 'pairing.dart';
+import 'progress.dart';
 import 'protocol/client.dart';
 import 'protocol/models.dart';
 import 'push/lock_push.dart';
@@ -79,6 +80,12 @@ class AppState extends ChangeNotifier {
 
   /// 今天的模型费用；还没拉到时为空。
   SpendToday? spend;
+
+  /// 每位员工的进度和要人看的时间点（F-24，m2-spec D-43）；还没拉到、或主机太旧没有这个请求时为空。
+  ProgressBoard? progress;
+
+  /// 主机有没有进度表；旧主机没有时为 false，不再去拉。
+  bool progressOnHost = false;
 
   /// 有路由规则时，新对话默认自动分派。
   bool hasRules = false;
@@ -582,6 +589,9 @@ class AppState extends ChangeNotifier {
     _client = null;
     _presenceTimer?.cancel();
     _presenceTimer = null;
+    _progressTimer?.cancel();
+    _progressTicker?.cancel();
+    _progressTicker = null;
     await c?.dispose();
     status = ConnStatus.closed;
   }
@@ -596,6 +606,8 @@ class AppState extends ChangeNotifier {
     tasks = [];
     reports = [];
     spend = null;
+    progress = null;
+    progressOnHost = false;
     hasRules = false;
     threadId = null;
     messages = [];
@@ -625,6 +637,8 @@ class AppState extends ChangeNotifier {
     outdated = c.outdated;
     // 重连时服务端补发了断开期间的事件，界面已经跟上，不用整个重新拉（D-29）。
     if (s == ConnStatus.open && !c.resumed) unawaited(_loadAll());
+    // 补发了事件也要重拉进度：断开期间时间在走，主机的估算变了。
+    if (s == ConnStatus.open && c.resumed) _refreshProgressSoon();
     if (s == ConnStatus.open) {
       _reportPresence();
       // 第一次连上时向系统要通知权限：配对以前问，人还不知道要通知什么。
@@ -767,6 +781,17 @@ class AppState extends ChangeNotifier {
       } on RequestError {
         // 主机太旧，没有星图轨道表：拖好的轨道只留在本机。
         orbitPinsOnHost = false;
+      }
+      try {
+        final board = await c.listProgress();
+        if (_client != c) return;
+        progress = board;
+        progressOnHost = true;
+        _startProgressTicker();
+      } on RequestError {
+        // 主机太旧，没有进度表：星球头顶不画进度条，待办里没有时间轴。
+        progress = null;
+        progressOnHost = false;
       }
       if (_client != c) return;
       if (!_agentForNewChosen) agentForNew = hasRules || agents.isEmpty ? null : agents.first.id;
@@ -927,6 +952,34 @@ class AppState extends ChangeNotifier {
 
   Timer? _reportsTimer;
   Timer? _spendTimer;
+  Timer? _progressTimer;
+  Timer? _progressTicker;
+
+  /// 多久重拉一次进度表，即使没有事件：停着的任务过一阵才算“要人看”，预计的时刻也随时间变。
+  static const progressEvery = Duration(seconds: 60);
+
+  /// 员工走了一步、一轮开始或结束、任务或卡片变了以后重拉进度表，合并短时间内的多次（员工一步一条消息，可能很密）。
+  void _refreshProgressSoon() {
+    if (!progressOnHost) return;
+    _progressTimer?.cancel();
+    _progressTimer = Timer(const Duration(seconds: 1), () async {
+      final c = _client;
+      if (c == null || !connected) return;
+      try {
+        final board = await c.listProgress();
+        if (_client != c) return;
+        progress = board;
+        notifyListeners();
+      } on RequestError {
+        // 断线重连后会整个重新拉。
+      }
+    });
+  }
+
+  void _startProgressTicker() {
+    _progressTicker?.cancel();
+    _progressTicker = Timer.periodic(progressEvery, (_) => _refreshProgressSoon());
+  }
 
   /// 一轮结束后刷新今天的费用（合并短时间内的多次）。
   void _refreshSpendSoon() {
@@ -1033,12 +1086,15 @@ class AppState extends ChangeNotifier {
           if (!messages.any((x) => x.id == message.id)) messages = [...messages, message];
         }
         _refreshThreadsSoon();
+        if (message.author is AgentAuthor) _refreshProgressSoon();
       case TurnStarted(:final agentId, :final threadId):
+        _refreshProgressSoon();
         agentsWorking.add(agentId);
         turnNote[threadId] = '${agentName(agentId)} 开始处理…';
       case TurnFinished():
         _refreshReportsSoon();
         _refreshSpendSoon();
+        _refreshProgressSoon();
         drafts.remove(e.agentId);
         agentsWorking.remove(e.agentId);
         agentFailures.remove(e.agentId);
@@ -1050,17 +1106,21 @@ class AppState extends ChangeNotifier {
             '${u.promptTokens + u.completionTokens} tokens（缓存命中 $cached%）$cost';
       case TurnFailed(:final agentId, :final threadId, :final error):
         _refreshSpendSoon();
+        _refreshProgressSoon();
         drafts.remove(agentId);
         agentsWorking.remove(agentId);
         agentFailures[agentId] = error.split('\n').first;
         turnNote[threadId] = '${agentName(agentId)} 这轮失败：$error';
       case TaskChanged(:final task):
+        _refreshProgressSoon();
         tasks = [task, ...tasks.where((t) => t.id != task.id)]..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
       case ApprovalChanged(:final approval):
+        _refreshProgressSoon();
         _upsertApproval(approval);
       case OrbitPinsChanged(:final pins):
         _applyHostOrbitPins(pins);
       case OrgChanged(roles: final r, agents: final a):
+        _refreshProgressSoon();
         roles = r;
         agents = a;
       case UnknownEvent():
@@ -1074,6 +1134,8 @@ class AppState extends ChangeNotifier {
     _threadsTimer?.cancel();
     _reportsTimer?.cancel();
     _spendTimer?.cancel();
+    _progressTimer?.cancel();
+    _progressTicker?.cancel();
     _presenceTimer?.cancel();
     unawaited(_disconnect());
     super.dispose();

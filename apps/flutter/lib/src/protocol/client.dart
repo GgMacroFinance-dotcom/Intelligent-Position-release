@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../progress.dart';
 import 'models.dart';
 import 'router.dart';
 import 'wire.dart' as w;
@@ -454,6 +455,12 @@ extension IpRequests on IpClient {
 
   /// 今天（UTC）各岗位和语义分派的模型费用。
   Future<SpendToday> spendToday() async => SpendToday.fromJson(await _object(const w.RequestSpendToday()));
+
+  /// 每位员工手上的事做到哪了、要人看的时间点（m2-spec D-43）。旧主机没有这个请求。
+  Future<ProgressBoard> listProgress() async => ProgressBoard.fromJson(
+    await _object(const w.RequestListProgress()),
+    receivedAtMs: DateTime.now().millisecondsSinceEpoch,
+  );
 
   /// 员工写的报告，新改的在前。省略 `agentId` 时列所有员工的。
   Future<List<ReportInfo>> listReports({String? agentId, int limit = 200}) =>

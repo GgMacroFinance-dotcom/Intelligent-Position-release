@@ -14,8 +14,10 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../../app_state.dart';
+import '../../progress.dart' show AttentionItem, AttentionKind, timelineItems;
 import '../../protocol/client.dart' show RequestError;
 import '../../protocol/models.dart';
+import '../attention_timeline.dart';
 import '../common.dart';
 import '../report.dart' show openReport;
 import '../task_card.dart' show taskMeta, taskStatusLabel, taskStatusText;
@@ -681,6 +683,11 @@ class _ExpandedInboxCard extends StatelessWidget {
             InboxLight.yellow => '没有待定或即将到期的事项。',
             InboxLight.green => '最近 7 天还没有完成任务或新报告。',
           };
+    // 主机估出的、要人看的时间点（F-24）；红、黄两栏已经列了的过期和快到期任务不重复。旧主机没有。
+    final board = state.progress;
+    final upcoming = board == null
+        ? const <AttentionItem>[]
+        : timelineItems(board, skip: const {AttentionKind.overdue, AttentionKind.due});
 
     return _LiquidGlass(
       key: const ValueKey('inbox-widget-expanded'),
@@ -714,6 +721,33 @@ class _ExpandedInboxCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 7),
+          if (board != null && upcoming.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _InnerCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(left: 4, bottom: 3),
+                      child: Text(
+                        '接下来要你看的',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _ink2, letterSpacing: 0.3),
+                      ),
+                    ),
+                    AttentionTimeline(
+                      board: board,
+                      items: upcoming,
+                      max: 4,
+                      dense: true,
+                      ink: _ink,
+                      muted: _ink3,
+                      onOpen: (item) => onOpenThread(item.threadId!, agentId: item.agentId),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           // Apple 分段筛选条：外圆角 12，内边距 2.5，选中项同心圆角 9.5。
           Container(
             margin: const EdgeInsets.only(bottom: 8),

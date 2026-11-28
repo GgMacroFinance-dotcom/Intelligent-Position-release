@@ -4,8 +4,10 @@
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../progress.dart' show AttentionItem, timelineItems;
 import '../protocol/client.dart';
 import '../protocol/models.dart';
+import 'attention_timeline.dart';
 import 'common.dart';
 import 'report.dart';
 import 'shell/completion_approval.dart';
@@ -34,6 +36,9 @@ class InboxPage extends StatelessWidget {
     final done = state.tasks.where((t) => t.status == 'done' && t.updatedAtMs >= since).take(_recentMax).toList();
     final reports = state.reports.where((r) => r.modifiedMs >= since).take(_recentMax).toList();
     final hasAction = questions.isNotEmpty || decisions.isNotEmpty || completion.isNotEmpty || blocked.isNotEmpty;
+    // 主机估出的、要人看的时间点（F-24）；旧主机没有。
+    final board = state.progress;
+    final upcoming = board == null ? const <AttentionItem>[] : timelineItems(board);
     if (!state.connected && !hasAction && done.isEmpty && reports.isEmpty) {
       return const EmptyHint('连上主机后，等你处理的事会显示在这里。');
     }
@@ -60,6 +65,26 @@ class InboxPage extends StatelessWidget {
         for (final a in decisions) ApprovalCard(approval: a, onOpenThread: onOpenThread),
         if (blocked.isNotEmpty) heading('受阻的任务（${blocked.length}）'),
         for (final t in blocked) TaskCard(key: ValueKey(t.id), task: t, onOpenThread: onOpenThread),
+        if (board != null && upcoming.isNotEmpty) ...[
+          heading('接下来要你看的（${upcoming.length}）'),
+          Card(
+            margin: const EdgeInsets.only(bottom: 4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: AttentionTimeline(
+                board: board,
+                items: upcoming,
+                onOpen: (item) => onOpenThread(item.threadId!),
+                ink: theme.colorScheme.onSurface,
+                muted: theme.hintColor,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 2, 4, 0),
+            child: Text('时刻是主机按同岗位以往的任务估的，只作参考。', style: muted.copyWith(fontSize: 11.5)),
+          ),
+        ],
         heading('最近 7 天'),
         Card(
           margin: const EdgeInsets.only(bottom: 12),
