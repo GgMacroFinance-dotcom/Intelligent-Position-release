@@ -511,6 +511,7 @@ async fn agent_gets_tools_of_a_server_that_reconnects() {
             id: "macro-1".into(),
             role: "macro".into(),
             name: "小宏".into(),
+            celestial_style: None,
         },
         role,
         toolbox: None,

@@ -225,6 +225,42 @@ pub enum Request {
     UnsubscribePush { endpoint: String },
     /// 页面在不在前台。在前台时不给这台设备推送，页面自己显示；页面每 20 秒报一次。回复 `null`。
     Presence { active: bool },
+    /// 新建一个岗位（D-42，要“管理”权限）。字段和 ip.yaml 的岗位一样；校验也一样（模型端点、预算要有价格、
+    /// 最多一个协调岗位）。存进数据库，不写回 ip.yaml。回复建好的 `Role`，并推 `org_changed`。
+    CreateRole { role: ip_core::Role },
+    /// 新建一位员工并启动他（D-42，要“管理”权限）。在线建的员工用默认工作目录，不能指定别的目录；
+    /// `tools` 省略时是 true。回复他的 `Agent`，并推 `org_changed`。
+    CreateAgent {
+        agent_id: AgentId,
+        role: RoleId,
+        name: String,
+        #[serde(default)]
+        #[ts(optional)]
+        tools: Option<bool>,
+        #[serde(default)]
+        #[ts(optional)]
+        celestial_style: Option<String>,
+    },
+    /// 改一位员工（D-42，要“管理”权限），ip.yaml 里的也行；没给的不改。`celestial_style` 给空字符串是清掉。
+    /// 改名字、岗位、工具要重启他，他正在干活时回错误；只改形态不用。回复改完的 `Agent`，并推 `org_changed`。
+    UpdateAgent {
+        agent_id: AgentId,
+        #[serde(default)]
+        #[ts(optional)]
+        name: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        role: Option<RoleId>,
+        #[serde(default)]
+        #[ts(optional)]
+        tools: Option<bool>,
+        #[serde(default)]
+        #[ts(optional)]
+        celestial_style: Option<String>,
+    },
+    /// 删掉一位员工（D-42，要“管理”权限），ip.yaml 里的也行。他正在干活、或路由规则、定时任务、渠道还指着他时回错误。
+    /// 对话、任务、记忆和工作目录都留着。回复 `null`，并推 `org_changed`。
+    DeleteAgent { agent_id: AgentId },
     /// 回复 `OrbitPin[]`：星图上人固定了轨道的员工，按员工 id 排（`docs/ip/m2-spec.md` D-40）。
     ListOrbitPins,
     /// 一次拖放改动的几位员工（拖进去的和被挤出去的）一起改，回复改完后的 `OrbitPin[]`，

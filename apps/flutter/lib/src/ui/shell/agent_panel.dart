@@ -500,7 +500,7 @@ class _DemoApprovalBody extends StatelessWidget {
   }
 }
 
-/// 本地新建 Bot（方案 1，待后端开放 `create_role` / `create_agent` RPC）的中央展示区。
+/// 只建在本机的 Bot 的中央展示区（主机上的员工走正常的对话区）。
 class _LocalBotBody extends StatelessWidget {
   const _LocalBotBody({required this.body, required this.record, required this.hasPending, required this.onRemoved});
 
@@ -557,7 +557,9 @@ class _LocalBotBody extends StatelessWidget {
                 if (record.workspace != null) _kv(s, '工作目录', record.workspace!),
                 const SizedBox(height: 10),
                 Text(
-                  hasPending ? '当前处于演示待审批态，可点上方「审批通过」或「打回修改」体验完整闭环。' : '后端协议空缺提示：当前主机 /ws 仅开放只读 list_roles / list_agents，尚未接入 create_role / create_agent 与 celestial_style 持久化，因此暂时无法向主机发起真实对话；待后端补齐接口后此处将自动切回实时对话流。',
+                  hasPending
+                      ? '当前处于演示待审批态，可点上方「审批通过」或「打回修改」体验完整闭环。'
+                      : '这个 Bot 只建在本机，主机上没有，所以还不能和它对话：新建时没连上主机、这台设备是“日常”权限，或者主机太旧。连上主机并给这台设备“管理”权限后新建的 Bot 会建在主机上。',
                   style: TextStyle(fontSize: 11.5, color: s.inkSecondary, height: 1.55),
                 ),
                 const SizedBox(height: 14),

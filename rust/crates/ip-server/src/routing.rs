@@ -30,7 +30,7 @@ pub async fn decide(app: &App, input: RouteInput<'_>) -> Decision {
 
 async fn guess(app: &App, spec: &SemanticSpec, text: &str) -> Result<Guess, String> {
     let (client, model) = app.runtime.models().resolve(&spec.model).map_err(|e| e.to_string())?;
-    let (system, user) = semantic::prompt(&app.org, text);
+    let (system, user) = semantic::prompt(&app.org(), text);
     let mut request = ChatRequest::new(
         model,
         vec![
@@ -64,5 +64,5 @@ async fn guess(app: &App, spec: &SemanticSpec, text: &str) -> Result<Guess, Stri
     {
         tracing::warn!(error = %e, "语义分派的费用没记上");
     }
-    semantic::parse(&reply, &app.org)
+    semantic::parse(&reply, &app.org())
 }

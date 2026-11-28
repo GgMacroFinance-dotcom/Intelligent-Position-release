@@ -14,7 +14,7 @@ const CORRECTIONS_LIMIT: usize = 200;
 const TEXT_MAX_CHARS: usize = 20_000;
 
 fn known(app: &App, role: &RoleId) -> Result<(), String> {
-    if app.org.roles.iter().any(|r| &r.id == role) {
+    if app.org().roles.iter().any(|r| &r.id == role) {
         Ok(())
     } else {
         Err(format!("没有岗位 {role}"))

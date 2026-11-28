@@ -92,12 +92,14 @@ pub(crate) async fn build_with_workspace(
         id: "coord-1".into(),
         role: "coordinator".into(),
         name: "小协".into(),
+        celestial_style: None,
     }];
     for i in 1..=macros {
         agents.push(Agent {
             id: format!("macro-{i}").as_str().into(),
             role: "macro".into(),
             name: format!("小宏{i}"),
+            celestial_style: None,
         });
     }
     for a in &agents {
@@ -697,6 +699,7 @@ async fn t12_failed_message_is_retried_not_swallowed_as_duplicate() {
                 id: "macro-9".into(),
                 role: "macro".into(),
                 name: "小宏9".into(),
+                celestial_style: None,
             },
             role: role("macro", "research/m"),
             toolbox: None,

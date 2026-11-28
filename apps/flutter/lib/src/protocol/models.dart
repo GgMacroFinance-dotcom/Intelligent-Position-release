@@ -100,6 +100,10 @@ sealed class RuntimeEvent {
     w.RuntimeEventTaskChanged e => TaskChanged(Task.fromWire(e.task)),
     w.RuntimeEventApprovalChanged e => ApprovalChanged(Approval.fromWire(e.approval)),
     w.RuntimeEventOrbitPinsChanged e => OrbitPinsChanged([for (final p in e.pins) PinnedOrbit.fromWire(p)]),
+    w.RuntimeEventOrgChanged e => OrgChanged(
+      roles: [for (final r in e.roles) Role.fromWire(r)],
+      agents: [for (final a in e.agents) Agent.fromWire(a)],
+    ),
     w.RuntimeEventUnknown e => UnknownEvent('${(e.json as Map?)?['type']}'),
   };
 }
@@ -126,6 +130,13 @@ class PinnedOrbit {
 class OrbitPinsChanged extends RuntimeEvent {
   const OrbitPinsChanged(this.pins);
   final List<PinnedOrbit> pins;
+}
+
+/// 主机上的组织在线改了（m2-spec D-42）：改完后的全部岗位和员工，直接换上。
+class OrgChanged extends RuntimeEvent {
+  const OrgChanged({required this.roles, required this.agents});
+  final List<Role> roles;
+  final List<Agent> agents;
 }
 
 class TurnStarted extends RuntimeEvent {
@@ -354,8 +365,9 @@ class Role {
     this.coordinator = false,
   });
 
-  factory Role.fromJson(Json j) {
-    final r = w.Role.fromJson(j);
+  factory Role.fromJson(Json j) => Role.fromWire(w.Role.fromJson(j));
+
+  factory Role.fromWire(w.Role r) {
     return Role(
       id: r.id,
       name: r.name,
@@ -387,16 +399,18 @@ class Role {
 }
 
 class Agent {
-  const Agent({required this.id, required this.role, required this.name});
+  const Agent({required this.id, required this.role, required this.name, this.celestialStyle});
 
-  factory Agent.fromJson(Json j) {
-    final a = w.Agent.fromJson(j);
-    return Agent(id: a.id, role: a.role, name: a.name);
-  }
+  factory Agent.fromJson(Json j) => Agent.fromWire(w.Agent.fromJson(j));
+
+  factory Agent.fromWire(w.Agent a) => Agent(id: a.id, role: a.role, name: a.name, celestialStyle: a.celestialStyle);
 
   final String id;
   final String role;
   final String name;
+
+  /// 星图上用哪种天体画他（`mercury`…`neptune`、`star`，m2-spec D-42）；没设时按 id 自己挑。
+  final String? celestialStyle;
 }
 
 // ---------- 审批和任务 ----------

@@ -128,6 +128,7 @@ async fn fixture_with(
                 id: "ops-1".into(),
                 role: "ops".into(),
                 name: "小维".into(),
+                celestial_style: None,
             },
             role: role.clone(),
             toolbox: Some(Toolbox::new(&workspace, Sandbox::None, Limits::default()).unwrap()),

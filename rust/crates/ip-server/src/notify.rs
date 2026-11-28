@@ -239,7 +239,7 @@ impl Rules {
             }
             RuntimeEvent::ApprovalChanged { approval } => Some(approval_alert(approval, now_ms, agent)),
             RuntimeEvent::TaskChanged { task } => self.task_alert(task, now_ms),
-            RuntimeEvent::OrbitPinsChanged { .. } => None,
+            RuntimeEvent::OrbitPinsChanged { .. } | RuntimeEvent::OrgChanged { .. } => None,
         }
     }
 
@@ -567,6 +567,7 @@ mod tests {
             id: id.clone(),
             role: RoleId::from("macro"),
             name: "宏观研究员".into(),
+            celestial_style: None,
         })
     }
 

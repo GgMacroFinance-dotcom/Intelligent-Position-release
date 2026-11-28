@@ -103,7 +103,8 @@ pub async fn draft_from_override(
         Author::System => "系统".into(),
     };
     let excerpt: String = text.chars().take(40).collect();
-    let role_name = app.org.role(role).map_or(role.as_str(), |r| r.display_name());
+    let org = app.org();
+    let role_name = org.role(role).map_or(role.as_str(), |r| r.display_name());
     let draft = RuleDraft {
         id: format!("d{}", now_ms()),
         rule,
@@ -123,7 +124,7 @@ fn build(app: &App, spec: RouterSpec) -> Result<Router, String> {
             .resolve(&sem.model)
             .map_err(|e| format!("语义匹配的模型 {}：{e}", sem.model))?;
     }
-    Router::new(spec, &app.org, &app.runtime.agents()).map_err(|e| e.to_string())
+    Router::new(spec, &app.org(), &app.runtime.agents()).map_err(|e| e.to_string())
 }
 
 async fn load_drafts(app: &App) -> Result<Vec<RuleDraft>, String> {

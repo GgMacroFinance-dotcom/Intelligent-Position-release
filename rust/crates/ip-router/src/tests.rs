@@ -19,6 +19,7 @@ fn org() -> (OrgSpec, Vec<Agent>) {
         id: id.into(),
         role: role.into(),
         name: id.into(),
+        celestial_style: None,
     };
     (
         OrgSpec {
