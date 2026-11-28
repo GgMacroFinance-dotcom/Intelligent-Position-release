@@ -414,6 +414,14 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('agent-tab-advanced')));
     await tester.pumpAndSettle();
     expect(find.textContaining('ip.yaml'), findsOneWidget);
+    // 管理权限：高级页能在线改岗位和员工（D-42、D-44）。
+    expect(find.byKey(const ValueKey('advanced-edit-agent')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('advanced-edit-role')));
+    await tester.pumpAndSettle();
+    expect(find.text('编辑岗位 macro'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(find.text('编辑岗位 macro'), findsNothing);
 
     // 左栏“新对话”：开一个发给小宏的新对话。
     await tester.tap(find.byKey(const ValueKey('agent-new-chat')));

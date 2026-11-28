@@ -490,6 +490,12 @@ extension IpRequests on IpClient {
     ),
   );
 
+  /// 改一个岗位：给出整个岗位，按 id 整个替换（m2-spec D-44）。这个岗位的员工会重启，有人在干活时主机拒绝。
+  Future<Role> updateRole(Role role) async => Role.fromJson(await _object(w.RequestUpdateRole(role: role.toWire())));
+
+  /// 删掉一个岗位。还有员工在这个岗位时主机拒绝。
+  Future<void> deleteRole(String roleId) => rpc(w.RequestDeleteRole(roleId: roleId));
+
   /// 新建一位员工并启动他（用主机默认的工作目录），回复他的样子。
   Future<Agent> createAgent({
     required String agentId,

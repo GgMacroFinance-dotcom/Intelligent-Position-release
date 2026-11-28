@@ -3,7 +3,7 @@
 > 范围：本轮 `design/dusk-shell` 宽屏桌面外壳重构（全部前端改动位于 `apps/flutter/`，不涉及 `rust/` 与 `apps/desktop/`）。
 > 目的：汇总新加入的桌面端交互功能、代码里预留的 `TODO(backend-*)` / `BACKEND / WIRE GAP` 接口位置，以及全库扫描发现的隐性协议缺口，便于后端按需排期适配。
 >
-> **进展（2026-11-27）**：第一批（第 5、9、1 项）主机端已做，App 也接上了，规格见 `docs/ip/m2-spec.md` D-40；第 2 项也已做，规格见 D-41（任务和审批卡片的字段和这里建议的一致：`pending_approval`、`task_completion`，choice 0 通过、1 打回修改）。排期跟踪在 `docs/ip/backlog.md` F-23。第 3 项也已做，规格见 D-42（`create_role`、`create_agent`、`update_agent`、`delete_agent`、`celestial_style`、`org_changed`；和这里的建议不同：在线建的员工不能指定 `workspace`，事件合成一个 `org_changed`）；第 7 项照同样的做法（存数据库、不写回 ip.yaml）。下面各项的“当前前端状态”是 PR #74 合并时的样子，已做的在总览表里标了。
+> **进展（2026-11-27）**：第一批（第 5、9、1 项）主机端已做，App 也接上了，规格见 `docs/ip/m2-spec.md` D-40；第 2 项也已做，规格见 D-41（任务和审批卡片的字段和这里建议的一致：`pending_approval`、`task_completion`，choice 0 通过、1 打回修改）。排期跟踪在 `docs/ip/backlog.md` F-23。第 3 项也已做，规格见 D-42（`create_role`、`create_agent`、`update_agent`、`delete_agent`、`celestial_style`、`org_changed`；和这里的建议不同：在线建的员工不能指定 `workspace`，事件合成一个 `org_changed`）；第 7 项也已做，规格见 D-44（`update_role` 整个替换岗位、`delete_role`，照第 3 项存数据库、不写回 ip.yaml；App 的“高级”页和岗位页能改岗位和员工）。下面各项的“当前前端状态”是 PR #74 合并时的样子，已做的在总览表里标了。
 >
 > **联调共通提示**：凡修改 `rust/crates/ip-core` 或 `rust/crates/ip-server/src/protocol.rs` 中的结构体或枚举，请同步重新生成 `apps/flutter/lib/src/protocol/wire.dart`；`apps/flutter/lib/src/protocol/models.dart` 会在编译期自动校验字段对齐。
 
@@ -19,7 +19,7 @@
 | **4** | 本轮新功能（显式预留） | 星球滚轮/左栏调重要度 → AI 资源分配传导 & 冲突先后反馈 | 仅开放缩放手感 + 顺位计算 + 空端口，后端暂不执行 | `ip-core/src/org.rs`、`ip-runtime/src/agent.rs` & `budget.rs`、`ip-server/src/protocol.rs` |
 | **5**（已做，D-40） | 全库扫出（隐性协议缺口） | 对话归属员工字段缺失（重启后左栏漏历史闲聊） | 仅靠内存 `threadAgent` + 任务/审批表拼凑 | `ip-core` / `ip-server` `ThreadSummary` & `list_threads` |
 | **6** | 全库扫出（隐性协议缺口） | 聊天输入框左下角 `+` 附件按钮禁用占位 | 按钮已摆位并禁用（提示主机暂不支持） | `ip-server` 上传端点 & `Send` / `MessageBody` 多模态协议 |
-| **7** | 全库扫出（隐性协议缺口） | 三栏右栏「高级」页与岗位页全只读（需改 `ip.yaml` 重启） | 只读展示，无法在线改模型/预算/职责/工具 | 与第 3 项合并：`update_role` / `update_agent` |
+| **7**（已做，D-44） | 全库扫出（隐性协议缺口） | 三栏右栏「高级」页与岗位页全只读（需改 `ip.yaml` 重启） | 只读展示，无法在线改模型/预算/职责/工具 | 与第 3 项合并：`update_role` / `update_agent` |
 | **8** | 全库扫出（隐性协议缺口） | 定时任务页仅支持查看与「立即运行一次」 | 无法新建/编辑 cron、启停或删除 | `ip-server/src/protocol.rs` & 定时任务持久化 |
 | **9**（已做，D-40） | 全库扫出（隐性协议缺口） | 中心「太阳（幕僚长）」身份靠名称/ID 字符串启发式猜测 | 依赖匹配 `coordinator`/`chief`/“协调”/“幕僚” | `ip-core/src/org.rs` `Role` 或 `Agent` 显式标记 |
 | **10** | 全库扫出（体验优化） | 缺少部分实时推送事件（报告/花费/组织/星图偏好） | 每轮结束防抖重拉全量列表；旧主机降级兼容 | `ip-runtime` `RuntimeEvent` |
