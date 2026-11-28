@@ -1,6 +1,6 @@
 //! 在线改组织（`docs/ip/m2-spec.md` D-42，桌面外壳后端适配清单第 3 项）。
 //!
-//! - 控制台和 App 能新建岗位，新建、改、删员工。改动存进数据库（设置表的 `org.console` 键），
+//! - 控制台和 App 能新建、改、删岗位（改、删是第 ⑦ 项，D-44），新建、改、删员工。改动存进数据库（设置表的 `org.console` 键），
 //!   不写回 ip.yaml；启动时合并到 ip.yaml 的组织上，和路由规则一样（维护者 2026-11-27 定）。
 //! - 每次改动都把“ip.yaml + 改动”拼成一份完整配置，整份过一遍 [`Config::validate`]：
 //!   模型端点、预算和价格、外部引擎要工作目录、定时任务和渠道指定的员工、路由规则……都和 ip.yaml 一样校验。
@@ -8,6 +8,7 @@
 //! - 在线建的员工只能用默认工作目录（`<data_dir>/workspaces/<id>`），不能指到主机上别的目录：
 //!   那等于让一个设备决定员工的 shell 能碰哪里，只有改 ip.yaml 的人能决定。
 //! - 改员工的名字、岗位、工具要重启这个员工，他正在干活时拒绝；只改星图形态不用重启。
+//!   员工手里拿着岗位定义的副本（模型、预算、说明），所以改岗位也要重启这个岗位的员工。
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -38,6 +39,9 @@ pub struct Overlay {
     /// 删掉的 ip.yaml 里的员工。
     #[serde(default)]
     pub removed_agents: Vec<String>,
+    /// 删掉的 ip.yaml 里的岗位（第 ⑦ 项，D-44）。
+    #[serde(default)]
+    pub removed_roles: Vec<String>,
 }
 
 /// 控制台建的或改过的一位员工。没有工作目录这一项：在线建的员工用默认工作目录。
@@ -55,6 +59,8 @@ impl Overlay {
     /// ip.yaml 加上这些改动。不校验，调用方接着调 [`Config::validate`]。
     pub fn apply(&self, base: &Config) -> Config {
         let mut c = base.clone();
+        c.roles
+            .retain(|r| !self.removed_roles.iter().any(|x| x == r.id.as_str()));
         for role in &self.roles {
             match c.roles.iter_mut().find(|r| r.id == role.id) {
                 Some(r) => *r = role.clone(),
@@ -111,7 +117,7 @@ pub fn merge_at_startup(base: &Config, overlay: Overlay) -> (Config, Overlay) {
             tracing::info!(
                 roles = overlay.roles.len(),
                 agents = overlay.agents.len(),
-                removed = overlay.removed_agents.len(),
+                removed = overlay.removed_agents.len() + overlay.removed_roles.len(),
                 "使用控制台改过的组织"
             );
             (merged, overlay)
@@ -203,11 +209,58 @@ pub async fn create_role(app: &App, role: Role) -> Result<Role, String> {
         if current.roles.iter().any(|r| r.id == role.id) {
             return Err(format!("岗位 {} 已经有了", role.id));
         }
+        overlay.removed_roles.retain(|r| r != role.id.as_str());
+        overlay.roles.retain(|r| r.id != role.id);
         overlay.roles.push(role);
         Ok(())
     })
     .await?;
     app.org().role(&id).cloned().ok_or_else(|| format!("岗位 {id} 没建上"))
+}
+
+/// 改一个岗位（D-44），ip.yaml 里的也行：给出整个岗位，按 id 整个替换。这个岗位的员工要重启才用上
+/// 新的模型、预算和说明，他们有人在干活时回错误。回复改完的岗位。
+pub async fn update_role(app: &App, role: Role) -> Result<Role, String> {
+    let id = role.id.clone();
+    change(app, |_base, current, overlay| {
+        if !current.roles.iter().any(|r| r.id == role.id) {
+            return Err(format!("找不到岗位 {}", role.id));
+        }
+        overlay.roles.retain(|r| r.id != role.id);
+        overlay.roles.push(role);
+        Ok(())
+    })
+    .await?;
+    app.org().role(&id).cloned().ok_or_else(|| format!("岗位 {id} 不见了"))
+}
+
+/// 删掉一个岗位（D-44），ip.yaml 里的也行。还有员工在这个岗位、或者引擎、MCP 服务器、数据源、记忆、
+/// 团队上下文、路由规则、定时任务还指着它时回错误（和 ip.yaml 一样整份校验）。它的记忆和花费记录留着。
+pub async fn delete_role(app: &App, id: &RoleId) -> Result<(), String> {
+    change(app, |base, current, overlay| {
+        if !current.roles.iter().any(|r| &r.id == id) {
+            return Err(format!("找不到岗位 {id}"));
+        }
+        let staff: Vec<&str> = current
+            .agents
+            .iter()
+            .filter(|a| a.role == id.as_str())
+            .map(|a| a.id.as_str())
+            .collect();
+        if !staff.is_empty() {
+            return Err(format!(
+                "岗位 {id} 还有员工：{}，先把他们删掉或换到别的岗位",
+                staff.join("、")
+            ));
+        }
+        overlay.roles.retain(|r| &r.id != id);
+        let in_yaml = base.roles.iter().any(|r| &r.id == id);
+        if in_yaml && !overlay.removed_roles.iter().any(|r| r == id.as_str()) {
+            overlay.removed_roles.push(id.to_string());
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// 新建一位员工并启动他，回复他的样子。
@@ -330,23 +383,32 @@ async fn change(
         .map_err(|e| format!("现在的路由规则和改后的组织对不上：{e}"))?;
 
     let rt = &app.runtime;
+    let old_org = current.org();
     let old: HashMap<&str, &AgentConfig> = current.agents.iter().map(|a| (a.id.as_str(), a)).collect();
     let new: HashMap<&str, &AgentConfig> = next.agents.iter().map(|a| (a.id.as_str(), a)).collect();
+    // 员工手里拿着岗位定义的副本（模型、预算、说明）：岗位改了也要重启。
+    let respawn = |a: &AgentConfig, b: &AgentConfig| {
+        needs_respawn(a, b) || old_org.role(&RoleId::from(a.role.as_str())) != org.role(&RoleId::from(b.role.as_str()))
+    };
     let mut workspaces = (*app.workspaces()).clone();
     // 先停掉要删和要重启的：他在干活时这里就报错返回，什么都还没动。
     for (id, a) in &old {
-        if new.get(id).is_none_or(|b| needs_respawn(a, b)) {
+        if new.get(id).is_none_or(|b| respawn(a, b)) {
             let id = AgentId::from(*id);
             rt.remove_agent(&id).await.map_err(|e| e.to_string())?;
             workspaces.remove(&id);
+        }
+    }
+    for role in &old_org.roles {
+        if org.role(&role.id).is_none() {
+            rt.remove_role(&role.id);
         }
     }
     for role in &org.roles {
         rt.add_role(role.clone());
     }
     for (id, b) in &new {
-        let respawn = old.get(id).is_none_or(|a| needs_respawn(a, b));
-        if respawn {
+        if old.get(id).is_none_or(|a| respawn(a, b)) {
             let role = org.role(&RoleId::from(b.role.as_str())).ok_or("岗位不存在")?;
             let (setup, workspace) = admin.factory.setup(b, role).map_err(|e| format!("{e:#}"))?;
             rt.spawn_agent(setup).map_err(|e| e.to_string())?;

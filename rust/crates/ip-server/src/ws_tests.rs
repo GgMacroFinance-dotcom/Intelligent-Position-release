@@ -2286,3 +2286,93 @@ async fn org_can_be_changed_online_and_survives_restart() {
     let ids: Vec<String> = app.runtime().agents().iter().map(|a| a.id.to_string()).collect();
     assert_eq!(ids, ["macro-1", "macro-2"], "存下的岗位用的端点没了：这次只用 ip.yaml");
 }
+
+/// 在线改岗位、删岗位（D-44）：整个替换、和 ip.yaml 一样整份校验；还有员工的岗位删不掉；重启后还在。
+#[tokio::test]
+async fn roles_can_be_updated_and_deleted_online() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_db, database) = crate::config::test_database();
+    let text = EXAMPLE.replace("api_key_env: DEEPSEEK_API_KEY, ", "").replacen(
+        "agents:",
+        "  - id: spare\n    description: 备用岗位\n    model: { default: deepseek/deepseek-chat }\nagents:",
+        1,
+    );
+    std::fs::write(dir.path().join("ip.yaml"), &text).unwrap();
+    let mut c = Config::load(&dir.path().join("ip.yaml")).unwrap();
+    c.database = database.clone();
+    let app = App::from_config(&c).await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let r = router(Some(app.clone()));
+    tokio::spawn(async move { axum::serve(listener, r).await.unwrap() });
+    let mut ws = connect(addr, "").await.unwrap();
+    let mut n = 0;
+    let mut call = async |ws: &mut Ws, body: Value| {
+        n += 1;
+        request(ws, n, body).await
+    };
+
+    // 改 ip.yaml 里的岗位：整个替换，员工都还在（重启过）。
+    let macro_role = json!({
+        "id": "macro", "name": "宏观研究", "description": "撰写宏观研报和数据点评。",
+        "model": {"default": "deepseek/deepseek-reasoner", "escalate": "deepseek/deepseek-chat"},
+        "approve_completion": true,
+    });
+    let (r, seen) = call(&mut ws, json!({"type": "update_role", "role": macro_role})).await;
+    assert_eq!(r["data"]["model"]["default"], "deepseek/deepseek-reasoner", "{r}");
+    assert_eq!(r["data"]["approve_completion"], true);
+    wait_for(&mut ws, &seen, |e| {
+        e["type"] == "org_changed" && e["roles"].as_array().unwrap().iter().any(|x| x["name"] == "宏观研究")
+    })
+    .await;
+    let ids: Vec<String> = app.runtime().agents().iter().map(|a| a.id.to_string()).collect();
+    assert_eq!(ids, ["macro-1", "macro-2"]);
+    // 校验和 ip.yaml 一样；不过就不动。
+    for (role, why) in [
+        (
+            json!({"id": "macro", "description": "x", "model": {"default": "nope/m"}}),
+            "端点",
+        ),
+        (
+            json!({"id": "nobody", "description": "x", "model": {"default": "deepseek/m"}}),
+            "找不到岗位",
+        ),
+        (
+            json!({"id": "macro", "description": " ", "model": {"default": "deepseek/m"}}),
+            "description",
+        ),
+    ] {
+        let (r, _) = call(&mut ws, json!({"type": "update_role", "role": role})).await;
+        assert_eq!(r["ok"], false, "{why}: {r}");
+        assert!(r["error"].as_str().unwrap().contains(why), "{why}: {r}");
+    }
+    assert_eq!(app.org().role(&"macro".into()).unwrap().display_name(), "宏观研究");
+
+    // 删岗位：还有员工的删不掉；没员工的能删，删掉后不能再往它派活。
+    let (r, _) = call(&mut ws, json!({"type": "delete_role", "role_id": "macro"})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert!(r["error"].as_str().unwrap().contains("macro-1"), "{r}");
+    let (r, _) = call(&mut ws, json!({"type": "delete_role", "role_id": "spare"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let (r, _) = call(&mut ws, json!({"type": "list_roles"})).await;
+    let roles: Vec<&str> = r["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|x| x["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(roles, ["macro"]);
+    let (r, _) = call(&mut ws, json!({"type": "create_task", "title": "x", "role": "spare"})).await;
+    assert_eq!(r["ok"], false, "删掉的岗位不能再派活：{r}");
+    drop(ws);
+    app.shutdown().await;
+
+    // 重启后照旧。
+    let app = App::from_config(&c).await.unwrap();
+    let org = app.org();
+    assert!(org.role(&"spare".into()).is_none());
+    let macro_role = org.role(&"macro".into()).unwrap();
+    assert_eq!(macro_role.model.default, "deepseek/deepseek-reasoner");
+    assert!(macro_role.approve_completion);
+    app.shutdown().await;
+}

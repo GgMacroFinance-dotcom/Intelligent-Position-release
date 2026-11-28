@@ -359,6 +359,38 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 能不能在这台设备上改主机的组织（岗位、员工）：和 [createsBotsOnHost] 一样，连着、有“管理”权限、主机认这些请求。
+  bool get canEditOrg => createsBotsOnHost;
+
+  /// 改一个岗位（m2-spec D-44），回复改完的岗位并换进列表。
+  Future<Role> updateRole(Role role) async {
+    final c = _client;
+    if (c == null) throw const RequestError('尚未连接');
+    final saved = await c.updateRole(role);
+    roles = [for (final r in roles) r.id == saved.id ? saved : r];
+    notifyListeners();
+    return saved;
+  }
+
+  /// 删掉一个岗位（m2-spec D-44）。
+  Future<void> deleteRole(String roleId) async {
+    final c = _client;
+    if (c == null) throw const RequestError('尚未连接');
+    await c.deleteRole(roleId);
+    roles = roles.where((r) => r.id != roleId).toList();
+    notifyListeners();
+  }
+
+  /// 改一位主机上的员工（m2-spec D-42）：没给的不改，[celestialStyle] 给空字符串是清掉。
+  Future<Agent> updateHostAgent(String agentId, {String? name, String? role, String? celestialStyle}) async {
+    final c = _client;
+    if (c == null) throw const RequestError('尚未连接');
+    final saved = await c.updateAgent(agentId, name: name, role: role, celestialStyle: celestialStyle);
+    agents = [for (final a in agents) a.id == saved.id ? saved : a];
+    notifyListeners();
+    return saved;
+  }
+
   /// 在主机上删掉一位员工（m2-spec D-42，要“管理”权限）。主机推 `org_changed` 后列表跟着换。
   Future<void> deleteHostAgent(String agentId) async {
     final c = _client;

@@ -28,6 +28,7 @@ import 'planet_importance.dart';
 import 'settings.dart';
 import 'tokens.dart';
 import '../rework_note.dart';
+import '../org_editor.dart';
 
 /// 这位员工的一个对话（左栏的一行）。
 typedef AgentThread = ({String threadId, String title, int atMs, int count, bool waiting});
@@ -1177,7 +1178,7 @@ class _AgentDetailState extends State<_AgentDetail> {
             : _card(s, [_kv(s, '模型', '—'), _kv(s, '今天岗位花费', '—'), _kv(s, '今日缓存命中', '—')]),
       ),
       _DetailTab.doing => _Doing(body: b, onOpenThread: widget.onOpenThread),
-      _DetailTab.advanced => _Advanced(roleId: b?.agent.role),
+      _DetailTab.advanced => _Advanced(roleId: b?.agent.role, agentId: b?.agent.id),
     };
 
     return Column(
@@ -1615,20 +1616,48 @@ class _DoingState extends State<_Doing> {
   }
 }
 
-/// 高级：岗位说明、模型、预算、岗位记忆（大部分只能看）。
+/// 高级：岗位说明、模型、预算、岗位记忆。这台设备有“管理”权限时能在线改岗位和员工（m2-spec D-42、D-44）。
 class _Advanced extends StatelessWidget {
-  const _Advanced({required this.roleId});
+  const _Advanced({required this.roleId, this.agentId});
 
   final String? roleId;
+  final String? agentId;
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final s = Shell.of(context);
     final r = roleId == null ? null : _role(state, roleId!);
+    // 只建在本机的 Bot 和它的岗位不在主机上，改不了。
+    final hostRole = r == null ? null : state.roles.where((x) => x.id == r.id).firstOrNull;
+    final hostAgent = agentId == null ? null : state.agents.where((a) => a.id == agentId).firstOrNull;
+    final canEdit = state.canEditOrg && (hostRole != null || hostAgent != null);
     return ListView(
       padding: const EdgeInsets.fromLTRB(10, 4, 12, 12),
       children: [
+        if (canEdit)
+          _card(s, [
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                if (hostRole != null)
+                  TextButton.icon(
+                    key: const ValueKey('advanced-edit-role'),
+                    onPressed: () => showRoleEditor(context, hostRole),
+                    icon: const Icon(Icons.tune_rounded, size: 16),
+                    label: const Text('编辑岗位'),
+                  ),
+                if (hostAgent != null)
+                  TextButton.icon(
+                    key: const ValueKey('advanced-edit-agent'),
+                    onPressed: () => showAgentEditor(context, hostAgent),
+                    icon: const Icon(Icons.badge_outlined, size: 16),
+                    label: const Text('编辑员工'),
+                  ),
+              ],
+            ),
+          ]),
         _card(s, [
           _kv(s, '岗位', r?.displayName ?? roleId ?? '幕僚长'),
           _kv(s, '模型', r?.model ?? '—'),
@@ -1665,7 +1694,10 @@ class _Advanced extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(top: 6, left: 6, right: 6),
           child: Text(
-            '名字、岗位说明、模型、预算和能用的工具都写在主机的 ip.yaml 里，改了重启主机生效。',
+            canEdit
+                ? '在这里改的岗位和员工存在主机上，不写回 ip.yaml；改了会重启相关的员工，他们有人在干活时主机会拒绝。'
+                : '名字、岗位说明、模型、预算和能用的工具写在主机的 ip.yaml 里，改了重启主机生效；'
+                      '这台设备有“管理”权限时也能在这里在线改。',
             style: TextStyle(fontSize: 11.5, color: s.inkTertiary, height: 1.5),
           ),
         ),
